@@ -102,9 +102,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
     std::vector<dnnl_data_type_t> dts = prb->sdt;
     dts.push_back(prb->ddt);
     skip_unimplemented_data_type(dts, prb->dir, res);
-    skip_unimplemented_sum_po(prb->attr, res, dnnl_sum, prb->sdt[0]);
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_sum);
 }
 
 void prb_t::skip_invalid(res_t *res) const {

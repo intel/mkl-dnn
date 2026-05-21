@@ -518,16 +518,6 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
 void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
     skip_unimplemented_data_type({prb->dt[0], prb->dt[1]}, prb->dir, res);
-
-    if ((is_gpu() || is_generic_gpu()) && (prb->dir & FLAG_BWD)) {
-        BENCHDNN_PRINT(2,
-                "[SKIP][%s:%d]: The implementation doesn't return the correct "
-                "result.\n",
-                __FILE__, __LINE__);
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-        return;
-    }
 }
 
 void prb_t::skip_invalid(res_t *res) const {

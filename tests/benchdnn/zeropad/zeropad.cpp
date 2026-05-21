@@ -116,11 +116,6 @@ static dnnl_status_t perf_func(
 void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
     skip_unimplemented_data_type({prb->dt}, FWD_D, res);
-
-    if (is_nvidia_gpu() || is_amd_gpu()) {
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-    }
 }
 
 int doit(const prb_t *prb, res_t *res) {
