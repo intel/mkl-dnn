@@ -142,7 +142,8 @@ struct ref_bwd_t : public primitive_t {
                     "diff_dst_md", data_md()->ndims, diff_dst_md()->ndims);
             VDISPATCH_ELTWISE(
                     utils::one_of(data_md()->data_type, data_type::f32,
-                            data_type::f16, data_type::bf16, data_type::f64),
+                            data_type::f16, data_type::bf16, data_type::f64,
+                            data_type::f8_e5m2, data_type::f8_e4m3),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_ELTWISE(
                     utils::everyone_is(data_md()->data_type,

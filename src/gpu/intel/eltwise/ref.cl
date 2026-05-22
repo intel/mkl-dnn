@@ -115,7 +115,8 @@ __kernel void ref_eltwise_fwd(__global SRC_DATA_T *src,
 
 #else // #if IS_FWD
 
-#if DT_F64 == 1 || DT_F32 == 1 || DT_BF16 == 1 || DT_F16 == 1
+#if DT_F64 == 1 || DT_F32 == 1 || DT_BF16 == 1 || DT_F16 == 1 || DT_BF8 == 1 \
+        || DT_HF8 == 1
 
 __kernel void ref_eltwise_bwd(__global SRC_DATA_T *src,
         __global DIFF_DATA_T *diff_src, __global DIFF_DATA_T *diff_dst,
