@@ -51,6 +51,7 @@ static status_t init_conf_common(
     conf.stat_md_info = memory_desc_info_t::create(stat_mdw);
     conf.is_fwd = pd->is_fwd();
     conf.skip_mean = pd->skip_mean();
+    conf.attr_info = attr_info_t::create(pd->attr());
 
     if (conf.use_shift || conf.use_scale) {
         memory_desc_wrapper weights_mdw(
@@ -86,8 +87,9 @@ static status_t init_conf_common(
     return status::success;
 }
 
-static status_t init_kernel_ctx_common(
-        compute::kernel_ctx_t &kernel_ctx, const conf_t &conf) {
+static status_t init_kernel_ctx_common(compute::kernel_ctx_t &kernel_ctx,
+        const conf_t &conf, const post_ops_t &post_ops = post_ops_t(),
+        const memory_desc_t *dst_md = &glob_zero_md) {
     kernel_ctx.set_data_type(conf.is_fwd ? conf.src_dt : conf.dst_dt);
     def_data_type(kernel_ctx, conf.weights_data_type, "WEI");
     kernel_ctx.require_stateless_addressing(conf.require_stateless_addressing);
@@ -110,6 +112,8 @@ static status_t init_kernel_ctx_common(
     def_dispatch(kernel_ctx, conf.dispatch);
     if (!conf.is_fwd) def_dispatch(kernel_ctx, conf.dispatch_scaleshift);
 
+    CHECK(def_attr_info(kernel_ctx, conf.attr_info, post_ops, *dst_md));
+
     return status::success;
 }
 
@@ -119,7 +123,8 @@ status_t ref_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
 
 status_t ref_fwd_t::pd_t::init_kernel_ctx(
         compute::kernel_ctx_t &kernel_ctx) const {
-    return init_kernel_ctx_common(kernel_ctx, conf);
+    return init_kernel_ctx_common(
+            kernel_ctx, conf, attr()->post_ops_, dst_md());
 }
 
 status_t ref_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
@@ -151,6 +156,9 @@ status_t ref_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     arg_list.set(6, conf.eps);
     arg_list.set(7, src_scale);
     arg_list.set(8, dst_scale);
+
+    append_post_ops_to_arg_list(
+            ctx, arg_list, 9, pd()->attr()->post_ops_, *pd()->dst_md());
 
     auto nd_range_kernel = conf.dispatch.nd_range();
 

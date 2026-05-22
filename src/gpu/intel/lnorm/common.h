@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include "gpu/intel/include/dispatch.h"
+#include "gpu/intel/include/post_ops.h"
 #include "gpu/intel/include/types.h"
 
 #ifndef GPU_INTEL_LNORM_COMMON_H

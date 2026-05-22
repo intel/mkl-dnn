@@ -70,6 +70,8 @@ struct conf_t {
     bool skip_mean;
     bool require_stateless_addressing;
 
+    attr_info_t attr_info;
+
     compute::dispatch_t dispatch_scaleshift;
     compute::dispatch_t dispatch_scaleshift_finalize;
     compute::dispatch_t dispatch;
