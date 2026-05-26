@@ -62,8 +62,6 @@ struct ref_inner_product_fwd_t : public primitive_t {
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_INNER_PRODUCT(wei_type == src_type,
                     VERBOSE_INCONSISTENT_DT, "weights", "src");
-            VDISPATCH_INNER_PRODUCT(utils::one_of(dst_type, f32, src_type),
-                    VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_INNER_PRODUCT(
                     IMPLICATION(with_bias(),
                             utils::one_of(bia_type, f32, src_type)),
