@@ -63,14 +63,11 @@ struct ref_batch_normalization_fwd_t : public primitive_t {
                             == memory_desc_wrapper(dst_md()),
                     VERBOSE_INCONSISTENT_MDS, "src", "dst");
 
-            // BN+Add+Relu fusion is not currently implemented
-            VDISPATCH_BNORM(!fuse_norm_add_relu(), VERBOSE_UNSUPPORTED_FEATURE,
-                    "sum+relu post-ops configuration is not supported");
-
             VDISPATCH_BNORM(!(src_md()->data_type == s8 && !stats_is_src()),
                     VERBOSE_UNSUPPORTED_DT);
 
-            if (is_training() && fuse_norm_relu()) init_default_ws(8);
+            if (is_training() && (fuse_norm_relu() || fuse_norm_add_relu()))
+                init_default_ws(8);
 
             return status::success;
         }
@@ -120,11 +117,7 @@ struct ref_batch_normalization_bwd_t : public primitive_t {
                             == memory_desc_wrapper(diff_dst_md()),
                     VERBOSE_INCONSISTENT_MDS, "diff_src", "diff_dst");
 
-            // BN+Add+Relu fusion is not currently implemented
-            VDISPATCH_BNORM(!fuse_norm_add_relu(), VERBOSE_UNSUPPORTED_FEATURE,
-                    "sum+relu post-ops configuration is not supported");
-
-            if (fuse_norm_relu()) {
+            if (fuse_norm_relu() || fuse_norm_add_relu()) {
                 init_default_ws(8);
                 VDISPATCH_BNORM(compare_ws(hint_fwd_pd_), VERBOSE_WS_MISMATCH);
             }

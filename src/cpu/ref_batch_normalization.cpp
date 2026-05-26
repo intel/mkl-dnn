@@ -68,6 +68,7 @@ status_t ref_batch_normalization_fwd_t<d_type>::execute_forward(
     const memory_desc_wrapper ss_d(pd()->weights_md());
 
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
+    auto src_add = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC_1);
     auto scale = CTX_IN_MEM(const acc_data_t *, DNNL_ARG_SCALE);
     auto shift = CTX_IN_MEM(const acc_data_t *, DNNL_ARG_SHIFT);
 
@@ -96,6 +97,7 @@ status_t ref_batch_normalization_fwd_t<d_type>::execute_forward(
     const auto eps = pd()->desc()->batch_norm_epsilon;
     const auto calculate_stats = !pd()->stats_is_src();
     const auto fuse_norm_relu = pd()->fuse_norm_relu();
+    const auto fuse_norm_add_relu = pd()->fuse_norm_add_relu();
     const auto save_stats = pd()->is_training();
     const auto is_training = pd()->is_training();
 
@@ -150,7 +152,8 @@ status_t ref_batch_normalization_fwd_t<d_type>::execute_forward(
             auto d_off = DATA_OFF(data_d, n, c, d, h, w);
             acc_data_t bn_res
                     = sm * (maybe_up_convert(src[d_off]) - v_mean) + sv;
-            if (fuse_norm_relu) {
+            if (fuse_norm_add_relu) bn_res += maybe_up_convert(src_add[d_off]);
+            if (fuse_norm_relu || fuse_norm_add_relu) {
                 if (bn_res <= 0) {
                     bn_res = 0;
                     if (is_training) ws[d_off] = 0;
@@ -198,6 +201,9 @@ status_t ref_batch_normalization_bwd_t<d_type>::execute_backward(
 
     auto diff_src = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DIFF_SRC, status);
     CHECK(status);
+    auto diff_src_add
+            = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DIFF_SRC_1, status);
+    CHECK(status);
 
     auto scale = CTX_IN_MEM(acc_data_t *, DNNL_ARG_SCALE);
     auto diff_scale
@@ -217,6 +223,7 @@ status_t ref_batch_normalization_bwd_t<d_type>::execute_backward(
     const auto eps = pd()->desc()->batch_norm_epsilon;
     const auto calculate_diff_stats = !pd()->use_global_stats();
     const auto fuse_norm_relu = pd()->fuse_norm_relu();
+    const auto fuse_norm_add_relu = pd()->fuse_norm_add_relu();
 
     /* fast return */
     if (this->pd()->has_zero_dim_memory()) {
@@ -248,7 +255,7 @@ status_t ref_batch_normalization_bwd_t<d_type>::execute_backward(
         for (dim_t w = 0; w < W; ++w) {
             const size_t s_off = DATA_OFF(data_d, n, c, d, h, w);
             acc_data_t dd;
-            if (fuse_norm_relu && !ws[s_off])
+            if ((fuse_norm_relu || fuse_norm_add_relu) && !ws[s_off])
                 dd = 0;
             else
                 dd = maybe_up_convert(
@@ -268,10 +275,11 @@ status_t ref_batch_normalization_bwd_t<d_type>::execute_backward(
             const size_t s_off = DATA_OFF(data_d, n, c, d, h, w);
             const size_t dd_off = DATA_OFF(diff_data_d, n, c, d, h, w);
             acc_data_t dd;
-            if (fuse_norm_relu && !ws[s_off])
+            if ((fuse_norm_relu || fuse_norm_add_relu) && !ws[s_off])
                 dd = 0;
             else
                 dd = maybe_up_convert(diff_dst[dd_off]);
+            if (fuse_norm_add_relu) diff_src_add[dd_off] = dd;
             acc_data_t v_diff_src = dd;
             if (calculate_diff_stats) {
                 v_diff_src -= diff_beta / (D * W * H * N)
