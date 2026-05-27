@@ -51,11 +51,11 @@ struct ref_convolution_int8_fwd_t : public primitive_t {
             VDISPATCH_CONV(
                     utils::one_of(src_type, s8, u8), VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(wei_type == s8, VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_CONV(
-                    IMPLICATION(with_bias(),
-                            utils::one_of(bia_type, f32, bf16, s32, s8, u8)),
+            VDISPATCH_CONV(IMPLICATION(with_bias(),
+                                   utils::one_of(bia_type, f32, bf16, f16, s32,
+                                           s8, u8)),
                     VERBOSE_UNSUPPORTED_BIAS_CFG);
-            VDISPATCH_CONV(utils::one_of(dst_type, f32, bf16, s32, s8, u8),
+            VDISPATCH_CONV(utils::one_of(dst_type, f32, bf16, f16, s32, s8, u8),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(set_default_formats(), VERBOSE_UNSUPPORTED_TAG);
             VDISPATCH_CONV(
