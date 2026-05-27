@@ -59,9 +59,9 @@ struct ref_convolution_int8_fwd_t : public primitive_t {
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(set_default_formats(), VERBOSE_UNSUPPORTED_TAG);
             VDISPATCH_CONV(
-                    attr()->has_default_values(smask_t::scales
-                                    | smask_t::zero_points | smask_t::post_ops
-                                    | smask_t::sum_dt,
+                    attr()->has_default_values(smask_t::scales_data_type
+                                    | smask_t::zero_points_data_type
+                                    | smask_t::post_ops | smask_t::sum_dt,
                             dst_type),
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_CONV(attr()->post_ops_.check_sum_consistency(dst_type,
