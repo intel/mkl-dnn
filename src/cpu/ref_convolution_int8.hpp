@@ -68,8 +68,8 @@ struct ref_convolution_int8_fwd_t : public primitive_t {
                                    /* is_int8 */ true),
                     VERBOSE_UNSUPPORTED_POSTOP);
             CHECK(attr_scales_ok());
-            CHECK(attr_zero_points_ok(
-                    {{DNNL_ARG_SRC, {0, 2}}, {DNNL_ARG_DST, {0, 2}}}));
+            CHECK(attr_zero_points_ok({{DNNL_ARG_SRC, {0, 2}},
+                    {DNNL_ARG_WEIGHTS, {0}}, {DNNL_ARG_DST, {0, 2}}}));
             VDISPATCH_CONV(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_CONV(
                     attr_.set_default_formats(dst_md(0)) == status::success,

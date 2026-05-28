@@ -52,11 +52,15 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
             const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC);
     const void *dst_zero_points = CTX_IN_MEM(
             const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST);
+    const void *wei_zero_points = CTX_IN_MEM(
+            const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS);
 
     const auto src_zp_dt
             = pd()->attr()->zero_points_.get_data_type(DNNL_ARG_SRC);
     const auto dst_zp_dt
             = pd()->attr()->zero_points_.get_data_type(DNNL_ARG_DST);
+    const auto wei_zp_dt
+            = pd()->attr()->zero_points_.get_data_type(DNNL_ARG_WEIGHTS);
 
     const int wei_scale_mask = pd()->attr()->scales_.get_mask(DNNL_ARG_WEIGHTS);
 
@@ -128,7 +132,10 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
                     : 0;
             const int w = io::load_int_value(
                     weights_d.data_type(), weights, wei_off);
-            d += (s - src_zp) * w;
+            const int wei_zp = wei_zero_points
+                    ? io::load_int_value(wei_zp_dt, wei_zero_points, 0)
+                    : 0;
+            d += (s - src_zp) * (w - wei_zp);
         }
         return d;
     };
@@ -187,7 +194,10 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
                             : 0;
                     const int w = io::load_int_value(weights_d.data_type(),
                             weights_loc, weights_off + weights_loc_off);
-                    d += (s - src_zp) * w;
+                    const int wei_zp = wei_zero_points
+                            ? io::load_int_value(wei_zp_dt, wei_zero_points, 0)
+                            : 0;
+                    d += (s - src_zp) * (w - wei_zp);
                 }
             }
         } else {
@@ -214,7 +224,10 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
                         : 0;
                 const int w = io::load_int_value(weights_d.data_type(),
                         weights_loc, weights_off + weights_loc_off);
-                d += (s - src_zp) * w;
+                const int wei_zp = wei_zero_points
+                        ? io::load_int_value(wei_zp_dt, wei_zero_points, 0)
+                        : 0;
+                d += (s - src_zp) * (w - wei_zp);
             }
         }
         return d;
