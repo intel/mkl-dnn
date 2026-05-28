@@ -393,14 +393,37 @@ protected:
         , dst_md_(desc_.dst_desc)
         , reduce_md_(desc_.reduce_desc) {}
 
-    // temporary solution to deal with format `any`
+    // Sets format to `abx` for all `format_kind::any` tensors.
     bool set_default_formats() {
         for (auto md :
                 {&src_md_, &weights_md_, &bias_md_, &dst_md_, &reduce_md_}) {
             memory_desc_wrapper mdw(md);
             if (mdw.format_any()) {
                 if (mdw.has_runtime_dims_or_strides()) return false;
-                status_t status = memory_desc_init_by_strides(*md, nullptr);
+                status_t status = status::success;
+                // Any data types that don't fit a single byte require special
+                // strides to form a valid operation.
+                // `memory_desc_init_by_strides` with `strides=nullptr` will
+                // set straight `abx` leading to odd stride for subbyte types
+                // which is illegal in reorder API.
+                const auto last_dim = mdw.dims()[mdw.ndims() - 1];
+                if (mdw.sub_byte_data_type_multiplier() > 1
+                        && last_dim % mdw.sub_byte_data_type_multiplier()
+                                != 0) {
+                    dims_t rounded_dims;
+                    utils::array_copy(rounded_dims, mdw.dims(), mdw.ndims());
+                    rounded_dims[mdw.ndims() - 1] = utils::rnd_up(
+                            last_dim, mdw.sub_byte_data_type_multiplier());
+
+                    dims_t rounded_strides;
+                    rounded_strides[mdw.ndims() - 1] = 1;
+                    for (dim_t d = mdw.ndims() - 2; d >= 0; d--)
+                        rounded_strides[d]
+                                = rounded_strides[d + 1] * rounded_dims[d + 1];
+                    status = memory_desc_init_by_strides(*md, rounded_strides);
+                } else {
+                    status = memory_desc_init_by_strides(*md, nullptr);
+                }
                 if (status != status::success) return false;
             }
         }
