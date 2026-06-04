@@ -285,6 +285,23 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         dnnl_primitive_t prim, const base_prb_t *base_prb, res_t *res,
         dnnl_primitive_t prim_ref = nullptr);
 
+// Paneled ("periodic") fill PoC. See ref_matmul.cpp::make_tiled_fill().
+//
+// When enabled (env var DNNL_BENCHDNN_MATMUL_PANEL_FILL=1), inputs are filled so
+// that the result is periodic along M (period `panel_m`) and N (period `panel_n`)
+// and, optionally, identical across the batch dimension (`tile_batch`). The native
+// reference then computes only the representative `panel_m x panel_n` panel (and a
+// single batch when `tile_batch`) and broadcasts it across the full output, which
+// reduces the reference cost from O(MB*M*N*K) to ~O(panel_m*panel_n*K).
+struct tiled_fill_t {
+    bool enabled = false;
+    int64_t panel_m = 0; // period along M (== M when M is not tiled).
+    int64_t panel_n = 0; // period along N (== N when N is not tiled).
+    bool tile_batch = false; // collapse the batch dimension to a single slice.
+    std::string reason; // Human-readable explanation (enabled or why disabled).
+};
+tiled_fill_t make_tiled_fill(const prb_t *prb);
+
 void compute_ref(const base_prb_t *base_prb, dir_t dir, const args_t &args,
         dnnl_primitive_t prim_ref = nullptr);
 

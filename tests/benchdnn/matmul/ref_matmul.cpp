@@ -540,6 +540,176 @@ void compute_ref_matmul(const prb_t *prb, const args_t &args) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// Paneled ("periodic") fill PoC.
+//
+// `make_tiled_fill` decides whether the periodic-fill fast path can be used for
+// a given problem and, if so, returns the panel periods. See matmul.hpp for the
+// high-level description.
+// ---------------------------------------------------------------------------
+
+// Smallest multiple of `base` that is >= `kMinPanel` and <= `dim`. Returns 0
+// when the dimension can't host a panel of at least `kMinPanel` (so that the
+// dimension is left untiled).
+static int64_t pick_panel(int64_t base, int64_t dim) {
+    static constexpr int64_t kMinPanel = 128;
+    if (base <= 0) base = 1;
+    if (dim < kMinPanel) return 0;
+    const int64_t p = div_up(kMinPanel, base) * base;
+    if (p > dim) return 0;
+    return p;
+}
+
+tiled_fill_t make_tiled_fill(const prb_t *prb) {
+    tiled_fill_t t;
+
+    const int enabled_env
+            = benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0);
+    if (!enabled_env) {
+        t.reason = "env DNNL_BENCHDNN_MATMUL_PANEL_FILL is not set";
+        return t;
+    }
+
+    // Compatibility gates. The PoC intentionally supports only the common
+    // matmul accuracy-validation cases; everything else falls back to the
+    // regular (full) reference.
+    if (!prb->sparse_options.is_def()) {
+        t.reason = "sparse/grouped matmul is unsupported";
+        return t;
+    }
+    // Runtime dimensions are supported: they only make the primitive descriptor
+    // use DNNL_RUNTIME_DIM_VAL placeholders. The native reference and the fill
+    // both operate on concrete `prb->m/n/k/mb` and concrete-sized, dense f32
+    // reference memory, so the periodic fill and broadcast remain valid. This
+    // assumes execute-time concrete dims equal `prb` dims (always true in
+    // benchdnn) and native ref memories stay plain logical f32.
+    if (!prb->attr.dropout.is_def()) {
+        t.reason = "dropout is unsupported";
+        return t;
+    }
+    if (!prb->attr.rounding_mode.is_def()) {
+        t.reason = "stochastic rounding is unsupported";
+        return t;
+    }
+    if (prb->attr.scales.get(DNNL_ARG_DST).is_dynamic()) {
+        t.reason = "dynamic dst scales are unsupported";
+        return t;
+    }
+    // Binary/prelu post-ops are supported: their operands are periodized on the
+    // same M/N panel grid by apply_paneled_fill (see matmul.cpp), keeping the
+    // post-op result periodic.
+
+    // Panel periods must be multiples of the dst scale groups so that no dst
+    // scale group straddles a panel boundary. K-direction groups are irrelevant
+    // because K is never tiled.
+    const auto &dsg = prb->attr.scales.get(DNNL_ARG_DST).groups;
+    const int64_t dst_M_group = !dsg.empty() ? dsg[0] : 1;
+    const int64_t dst_N_group = !dsg.empty() ? dsg[1] : 1;
+
+    const int64_t pm = pick_panel(dst_M_group, prb->m);
+    const int64_t pn = pick_panel(dst_N_group, prb->n);
+    const bool tile_batch = prb->mb > 1;
+
+    // Effective periods: a 0 from pick_panel means "leave this dimension
+    // untiled" (period == full extent).
+    const int64_t panel_m = pm == 0 ? prb->m : pm;
+    const int64_t panel_n = pn == 0 ? prb->n : pn;
+
+    const bool m_tiled = panel_m < prb->m;
+    const bool n_tiled = panel_n < prb->n;
+    if (!m_tiled && !n_tiled && !tile_batch) {
+        t.reason = "shape too small to form a >=128 panel on any dimension";
+        return t;
+    }
+
+    t.enabled = true;
+    t.panel_m = panel_m;
+    t.panel_n = panel_n;
+    t.tile_batch = tile_batch;
+    t.reason = "periodic fill selected";
+    return t;
+}
+
+// Periodic fast reference: compute only the representative
+// [0:panel_m) x [0:panel_n) panel (and a single batch when `tile_batch`) reusing
+// the regular per-chunk kernel, then broadcast the final values across the full
+// output using modulo indexing.
+static void compute_ref_matmul_periodic(
+        const prb_t *prb, const args_t &args, const tiled_fill_t &tf) {
+    {
+        const dnn_mem_t &dst_m = args.find(DNNL_ARG_DST);
+        for (int d = 0; d < dst_m.ndims(); d++) {
+            if (prb->src_dims()[d] == 0 || prb->weights_dims()[d] == 0) return;
+        }
+    }
+
+    const chunk_params_t params = make_chunk_params(prb, args);
+
+    const int64_t M = prb->m;
+    const int64_t N = prb->n;
+    const int64_t K = prb->k;
+    const int64_t MB = prb->mb;
+
+    // Representative ranges. Panels are multiples of the dst groups, so these
+    // chunk counts never spill outside the panel.
+    const int64_t repr_MB = tf.tile_batch ? 1 : MB;
+    const int64_t repr_M_chunks
+            = div_up(MIN2(tf.panel_m, M), params.dst_M_group);
+    const int64_t repr_N_chunks
+            = div_up(MIN2(tf.panel_n, N), params.dst_N_group);
+
+    const dnn_mem_t &dst_m = *params.dst_m;
+    const int batch_ndims = dst_m.ndims() - 2;
+
+    const auto src_broadcast_mask = prb->src_broadcast_mask();
+    const auto wei_broadcast_mask = prb->weights_broadcast_mask();
+    const auto bias_broadcast_mask = prb->bias_broadcast_mask();
+
+    // Phase 1: compute the representative panel(s).
+    benchdnn_parallel_nd(repr_MB, repr_M_chunks, repr_N_chunks,
+            [&](int64_t mb, int64_t mc, int64_t nc) {
+        int64_t src_mb = 0;
+        int64_t wei_mb = 0;
+        if (MB > 1) {
+            src_mb = dst_m.get_idx(mb, src_broadcast_mask, batch_ndims);
+            wei_mb = dst_m.get_idx(mb, wei_broadcast_mask, batch_ndims);
+        }
+
+        int64_t bia_base = 0, bia_m_stride = 0, bia_n_stride = 0;
+        if (params.bia_dt != dnnl_data_type_undef) {
+            bia_base = dst_m.get_idx(
+                    dst_off_f(prb, mb, 0, 0), bias_broadcast_mask);
+            bia_m_stride = dst_m.get_idx(dst_off_f(prb, mb, 1, 0),
+                                   bias_broadcast_mask)
+                    - bia_base;
+            bia_n_stride = dst_m.get_idx(dst_off_f(prb, mb, 0, 1),
+                                   bias_broadcast_mask)
+                    - bia_base;
+        }
+
+        const int64_t src_row_base = src_mb * M;
+        const int64_t wei_base = wei_mb * K * N;
+        const int64_t dst_row_base = mb * M;
+
+        compute_ref_matmul_chunk(params, M, /* Kg = */ K, mc, nc,
+                /* src_base = */ src_row_base * K, wei_base, dst_row_base,
+                bia_base, bia_m_stride, bia_n_stride, prb->attr, args);
+    });
+
+    // Phase 2: broadcast the representative values across the full output.
+    const int64_t panel_m = tf.panel_m;
+    const int64_t panel_n = tf.panel_n;
+    benchdnn_parallel_nd(MB, M, N, [&](int64_t mb, int64_t m, int64_t n) {
+        const int64_t repr_mb = tf.tile_batch ? 0 : mb;
+        const int64_t repr_m = m % panel_m;
+        const int64_t repr_n = n % panel_n;
+        const int64_t dst_off = (mb * M + m) * N + n;
+        const int64_t src_off = (repr_mb * M + repr_m) * N + repr_n;
+        if (dst_off == src_off) return;
+        dst_m.set_f32_elem(dst_off, dst_m.get_f32_elem(src_off));
+    });
+}
+
 void cvt_coo_indices_to_csr_pointers(const int32_t *indices, int32_t *pointers,
         const int nnz, const int nrows) {
     for (int i = 0; i < nnz; ++i) {
@@ -666,7 +836,11 @@ void compute_ref(const base_prb_t *base_prb, dir_t dir, const args_t &args,
             || src_encoding == dnnl_coo || wei_encoding == dnnl_coo) {
         compute_ref_sparse_matmul(prb, args);
     } else {
-        compute_ref_matmul(prb, args);
+        const auto tf = make_tiled_fill(prb);
+        if (tf.enabled)
+            compute_ref_matmul_periodic(prb, args, tf);
+        else
+            compute_ref_matmul(prb, args);
     }
 }
 

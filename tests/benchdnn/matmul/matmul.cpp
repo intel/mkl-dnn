@@ -799,6 +799,156 @@ std::vector<int> prb_t::supported_exec_args(bool) const {
     return exec_args;
 }
 
+// Per-axis classification used by the paneled ("periodic") fill PoC.
+enum tile_role_t { ROLE_BATCH, ROLE_M, ROLE_N, ROLE_K, ROLE_BCAST };
+
+// Rewrite `fp` in place so that its values become periodic: the value at a
+// logical coordinate `c` is replaced by the value at the canonical coordinate
+// `c'` where `c'[d] = c[d] % period[d]`. Operates on the plain f32 reference
+// memory (any layout, indexed through its physical strides), so the caller must
+// re-reorder the corresponding device memory afterwards.
+static void periodize_ref(dnn_mem_t &fp, const std::vector<tile_role_t> &roles,
+        int64_t panel_m, int64_t panel_n, bool tile_batch) {
+    const int ndims = fp.ndims();
+    const auto &dims = fp.dims();
+    const auto &strides = fp.strides();
+
+    std::vector<int64_t> period(ndims);
+    for (int d = 0; d < ndims; d++) {
+        switch (roles[d]) {
+            case ROLE_M: period[d] = MIN2(panel_m, dims[d]); break;
+            case ROLE_N: period[d] = MIN2(panel_n, dims[d]); break;
+            case ROLE_BATCH: period[d] = tile_batch ? 1 : dims[d]; break;
+            default: period[d] = dims[d]; break; // K / BCAST: left untiled.
+        }
+    }
+
+    int64_t total = 1;
+    for (int d = 0; d < ndims; d++)
+        total *= dims[d];
+
+    // Ascending row-major order guarantees every canonical element is finalized
+    // (and left untouched) before it is read, so the in-place copy is safe.
+    for (int64_t lin = 0; lin < total; lin++) {
+        int64_t rem = lin, phys = 0, phys_c = 0;
+        bool is_canon = true;
+        for (int d = ndims - 1; d >= 0; d--) {
+            const int64_t c = rem % dims[d];
+            rem /= dims[d];
+            const int64_t cc = c % period[d];
+            phys += c * strides[d];
+            phys_c += cc * strides[d];
+            if (cc != c) is_canon = false;
+        }
+        if (!is_canon) fp.set_f32_elem(phys, fp.get_f32_elem(phys_c));
+    }
+}
+
+// Make every supported input tensor periodic so that both the library and the
+// (periodic) reference produce a periodic output. Returns OK and does nothing
+// when the feature is disabled for this problem.
+static int apply_paneled_fill(dnn_mem_map_t &ref_mem_map,
+        dnn_mem_map_t &mem_map, const prb_t *prb, const cfg_t &cfg,
+        res_t *res) {
+    const auto tf = make_tiled_fill(prb);
+
+    if (!tf.enabled) {
+        // Only advertise the decision when the feature was explicitly requested.
+        if (benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0))
+            BENCHDNN_PRINT(0,
+                    "[MATMUL_PANEL_FILL] periodic fill NOT selected: %s\n",
+                    tf.reason.c_str());
+        return OK;
+    }
+
+    BENCHDNN_PRINT(0,
+            "[MATMUL_PANEL_FILL] periodic fill selected: panel_m=" IFMT
+            " panel_n=" IFMT " tile_batch=%d\n",
+            tf.panel_m, tf.panel_n, (int)tf.tile_batch);
+
+    auto periodize_and_sync = [&](int arg, tile_role_t secondlast,
+                                      tile_role_t last,
+                                      dnnl_data_type_t swapped_dt) -> int {
+        auto rit = ref_mem_map.find(arg);
+        if (rit == ref_mem_map.end() || !rit->second) return OK;
+        auto &ref = rit->second;
+        const int nd = ref.ndims();
+        std::vector<tile_role_t> roles(nd, ROLE_BATCH);
+        if (nd >= 2) roles[nd - 2] = secondlast;
+        if (nd >= 1) roles[nd - 1] = last;
+        periodize_ref(ref, roles, tf.panel_m, tf.panel_n, tf.tile_batch);
+        auto mit = mem_map.find(arg);
+        if (mit != mem_map.end() && mit->second)
+            SAFE(mit->second.reorder(ref, res, swapped_dt), WARN);
+        return OK;
+    };
+
+    // Data tensors. Layouts: src [..,M,K], wei [..,K,N], bias [..,M,N],
+    // dst (sum) [..,M,N].
+    SAFE(periodize_and_sync(DNNL_ARG_SRC, ROLE_M, ROLE_K,
+                 cfg.get_swapped_dt(SRC)),
+            WARN);
+    SAFE(periodize_and_sync(DNNL_ARG_WEIGHTS, ROLE_K, ROLE_N,
+                 cfg.get_swapped_dt(WEI)),
+            WARN);
+    SAFE(periodize_and_sync(
+                 DNNL_ARG_BIAS, ROLE_M, ROLE_N, cfg.get_swapped_dt(BIA)),
+            WARN);
+    // dst is periodized only when it is a genuine input (sum post-op); otherwise
+    // it is pure output and compute_ref fully overwrites it.
+    if (prb->attr.post_ops.find(attr_t::post_ops_t::SUM) >= 0) {
+        SAFE(periodize_and_sync(
+                     DNNL_ARG_DST, ROLE_M, ROLE_N, cfg.get_swapped_dt(DST)),
+                WARN);
+    }
+
+    // Quantization tensors are stored in abx over their owning tensor's dims.
+    SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, ROLE_M, ROLE_K,
+                 dnnl_data_type_undef),
+            WARN);
+    SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, ROLE_K,
+                 ROLE_N, dnnl_data_type_undef),
+            WARN);
+    SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, ROLE_M, ROLE_N,
+                 dnnl_data_type_undef),
+            WARN);
+    SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, ROLE_M,
+                 ROLE_K, dnnl_data_type_undef),
+            WARN);
+    SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, ROLE_K,
+                 ROLE_N, dnnl_data_type_undef),
+            WARN);
+    SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, ROLE_M,
+                 ROLE_N, dnnl_data_type_undef),
+            WARN);
+
+    // Binary/prelu post-op operands are addressed in the dst index space via
+    // `dst_m.get_idx(dst_off, mask)`, so they must be periodic on the same M/N
+    // panel grid for the broadcasted dst to stay valid. Their reference mems are
+    // f32 with the same ndims as dst (broadcast dims have extent 1, where
+    // periodize_ref is a no-op). Periodize every operand: binary src1, the
+    // ternary (select) condition src2, and prelu weights.
+    for (int i = 0; i < prb->attr.post_ops.len(); i++) {
+        const auto &e = prb->attr.post_ops.entry[i];
+        const int base = DNNL_ARG_ATTR_MULTIPLE_POST_OP(i);
+        if (e.is_binary_kind()) {
+            SAFE(periodize_and_sync(base | DNNL_ARG_SRC_1, ROLE_M, ROLE_N,
+                         dnnl_data_type_undef),
+                    WARN);
+            if (e.is_binary_kind_with_ternary_op())
+                SAFE(periodize_and_sync(base | DNNL_ARG_SRC_2, ROLE_M, ROLE_N,
+                             dnnl_data_type_undef),
+                        WARN);
+        } else if (e.is_prelu_kind()) {
+            SAFE(periodize_and_sync(base | DNNL_ARG_WEIGHTS, ROLE_M, ROLE_N,
+                         dnnl_data_type_undef),
+                    WARN);
+        }
+    }
+
+    return OK;
+}
+
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         dnnl_primitive_t prim, const base_prb_t *base_prb, res_t *res,
         dnnl_primitive_t prim_ref) {
@@ -981,6 +1131,17 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
 
         // Don't keep reference memory if it is not used further.
         if (!has_bench_mode_bit(mode_bit_t::corr)) ref_mem_map.clear();
+    }
+
+    // Paneled ("periodic") fill PoC. Only applies to the native reference path
+    // (no CPU `prim_ref`) and to correctness mode where reference memory exists.
+    if (has_bench_mode_bit(mode_bit_t::corr) && !prim_ref) {
+        SAFE(apply_paneled_fill(ref_mem_map, mem_map, prb, cfg, res), WARN);
+    } else if (benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0)
+            && prim_ref) {
+        BENCHDNN_PRINT(0, "%s\n",
+                "[MATMUL_PANEL_FILL] periodic fill NOT applied: a CPU primitive "
+                "reference is in use; pass --fast-ref=false to enable it");
     }
 
     if (ref_mem_map.count(

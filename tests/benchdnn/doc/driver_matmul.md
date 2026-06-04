@@ -152,3 +152,35 @@ or
 
 More examples with different driver options can be found at
 inputs/matmul/test_\*.
+
+## Experimental: paneled ("periodic") fast reference
+
+`DNNL_BENCHDNN_MATMUL_PANEL_FILL` is an experimental, opt-in environment variable
+that speeds up the native CPU reference used for GPU correctness validation. When
+set to `1`, the driver fills the inputs so the result is periodic along `M` and `N`
+(the `K` dimension is kept full), computes the reference for a single representative
+`panel_m x panel_n` panel, and broadcasts it across the whole output. This reduces
+the reference cost from `O(MB*M*N*K)` to roughly `O(panel_m*panel_n*K)` while the
+GPU primitive still runs the full shape.
+
+``` sh
+    DNNL_BENCHDNN_MATMUL_PANEL_FILL=1 ./benchdnn --matmul --engine=gpu \
+        --fast-ref=false 4096x4096:4096x4096
+```
+
+Notes:
+- It only affects the *native* reference path, so it requires `--fast-ref=false`
+  (otherwise a CPU oneDNN primitive is used as the reference and the periodic fill
+  is skipped).
+- The panel width is at least 128 and is aligned to the destination scale/zero-point
+  groups so no block/group quantization parameter straddles a panel boundary.
+- The driver prints whether the periodic fill was selected (and the chosen
+  `panel_m`/`panel_n`), or the reason it fell back to the normal reference, at
+  verbose level >= 0.
+- Periodic inputs can mask bugs in `M`/`N` address arithmetic, so this mode is
+  intended for speeding up local validation of large shapes, not as a replacement
+  for the default reference in CI. It is disabled by default.
+- Unsupported configurations (dynamic destination scales, dropout/stochastic
+  rounding, sparse/grouped dimensions, and shapes too small to form a 128-wide
+  panel) automatically fall back to the normal reference. Runtime dimensions and
+  binary/prelu post-ops are supported.
