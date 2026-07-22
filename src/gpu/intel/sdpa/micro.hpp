@@ -242,11 +242,29 @@ struct micro_fwd_t : public primitive_t {
                                     dst_md()->data_type)),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_SDPA(utils::one_of(desc()->key_md()->data_type, f32, bf16,
-                                   f16, u8, s8, u4, s4),
+                                   f16, u8, s8, u4, s4, f8_e4m3),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_SDPA(utils::one_of(desc()->val_md()->data_type, f32, bf16,
-                                   f16, u8, s8, u4, s4),
+                                   f16, u8, s8, u4, s4, f8_e4m3),
                     VERBOSE_UNSUPPORTED_DT);
+
+            const auto key_dt = desc()->key_md()->data_type;
+            const auto val_dt = desc()->val_md()->data_type;
+            const bool with_fp8_kv = utils::one_of(f8_e4m3, key_dt, val_dt);
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8_kv, key_dt == val_dt),
+                    "K(%s) and V(%s) data types must match when either is fp8",
+                    dnnl_dt2str(key_dt), dnnl_dt2str(val_dt));
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8_kv, use_systolic_ukernel_),
+                    "fp8 K/V requires the systolic microkernel path");
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8_kv,
+                                   desc()->kq_zero_points.has_default_values()
+                                           && desc()->vs_zero_points
+                                                      .has_default_values()),
+                    "zero points are not supported with fp8 K/V");
+
             VDISPATCH_SDPA(set_default_formats() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);
 
