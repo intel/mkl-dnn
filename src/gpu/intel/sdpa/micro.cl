@@ -37,15 +37,36 @@ typedef NATIVE_LAYOUT_TYPE(DST_DATA_T) dst_tile_data_t;
 typedef NATIVE_LAYOUT_TYPE(MSK_DATA_T) msk_tile_data_t;
 typedef NATIVE_LAYOUT_TYPE(QRY_DATA_T) qry_tile_data_t;
 
+#ifdef QRY_DT_HF8
+#define QRY_SLM_DATA_T half
+#define QRY_SLM_CROSSPACK 2
+#else
+#define QRY_SLM_DATA_T QRY_DATA_T
+#if defined(QRY_DT_HF8)
+#define QRY_SLM_CROSSPACK 4
+#else
+#define QRY_SLM_CROSSPACK 2
+#endif
+
+#ifdef QRY_DT_HF8
+#define FMA_DATA_T half
+typedef half fma_tile_data_t;
+#else
+#define FMA_DATA_T QRY_DATA_T
+typedef qry_tile_data_t fma_tile_data_t;
+#endif
+
 #define CONVERT_TILE_DATA_T(value) as_native_layout(CONVERT_DATA_T(value))
 
 #define CONVERT_TILE_FLOAT_MSK_T(value) \
     into_float(AS_NATIVE_LAYOUT_TYPE(MSK_DATA_T, value))
 
-/* FMA tile storage, which follows the query type rather than the ambient dst
- * type -- see FMA_TYPE below. */
+#ifdef QRY_DT_HF8
+#define CONVERT_TILE_FMA_T(v) as_native_layout(into_half(convert_float(v)))
+#else
 #define CONVERT_TILE_FMA_T(v) \
     as_native_layout(CONCAT2(into_, QRY_DATA_T)(convert_float(v)))
+#endif
 
 #define sg_per_wg (ugemm_kq_sg_per_wg_m * ugemm_kq_sg_per_wg_n)
 #define q_tile_sg_n DIV_UP(ugemm_kq_wg_tile_n, sg_per_wg)
@@ -118,6 +139,8 @@ inline void apply_dropout_s_tile(
 #define VEC_TYPE2 half2
 #elif defined(QRY_DT_BF16)
 #define VEC_TYPE2 ushort2
+#elif defined(QRY_DT_HF8)
+#define VEC_TYPE2 half2
 #elif !defined(QRY_DT_F32)
 #error "Data type not supported for VEC_TYPE2"
 #endif
@@ -142,11 +165,16 @@ DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ,
 
 #elif Q_ALIGN < 4
 
-#if USE_SYSTOLIC_UKERNEL
+#if USE_SYSTOLIC_UKERNEL && !defined(QRY_DT_HF8)
 DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, qry_tile_data_t, VEC_TYPE2,
         SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
 #endif
 
+#endif
+
+#if defined(QRY_DT_HF8) && USE_SYSTOLIC_UKERNEL
+DECLARE_2D_TILE_LOAD_PACKED_VEC_CVT(q_tile_type, QRY_DATA_T, VEC_TYPE2,
+        into_half, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
 #endif
 
 #if BLOCK_A
@@ -182,10 +210,10 @@ DECLARE_2D_TILE_COPY_REBLOCK(a_tile_type, SUBGROUP_SIZE, ugemm_vs_c_type_block0,
 DECLARE_2D_TILE(s_tile_type_packed, uint, SUBGROUP_SIZE, ugemm_kq_c_type_block0,
         ugemm_kq_c_type_block1 / 2, ugemm_kq_c_type_nblock0,
         ugemm_kq_c_type_nblock1)
-DECLARE_2D_TILE(s_tile_type_reblock, qry_tile_data_t, SUBGROUP_SIZE,
+DECLARE_2D_TILE(s_tile_type_reblock, fma_tile_data_t, SUBGROUP_SIZE,
         ugemm_vs_sg_tile_n, 1, ugemm_kq_sg_tile_n / ugemm_vs_sg_tile_n,
         ugemm_kq_sg_tile_m)
-DECLARE_2D_TILE_BLOCK_OPS(s_tile_type_reblock, qry_tile_data_t, SUBGROUP_SIZE,
+DECLARE_2D_TILE_BLOCK_OPS(s_tile_type_reblock, fma_tile_data_t, SUBGROUP_SIZE,
         ugemm_vs_sg_tile_n, 1, ugemm_kq_sg_tile_n / ugemm_vs_sg_tile_n,
         ugemm_kq_sg_tile_m)
 
@@ -384,7 +412,10 @@ inline void tile_load_src1(q_tile_type *Q_tile, const global QRY_DATA_T *Q,
 
 #if USE_SYSTOLIC_UKERNEL
 
-#if BLOCK_Q
+#if defined(QRY_DT_HF8)
+    /* fp8: load bytes and convert to f16 (ldq is in elements). */
+    tile_load_packed_vec2_cvt(Q_tile, Q, m, n, ldq, offset_r, offset_c);
+#elif BLOCK_Q
     tile_load_block_rem_q(
             Q_tile, (global uint *)Q, n, ldq >> 1, offset_r, offset_c);
 #elif Q_ALIGN >= 4
@@ -407,8 +438,9 @@ inline void tile_load_src1(q_tile_type *Q_tile, const global QRY_DATA_T *Q,
 #endif
 }
 
-inline void tile_store_t_slm_src1(q_tile_type *Q_tile, local QRY_DATA_T *Q_slm,
-        int panel, int ld, int offset_r, int offset_c) {
+inline void tile_store_t_slm_src1(q_tile_type *Q_tile,
+        local QRY_SLM_DATA_T *Q_slm, int panel, int ld, int offset_r,
+        int offset_c) {
 #if USE_SYSTOLIC_UKERNEL
     tile_store_t_sys_src1(
             *Q_tile, (local uint *)&Q_slm[0], ld / 2, offset_r, offset_c);
@@ -518,9 +550,11 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
     uint sg_j_vs = sg_ij / ugemm_vs_sg_per_wg_m;
 
     /* SLM allocations -- place in one array to work around compiler bug */
-#define Q_slm_size (D_MAX_KQ * ugemm_kq_wg_tile_n * sizeof(QRY_DATA_T))
+    /* Q is staged as QRY_SLM_DATA_T (the f16 an fp8 query is upconverted to).
+     * The softmax probabilities are staged separately, as FMA_DATA_T. */
+#define Q_slm_size (D_MAX_KQ * ugemm_kq_wg_tile_n * sizeof(QRY_SLM_DATA_T))
 #define S_slm_size \
-    (ugemm_kq_wg_tile_m * ugemm_kq_wg_tile_n * sizeof(QRY_DATA_T))
+    (ugemm_kq_wg_tile_m * ugemm_kq_wg_tile_n * sizeof(FMA_DATA_T))
 #define S_sum_slm_size \
     (ugemm_kq_wg_tile_n * ugemm_kq_sg_per_wg_m * sizeof(float))
 #define S_max_slm_size (ugemm_kq_wg_tile_n * sizeof(float))
@@ -529,8 +563,8 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
     local char slm[Q_slm_size + S_slm_size + S_sum_slm_size + S_max_slm_size
             + ugemm_slm_size];
 
-    local QRY_DATA_T *Q_slm = (local QRY_DATA_T *)&slm[0];
-    local QRY_DATA_T *S_slm = (local QRY_DATA_T *)&slm[Q_slm_size];
+    local QRY_SLM_DATA_T *Q_slm = (local QRY_SLM_DATA_T *)&slm[0];
+    local FMA_DATA_T *S_slm = (local FMA_DATA_T *)&slm[Q_slm_size];
     local float *S_sum_slm = (local float *)&slm[Q_slm_size + S_slm_size];
     local float *S_max_slm
             = (local float *)&slm[Q_slm_size + S_slm_size + S_sum_slm_size];

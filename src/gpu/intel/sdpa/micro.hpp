@@ -220,6 +220,14 @@ struct micro_fwd_t : public primitive_t {
                             "type(%s).",
                             dnnl_dt2str(desc()->attn_mask_md()->data_type),
                             dnnl_dt2str(desc()->qry_md()->data_type));
+                } else if (desc()->qry_md()->data_type == f8_e4m3) {
+                    VDISPATCH_SDPA(
+                            utils::one_of(desc()->attn_mask_md()->data_type,
+                                    data_type::f16, data_type::bf16,
+                                    data_type::f32),
+                            "Mask data type(%s) should be f16, bf16 or f32 "
+                            "when Qry is fp8.",
+                            dnnl_dt2str(desc()->attn_mask_md()->data_type));
                 } else {
                     VDISPATCH_SDPA((desc()->attn_mask_md()->data_type
                                            == desc()->qry_md()->data_type)
@@ -231,39 +239,48 @@ struct micro_fwd_t : public primitive_t {
                             dnnl_dt2str(desc()->qry_md()->data_type));
                 }
             }
-            VDISPATCH_SDPA(
-                    (utils::everyone_is(data_type::f16,
-                             desc()->qry_md()->data_type, dst_md()->data_type)
-                            || utils::everyone_is(data_type::bf16,
-                                    desc()->qry_md()->data_type,
-                                    dst_md()->data_type)
-                            || utils::everyone_is(data_type::f32,
-                                    desc()->qry_md()->data_type,
-                                    dst_md()->data_type)),
-                    VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_SDPA(utils::one_of(desc()->key_md()->data_type, f32, bf16,
-                                   f16, u8, s8, u4, s4, f8_e4m3),
-                    VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_SDPA(utils::one_of(desc()->val_md()->data_type, f32, bf16,
-                                   f16, u8, s8, u4, s4, f8_e4m3),
-                    VERBOSE_UNSUPPORTED_DT);
-
+            const auto qry_dt = desc()->qry_md()->data_type;
             const auto key_dt = desc()->key_md()->data_type;
             const auto val_dt = desc()->val_md()->data_type;
-            const bool with_fp8_kv = utils::one_of(f8_e4m3, key_dt, val_dt);
+            const bool is_fp8_qry = (qry_dt == f8_e4m3);
 
-            VDISPATCH_SDPA(IMPLICATION(with_fp8_kv, key_dt == val_dt),
+            VDISPATCH_SDPA((utils::everyone_is(
+                                    data_type::f16, qry_dt, dst_md()->data_type)
+                                   || utils::everyone_is(data_type::bf16,
+                                           qry_dt, dst_md()->data_type)
+                                   || utils::everyone_is(data_type::f32, qry_dt,
+                                           dst_md()->data_type)
+                                   || (is_fp8_qry
+                                           && utils::one_of(dst_md()->data_type,
+                                                   f16, bf16))),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SDPA(utils::one_of(key_dt, f32, bf16, f16, u8, s8, u4, s4,
+                                   f8_e4m3),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SDPA(utils::one_of(val_dt, f32, bf16, f16, u8, s8, u4, s4,
+                                   f8_e4m3),
+                    VERBOSE_UNSUPPORTED_DT);
+
+            const bool with_fp8
+                    = utils::one_of(f8_e4m3, qry_dt, key_dt, val_dt);
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8, key_dt == val_dt),
                     "K(%s) and V(%s) data types must match when either is fp8",
                     dnnl_dt2str(key_dt), dnnl_dt2str(val_dt));
 
-            VDISPATCH_SDPA(IMPLICATION(with_fp8_kv, use_systolic_ukernel_),
-                    "fp8 K/V requires the systolic microkernel path");
+            VDISPATCH_SDPA(IMPLICATION(is_fp8_qry, key_dt == f8_e4m3),
+                    "an fp8 query(%s) requires fp8 K(%s) and V(%s)",
+                    dnnl_dt2str(qry_dt), dnnl_dt2str(key_dt),
+                    dnnl_dt2str(val_dt));
 
-            VDISPATCH_SDPA(IMPLICATION(with_fp8_kv,
+            VDISPATCH_SDPA(IMPLICATION(with_fp8, use_systolic_ukernel_),
+                    "fp8 requires the systolic microkernel path");
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8,
                                    desc()->kq_zero_points.has_default_values()
                                            && desc()->vs_zero_points
                                                       .has_default_values()),
-                    "zero points are not supported with fp8 K/V");
+                    "zero points are not supported with fp8");
 
             VDISPATCH_SDPA(set_default_formats() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);

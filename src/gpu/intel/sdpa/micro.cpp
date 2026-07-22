@@ -290,10 +290,14 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
         problem.Ta = problem.Tb = Type::bf16;
     } else if (desc()->qry_md()->data_type == data_type::f32) {
         problem.Ta = problem.Tb = Type::f32;
+    } else if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
+        problem.Tb_ext = Type::f16;
+        problem.Ta = problem.Tb = Type::f16;
     } else {
-        VCHECK_SDPA_COND(utils::one_of(desc()->qry_md()->data_type,
-                                 data_type::f16, data_type::bf16),
-                "Q tensor's data type must be bf16 or f16");
+        VCHECK_SDPA_COND(
+                utils::one_of(desc()->qry_md()->data_type, data_type::f16,
+                        data_type::bf16, data_type::f8_e4m3),
+                "Q tensor's data type must be bf16, f16, or f8_e4m3");
     }
     problem.Tc = problem.Tc_ext = Type::f32;
     problem.Ts = problem.Tc;
@@ -1144,6 +1148,10 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     def_data_type(kernel_ctx, val_data_t, "VAL");
     def_data_type(kernel_ctx, dst_data_t, "DST");
     def_data_type(kernel_ctx, msk_data_t, "MSK");
+
+    const bool any_hf8 = utils::one_of(
+            data_type::f8_e4m3, key_data_t, qry_data_t, val_data_t);
+    if (any_hf8) kernel_ctx.define_int("MATH_UTILS_DECLARE_HF8", 1);
 
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");
     def_data_type(kernel_ctx, value_scales_data_t, "VAL_ATTR_SCALES");
