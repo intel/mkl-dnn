@@ -373,7 +373,10 @@ class ParserImpl:
         post_op.mask = spec.read_uint()
         if spec.read_literal(":"):
             post_op.tag = spec.read_str()
-        # benchdnn can't do anything with src2 info yet.
+        if spec.read_literal(":"):
+            post_op.src2_mask = spec.read_uint()
+        if spec.read_literal(":"):
+            post_op.src2_tag = spec.read_str()
         return post_op
 
     @staticmethod
