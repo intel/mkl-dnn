@@ -16,6 +16,7 @@
 
 import functools
 import logging
+import math
 from collections import defaultdict
 from typing import Dict, List, Mapping, Optional, Set, cast
 
@@ -90,6 +91,10 @@ class Converter(metaclass=ConverterMeta):
             if not md.tag:
                 continue
             return f"--tag={md.tag}"  # XXX: Don't use maybe_make_any_tag
+        return ""
+
+    @property
+    def encoding(self) -> str:
         return ""
 
     @property
@@ -375,9 +380,10 @@ class StridesMixin(TagTripletMixin):
         tags = []
         strides = []
 
-        def add_strides_or_tag(arg, md):
-            if md.grouped is not None:
-                return  # grouped MDs go through --grouped
+        def add_strides_or_tag(arg, md: ir.MemoryDescriptor):
+            if md.format_kind == "sparse":
+                strides.append(md.strides)
+                return
             tag = maybe_make_any_tag(md)
             if arg == "wei" and str(md.flags.value) != "f0":
                 tag = "any"
@@ -622,6 +628,34 @@ class MatmulConverter(StridesMixin, MultiDataTypeWithBiasMixin, Converter):
                 mask = md.flags.value.split("_")[1][4:]
                 return f"--bia_mask={mask}"
         return ""
+
+    @property
+    def encoding(self):
+        src, wei = self.entry.shapes.split(":", 2)[:2]
+        *sb, m, sk = map(int, src.split("x"))
+        *wb, wk, n = map(int, wei.split("x"))
+        b = tuple(max(s, w) for s, w in zip(sb, wb))
+
+        counts = {
+            "src": math.prod(sb) * m * sk,
+            "wei": math.prod(wb) * wk * n,
+            "dst": math.prod(b) * m * n,
+        }
+
+        encodings: Dict[str, str] = {}
+        for md in self.entry.mds:
+            if md.arg not in counts:
+                continue
+            if md.format_kind != "sparse" or md.grouped:
+                continue
+            count = counts[md.arg]
+            nnz = max(200, count // 100)
+            sparsity = 1.00 - min(nnz / count, 1.00)
+            encodings[md.arg] = f"{md.tag}+{sparsity:.2f}"
+        if not encodings:
+            return ""
+        encoding = ":".join(encodings.get(arg, "") for arg in counts)
+        return f"--encoding={encoding}"
 
     @property
     def grouped(self) -> str:
@@ -1028,6 +1062,7 @@ class InputGenerator:
             converter.aux,
             converter.bias_mask,
             converter.dts,
+            converter.encoding,
             converter.tags,
             converter.flags,
             converter.attrs,
