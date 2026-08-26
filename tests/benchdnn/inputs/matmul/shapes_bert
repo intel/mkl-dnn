@@ -8,5 +8,5 @@
 1536x128x128:1536x128x64_n"encoder:WV_matmul:12"
 
 # mb = 128, num_heads = 16, hidden_size = 1024, t_x = t_y = 128,
-#2048x128x64:2048x64x128_n"encoder:QK_matmul:24"
-#2048x128x128:2048x128x64_n"encoder:WV_matmul:24"
+2048x128x64:2048x64x128_n"encoder:QK_matmul:24"
+2048x128x128:2048x128x64_n"encoder:WV_matmul:24"

@@ -31,7 +31,7 @@
 mb2ic368oc623
 mb2ic1462oc412
 
-# accumulation mode any (2D). Mirrors matmul/test_matmul_float16.
+# accumulation mode any (2D).
 # zen_inner_product: ndims==2, src/dst tag ab, acc-mode any|f16.
 --reset
 --skip-impl=ref

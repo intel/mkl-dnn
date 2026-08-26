@@ -203,9 +203,8 @@ foreach(driver ${all_drivers})
         endif()
     elseif(DNNL_TEST_SET_COVERAGE EQUAL DNNL_TEST_SET_NIGHTLY)
         if(NOT DNNL_EXPERIMENTAL_GROUPED_MEMORY)
-            list(REMOVE_ITEM test_files_gpu "test_matmul_grouped_gpu")
-            list(REMOVE_ITEM test_files_cpu "test_matmul_grouped_gpu")
-            list(REMOVE_ITEM test_files_cpu "test_matmul_grouped")
+            list(REMOVE_ITEM test_files_cpu "test_matmul_grouped_nightly")
+            list(REMOVE_ITEM test_files_nightly "test_matmul_grouped_nightly")
         endif()
 
         ## Filter out gpu, large cpu, weekly and invalid inputs from cpu
