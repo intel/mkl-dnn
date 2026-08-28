@@ -643,8 +643,17 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     tags_ = match_params[0].tags;
     Ts_ = problem.Ts;
     beta_ = problem.beta;
-    return select(catalog(), static_cast<int>(match_params.size()),
-            match_params.data(), eval_params_, aux_params_, &observer);
+
+    // Try exact-size LUT catalog first, then fall back to kernel catalog.
+    int npat = static_cast<int>(match_params.size());
+    std::vector<const kcatalog::Entry *> entries;
+    if (gpu_utils::dev_getenv("GEMM_LUT", true))
+        entries = select(lut_catalog(), npat, match_params.data(), eval_params_,
+                aux_params_, &observer);
+    if (entries.empty())
+        entries = select(catalog(), npat, match_params.data(), eval_params_,
+                aux_params_, &observer);
+    return entries;
 }
 
 status_t gen_nocopy_desc_t::finalize() {
