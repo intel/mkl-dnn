@@ -70,6 +70,7 @@ struct gen_desc_t {
     const gemmstone::GEMMProblem *problem() const { return &problem_; }
     const gemmstone::GEMMStrategy *strategy() const { return &strategy_; }
     std::string str() const;
+    ngen::HW hw() const { return hw_; }
 
     const gemmstone::CommonDriverInfo *driver_info() const {
         return &driver_info_;
@@ -188,7 +189,8 @@ struct gen_xe_systolic_kernel_desc_t : public gen_desc_t {
 };
 
 std::string dump_kernel(ngen::HW hw, const gemmstone::GEMMProblem &problem,
-        const gemmstone::GEMMStrategy &strategy);
+        const gemmstone::GEMMStrategy &strategy,
+        const gemmstone::EvaluateAuxOutput *aux = nullptr);
 
 struct gen_kernel_t : public intel::jit::generator_base_t {
 

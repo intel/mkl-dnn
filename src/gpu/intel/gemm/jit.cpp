@@ -16,6 +16,7 @@
 
 #include "gpu/intel/gemm/jit.hpp"
 #include "common/c_types_map.hpp"
+#include "common/primitive_desc_iface.hpp"
 #include "common/type_helpers.hpp"
 #include "gemmstone/driver_info.hpp"
 #include "gpu/intel/compute/utils.hpp"
@@ -24,6 +25,7 @@
 #include "gpu/intel/jit/ir/block_2d_utils.hpp"
 #include "gpu/intel/jit/utils/utils.hpp"
 #include "gpu/intel/logging.hpp"
+#include "gpu/intel/matmul/gemm.hpp"
 
 #ifdef DNNL_WITH_SYCL
 #include "gpu/intel/sycl/stream.hpp"
@@ -740,5 +742,26 @@ status_t gen_t::execute(const exec_ctx_t &ctx) const {
 } // namespace gpu
 } // namespace impl
 } // namespace dnnl
+
+#ifdef DNNL_DEV_MODE
+// Deployed (post-preflight/modifyStrategy) gemm strategy string for the kernel
+// the primitive descriptor selected -- the catalog default when no override is
+// set. "" if the chosen impl is not jit:gemm. Points into the pd; valid for its
+// lifetime.
+extern "C" dnnl_status_t DNNL_API dnnl_impl_gpu_intel_get_gemm_kernel(
+        const_dnnl_primitive_desc_t pd, const char **kernel) {
+    using namespace dnnl::impl;
+    if (utils::any_null(pd, kernel)) return status::invalid_arguments;
+    *kernel = "";
+
+    const primitive_desc_t *impl = pd->impl().get();
+    // matmul dispatches to jit:gemm through a nested gemm pd; unwrap it.
+    if (auto *mm = dynamic_cast<const gpu::intel::matmul::gemm_t::pd_t *>(impl))
+        impl = mm->gemm_pd();
+    if (auto *g = dynamic_cast<const gpu::intel::gemm::gen_t::pd_t *>(impl))
+        *kernel = g->gemm_kernel_str().c_str();
+    return status::success;
+}
+#endif // DNNL_DEV_MODE
 
 // vim: et ts=4 sw=4 cindent cino+=l0,\:4,N-s

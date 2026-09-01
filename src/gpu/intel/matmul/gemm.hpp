@@ -397,6 +397,8 @@ struct gemm_t : public primitive_t {
             return matmul::pd_t::query(what, idx, result);
         }
 
+        const primitive_desc_t *gemm_pd() const { return gemm_pd_.get(); }
+
         std::shared_ptr<primitive_desc_t> gemm_pd_;
         sum_ab_t sum_ab_ = sum_ab::sum_none;
         data_type_t sum_ab_type_ = data_type::undef;

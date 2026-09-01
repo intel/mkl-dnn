@@ -646,6 +646,15 @@ struct gen_t : public primitive_t {
             return &kernel_desc_;
         }
 
+        // Deployed (post-finalize) strategy string; lazily dumped and cached.
+        const std::string &gemm_kernel_str() const {
+            if (kernel_str_.empty())
+                kernel_str_ = jit::dump_kernel(kernel_desc_.hw(),
+                        *kernel_desc_.problem(), *kernel_desc_.strategy(),
+                        kernel_desc_.aux_params());
+            return kernel_str_;
+        }
+
         int max_k_sliced_groups() const {
             const auto *info = kernel_desc()->driver_info();
 
@@ -666,6 +675,7 @@ struct gen_t : public primitive_t {
 
         kernel_desc_t kernel_desc_;
         int kernel_count_ = 0;
+        mutable std::string kernel_str_; // lazy dump for dnnl_impl_gpu_intel_get_gemm_kernel
     };
 
     gen_t(const pd_t *apd) : primitive_t(apd) {}

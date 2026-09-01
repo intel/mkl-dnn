@@ -66,6 +66,33 @@ SelectionObserver make_entry_observer(int eu_count, int freq_mhz) {
                     << entry->str();
     };
 }
+
+// Trailing " | dispatch k0=.. wgK=.." section with evaluator-derived geometry
+// the strategy string can't encode; '|' is unused by the strategy grammar.
+constexpr char dispatch_divider = '|';
+
+std::string serialize_dispatch(const EvaluateAuxOutput &aux) {
+    return " | dispatch k0=" + std::to_string(aux.k0) + " wgK="
+            + std::to_string(aux.wgK);
+}
+
+#ifdef DNNL_DEV_MODE
+// Parses and trims the dispatch section off `str`; returns whether present.
+bool parse_dispatch(std::string &str, int64_t &k0, int &wgK) {
+    auto pos = str.find(dispatch_divider);
+    if (pos == std::string::npos) return false;
+    std::stringstream ss(str.substr(pos + 1));
+    std::string tok;
+    while (ss >> tok) {
+        if (tok.rfind("k0=", 0) == 0)
+            k0 = std::stoll(tok.substr(3));
+        else if (tok.rfind("wgK=", 0) == 0)
+            wgK = std::stoi(tok.substr(4));
+    }
+    str.resize(pos);
+    return true;
+}
+#endif
 } // anonymous namespace
 
 bool enable_generator_dsl() {
@@ -187,6 +214,16 @@ status_t gen_desc_t::apply_kernel_override(
 
         if (!ss) throw std::runtime_error("truncated kernel string");
         std::string rest = ss.str().substr(ss.tellg());
+
+        // Strip a trailing " | dispatch k0=.. wgK=.." section, if present: it
+        // carries evaluator-derived dispatch geometry from a prior
+        // dnnl_impl_gpu_intel_get_gemm_kernel dump so k-parallel kernels can
+        // be replayed exactly rather than re-derived (which isn't possible
+        // for global k-parallel without the evaluator).
+        int64_t disp_k0 = 0;
+        int disp_wgK = 1;
+        bool have_disp = parse_dispatch(rest, disp_k0, disp_wgK);
+
         parseStrategy(rest, problem_, strategy_);
 
         // Later k-chunks accumulate (catalog parity).
@@ -194,11 +231,15 @@ status_t gen_desc_t::apply_kernel_override(
         if (block_k <= 0) block_k = strategy_.defaultBlockK(hw_, problem_);
         if (k_ > block_k && !problem_.beta1()) problem_.beta = Scalar();
 
-        if (strategy_.kParallel)
+        if (strategy_.kParallel && !have_disp)
             throw std::runtime_error("unknown k0 for global k-parallel");
         aux_params_ = EvaluateAuxOutput();
+        aux_params_.kParallel = strategy_.kParallel;
         aux_params_.kParallelVariable = strategy_.kParallelVariable;
-        if (strategy_.kParallelLocal) {
+        if (have_disp) {
+            aux_params_.k0 = disp_k0;
+            aux_params_.wgK = disp_wgK;
+        } else if (strategy_.kParallelLocal) {
             if (strategy_.wg[LoopK] < 1 || strategy_.unroll[LoopK] < 1)
                 throw std::runtime_error("invalid k-parallel-local geometry");
             aux_params_.k0
@@ -1080,13 +1121,20 @@ dsl::kernel_t get_dsl_kernel(const GEMMProblem &problem,
 }
 
 std::string dump_kernel(ngen::HW hw, const gemmstone::GEMMProblem &problem,
-        const gemmstone::GEMMStrategy &strategy) {
+        const gemmstone::GEMMStrategy &strategy,
+        const gemmstone::EvaluateAuxOutput *aux) {
     auto pstr = problem.toString();
     auto astr = problem.scalarsToString();
     auto sstr = unparseStrategy(hw, problem, strategy);
     if (!astr.empty()) astr += ' ';
-    return pstr + ' ' + std::to_string(strategy.unroll[LoopM]) + ' '
+    auto str = pstr + ' ' + std::to_string(strategy.unroll[LoopM]) + ' '
             + std::to_string(strategy.unroll[LoopN]) + ' ' + astr + sstr;
+    // Append dispatch geometry for k-parallel kernels.
+    if (aux
+            && (aux->kParallel || aux->kParallelVariable || aux->wgK > 1
+                    || aux->k0 > 0))
+        str += serialize_dispatch(*aux);
+    return str;
 }
 
 status_t gen_kernel_t::get_kernel(
@@ -1141,8 +1189,8 @@ std::string gen_desc_t::str() const {
 
 void gen_kernel_t::maybe_print_verbose() {
     gpu_debug() << "kernel:"
-                << dump_kernel(
-                           desc()->hw_, desc()->problem_, desc()->strategy_);
+                << dump_kernel(desc()->hw_, desc()->problem_, desc()->strategy_,
+                           desc()->aux_params());
 }
 
 } // namespace jit

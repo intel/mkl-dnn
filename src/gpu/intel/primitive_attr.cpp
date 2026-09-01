@@ -44,4 +44,24 @@ extern "C" dnnl_status_t DNNL_API dnnl_impl_gpu_intel_get_kernel_count(
         *count = -1;
     return status::success;
 }
+
+extern "C" dnnl_status_t DNNL_API dnnl_impl_gpu_intel_get_kernel_override(
+        const primitive_attr_t *attr, const char **kernel) {
+    if (utils::any_null(attr, kernel)) return status::invalid_arguments;
+
+    *kernel = "";
+    if (attr->gpu_attr_) {
+        auto *cur = utils::downcast<const gpu_primitive_attr_t *>(
+                attr->gpu_attr_.get());
+        *kernel = cur->kernel_override().c_str();
+    }
+    return status::success;
+}
+
+// dnnl_impl_gpu_intel_get_gemm_kernel is defined in gpu/intel/gemm/jit.cpp:
+// it needs gemm/jit.hpp and matmul/gemm.hpp (for the dynamic_casts that
+// unwrap matmul -> jit:gemm pds), which pull in a much heavier include graph
+// that -- combined with this file's existing common/engine.hpp dependency
+// chain -- can trip a sycl namespace ambiguity on some Windows/SYCL
+// toolchains. Keeping this file's includes minimal avoids that.
 #endif // DNNL_DEV_MODE
