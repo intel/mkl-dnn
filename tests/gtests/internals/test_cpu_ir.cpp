@@ -2314,4 +2314,145 @@ TEST(IntegrationTests, SoftmaxOnlineTileMultiRow) {
     }
 }
 
+// Arguments for the accumulator renormalization epilogue. After the softmax
+// tile update produces old_coef per row, the running output accumulator is
+// rescaled and the new tile's P*V contribution is added in one pass:
+// acc = old_coef*acc + pv, over seq_q rows of hs_v head-size columns. acc and
+// pv hold seq_q*hs floats (row i at i*hs); old_coef holds seq_q floats.
+struct acc_renorm_args_t {
+    float *acc; // in: running output acc; out: renormalized acc
+    const float *pv; // in: this tile's P*V contribution
+    const float *old_coef; // in: per-row renorm coefficient (corr*l_old/l_new)
+};
+
+// Builds the accumulator renormalization for a tile of `seq_q` rows, each of
+// head size `hs` (any hs >= 1; the ragged tail beyond the last full simd_w
+// block uses masked loads/stores). Mirrors the acc rescale in the fused SDPA
+// kernel that follows the softmax epilogue: acc = old_coef*acc + pv. Rows are
+// processed by a runtime loop over seq_q (inlined when seq_q == 1); the acc, pv
+// and old_coef pointers advance one row per iteration. old_coef is broadcast so
+// the per-row scalar reuses the vector ops; no reduction is needed, so the tail
+// needs no lane neutralization (masked ld/st touch only the active columns).
+ir_t build_acc_renorm_ir(int seq_q, int hs) {
+    const int n_blk = hs / simd_w;
+    const int tail = hs % simd_w;
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
+    const dim_t tail_off = n_blk * vbytes;
+    const dim_t fsz = (dim_t)sizeof(float);
+
+    ir_t ir;
+
+    // Row pointers: advanced one row per loop iteration.
+    const vreg_t acc_ptr = ir.new_gpr();
+    ir.load_param(acc_ptr, offsetof(acc_renorm_args_t, acc));
+    const vreg_t pv_ptr = ir.new_gpr();
+    ir.load_param(pv_ptr, offsetof(acc_renorm_args_t, pv));
+    const vreg_t oc_ptr = ir.new_gpr();
+    ir.load_param(oc_ptr, offsetof(acc_renorm_args_t, old_coef));
+
+    // One mask, reused by every masked op and every row, active for `tail`.
+    vreg_t mask = vreg_t::none;
+    if (tail) {
+        mask = ir.new_mask();
+        ir.set_mask_imm(mask, tail);
+    }
+
+    // acc = old_coef*acc + pv for the single row at the current pointers.
+    auto row_body = [&]() {
+        const vreg_t oc_bc = ir.new_vec(data_type::f32);
+        ir.vload_masked(oc_bc, oc_ptr, 0, vreg_t::none, 1);
+        ir.vbcast(oc_bc, oc_bc);
+
+        for (int b = 0; b < n_blk; b++) {
+            const vreg_t acc = ir.new_vec(data_type::f32);
+            ir.vload(acc, acc_ptr, b * vbytes);
+            ir.vmul(acc, oc_bc);
+            const vreg_t pv = ir.new_vec(data_type::f32);
+            ir.vload(pv, pv_ptr, b * vbytes);
+            ir.vadd(acc, pv);
+            ir.vstore_masked(acc_ptr, b * vbytes, acc, vreg_t::none, simd_w);
+        }
+        if (tail) {
+            const vreg_t acc = ir.new_vec(data_type::f32);
+            ir.vload_masked(acc, acc_ptr, tail_off, mask, tail);
+            ir.vmul(acc, oc_bc);
+            const vreg_t pv = ir.new_vec(data_type::f32);
+            ir.vload_masked(pv, pv_ptr, tail_off, mask, tail);
+            ir.vadd(acc, pv);
+            ir.vstore_masked(acc_ptr, tail_off, acc, mask, tail);
+        }
+    };
+
+    // Advance every row pointer to the next row.
+    auto advance_row = [&]() {
+        ir.add_imm(acc_ptr, hs * fsz);
+        ir.add_imm(pv_ptr, hs * fsz);
+        ir.add_imm(oc_ptr, fsz);
+    };
+
+    emit_loop_imm(ir, seq_q, row_body, advance_row);
+
+    return ir;
+}
+
+// Scalar reference for one accumulator renormalization row, matching one row of
+// build_acc_renorm_ir.
+void ref_acc_renorm(
+        std::vector<float> &acc, const std::vector<float> &pv, float old_coef) {
+    for (size_t d = 0; d < acc.size(); d++)
+        acc[d] = old_coef * acc[d] + pv[d];
+}
+
+// Validates the accumulator renormalization tile epilogue: one kernel rescales
+// seq_q accumulator rows (acc = old_coef*acc + pv) with a runtime loop,
+// advancing the acc/pv/old_coef pointers each iteration. Every row carries a
+// distinct old_coef and distinct data, so a wrong stride would bleed rows into
+// each other. Each row must match an independent scalar-reference update.
+TEST(IntegrationTests, AccRenormTile) {
+    SKIP_IF_NO_AVX2();
+
+    for (int seq_q : {1, 2, 3, 5}) {
+        // Head sizes span pure tails, exact multiples, and multiples plus a
+        // ragged tail, so the masked-tail path runs.
+        for (int hs : {1, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
+            ir_kernel_t kernel(build_acc_renorm_ir(seq_q, hs));
+            ASSERT_TRUE(kernel.run_ir_pipeline())
+                    << "seq_q=" << seq_q << " hs=" << hs;
+
+            std::vector<float> acc((size_t)seq_q * hs);
+            std::vector<float> pv((size_t)seq_q * hs);
+            std::vector<float> oc(seq_q);
+            std::vector<std::vector<float>> ref(seq_q);
+            for (int i = 0; i < seq_q; i++) {
+                ref[i].resize(hs);
+                for (int j = 0; j < hs; j++) {
+                    const float a
+                            = (float)(((i + 1) * j * 3 + i * 2) % 11) * 0.5f
+                            - 2.f;
+                    const float p
+                            = (float)(((i + 2) * j * 7 + i) % 13) * 0.25f - 1.f;
+                    acc[(size_t)i * hs + j] = a;
+                    pv[(size_t)i * hs + j] = p;
+                    ref[i][j] = a;
+                }
+                // Distinct per-row renorm coefficient.
+                oc[i] = 0.3f + 0.2f * i;
+                std::vector<float> pv_row(pv.begin() + (size_t)i * hs,
+                        pv.begin() + (size_t)(i + 1) * hs);
+                ref_acc_renorm(ref[i], pv_row, oc[i]);
+            }
+
+            acc_renorm_args_t args {acc.data(), pv.data(), oc.data()};
+            kernel.run(&args);
+
+            for (int i = 0; i < seq_q; i++)
+                for (int j = 0; j < hs; j++)
+                    EXPECT_NEAR(acc[(size_t)i * hs + j], ref[i][j],
+                            1e-5f * std::abs(ref[i][j]) + 1e-6f)
+                            << "seq_q=" << seq_q << " hs=" << hs << " i=" << i
+                            << " j=" << j;
+        }
+    }
+}
+
 } // namespace dnnl
