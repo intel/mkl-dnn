@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <memory>
 #include <regex>
 #include <set>
@@ -33,6 +34,7 @@
 #include "common/c_types_map.hpp"
 
 #include "cpu/x64/ir/dump.hpp"
+#include "cpu/x64/ir/eltwise_injector.hpp"
 #include "cpu/x64/ir/emitter/emitter.hpp"
 #include "cpu/x64/ir/ir.hpp"
 #include "cpu/x64/ir/postops_injector.hpp"
@@ -324,13 +326,38 @@ protected:
                     eltwise_opmask, binary_tail_opmask));
         }
 
+        // Create an eltwise injector for each algorithm the IR uses, discovered
+        // by scanning the `veltwise` ops, the same way a real IR kernel would.
+        // Like the post-ops injector, each one saves and restores every register
+        // it borrows, so it takes no part in the IR register allocation. One
+        // generic callback dispatches by algorithm, so a new algorithm needs no
+        // new wiring here.
+        std::map<alg_kind_t, std::unique_ptr<eltwise_injector_t>>
+                eltwise_injectors;
+        for (const auto &op : ir_.ops()) {
+            if (op.kind != op_kind_t::veltwise) continue;
+            const auto alg = (alg_kind_t)op.imm;
+            if (eltwise_injectors.count(alg)) continue;
+            eltwise_injectors.emplace(alg,
+                    std::unique_ptr<eltwise_injector_t>(
+                            new eltwise_injector_t(*this, avx2, alg,
+                                    /* alpha = */ 0.f, /* beta = */ 0.f,
+                                    /* scale = */ 1.f)));
+        }
+        eltwise_fn_t emit_eltwise;
+        if (!eltwise_injectors.empty()) {
+            emit_eltwise = [&](alg_kind_t alg, int vec_phys) {
+                eltwise_injectors.at(alg)->apply(vec_phys);
+            };
+        }
+
         preamble();
 
         const int frame = (int)utils::rnd_up(alloc.frame_bytes, 16);
         if (frame > 0) sub(rsp, frame);
 
         data_section_t data;
-        emit(*this, ir_, alloc, reg_cfg, data, injector.get());
+        emit(*this, ir_, alloc, reg_cfg, data, injector.get(), emit_eltwise);
 
         if (frame > 0) add(rsp, frame);
 
@@ -341,6 +368,10 @@ protected:
         // The injector's constant table follows the postamble. A no-op unless
         // the chain has an eltwise post-op.
         if (injector) injector->maybe_prepare_table();
+
+        // Each eltwise injector's constant table also follows the postamble.
+        for (auto &kv : eltwise_injectors)
+            kv.second->prepare_table();
     }
 
 private:
@@ -1686,6 +1717,9 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     const int i_hm = ir.n_ops();
     ir.vhreduce_max(x, ws);
 
+    const int i_exp = ir.n_ops();
+    ir.vexp(x);
+
     std::vector<int> defs, uses;
     // rmw ops read dst and s0 and write dst.
     for (int idx : {i_sub, i_div, i_max}) {
@@ -1707,6 +1741,10 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ASSERT_EQ(uses.size(), 2u);
     EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
     EXPECT_NE(std::find(uses.begin(), uses.end(), (int)ws), uses.end());
+    // vexp reads and writes dst in place.
+    ir.def_use(ir.ops()[i_exp], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)x}));
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
 }
 
 // Builds a kernel that applies one elementwise op to two loaded vectors and
@@ -1815,6 +1853,101 @@ TEST(IntegrationTests, HorizontalMaxBroadcast) {
     const float m = *std::max_element(a.begin(), a.end());
     for (int i = 0; i < simd_w; i++)
         EXPECT_FLOAT_EQ(c[i], m) << "lane " << i;
+}
+
+// Builds a kernel that applies exp element-wise to a loaded vector, in place,
+// and stores it. This is the P = exp(S - m) step of online softmax.
+ir_t build_exp_ir() {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t acc = ir.new_vec(data_type::f32);
+    ir.vload(acc, a_ptr, 0);
+    ir.vexp(acc);
+    ir.vstore_masked(c_ptr, 0, acc, vreg_t::none, simd_w);
+    return ir;
+}
+
+// Validates the `vexp` op end to end. The eltwise injector's exp is a
+// polynomial approximation, so compare with a relative tolerance rather than
+// exact equality.
+TEST(IntegrationTests, ExpVector) {
+    SKIP_IF_NO_AVX2();
+
+    ir_kernel_t kernel(build_exp_ir());
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a(simd_w), c(simd_w, -12345.f);
+    for (int i = 0; i < simd_w; i++)
+        a[i] = (float)(i - 4) * 0.75f; // spans negative and positive
+
+    dot_args_t args {a.data(), nullptr, c.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w; i++) {
+        const float expected = std::exp(a[i]);
+        EXPECT_NEAR(c[i], expected, 1e-5f * std::abs(expected) + 1e-6f)
+                << "lane " << i;
+    }
+}
+
+// Builds a kernel that applies two different eltwise algorithms in the same
+// kernel: exp to the first input, tanh to the second, storing both. This shows
+// that distinct `veltwise` ops carry their own algorithm (in `op.imm`) and are
+// dispatched to the matching injector, with no per-algorithm wiring.
+ir_t build_two_eltwise_ir() {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(dot_args_t, b));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t x = ir.new_vec(data_type::f32);
+    ir.vload(x, a_ptr, 0);
+    ir.veltwise(alg_kind::eltwise_exp, x);
+    ir.vstore_masked(c_ptr, 0, x, vreg_t::none, simd_w);
+
+    const vreg_t y = ir.new_vec(data_type::f32);
+    ir.vload(y, b_ptr, 0);
+    ir.veltwise(alg_kind::eltwise_tanh, y);
+    ir.vstore_masked(
+            c_ptr, simd_w * (dim_t)sizeof(float), y, vreg_t::none, simd_w);
+    return ir;
+}
+
+// Validates that two different eltwise algorithms coexist in one kernel and are
+// each applied correctly. If the algorithm were not distinguished per op, the
+// tanh lanes would receive exp (and fail).
+TEST(IntegrationTests, TwoEltwiseAlgorithms) {
+    SKIP_IF_NO_AVX2();
+
+    ir_kernel_t kernel(build_two_eltwise_ir());
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a(simd_w), b(simd_w), c(2 * simd_w, -12345.f);
+    for (int i = 0; i < simd_w; i++) {
+        a[i] = (float)(i - 4) * 0.75f;
+        b[i] = (float)(i - 4) * 0.5f;
+    }
+
+    dot_args_t args {a.data(), b.data(), c.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w; i++) {
+        const float exp_ref = std::exp(a[i]);
+        EXPECT_NEAR(c[i], exp_ref, 1e-5f * std::abs(exp_ref) + 1e-6f)
+                << "exp lane " << i;
+        const float tanh_ref = std::tanh(b[i]);
+        EXPECT_NEAR(c[simd_w + i], tanh_ref, 1e-5f * std::abs(tanh_ref) + 1e-6f)
+                << "tanh lane " << i;
+    }
 }
 
 } // namespace dnnl
