@@ -130,6 +130,13 @@ enum class op_kind_t {
     // (overwritten).
     vhreduce_max,
 
+    // dst = alg(dst), elementwise, in place. `alg` is an eltwise algorithm
+    // (e.g. eltwise_exp), held in `imm`. Lowered through the eltwise injector
+    // (like inject_postops: outside the emitter backend and the register
+    // allocator), not a backend instruction. One op serves every eltwise
+    // algorithm, so a new one needs no new op, emitter case or callback.
+    veltwise,
+
     // Post-ops
     //
     // Apply post-ops via an injector to a set of accumulators. The injector is
@@ -205,6 +212,8 @@ struct mem_t {
 //         * mov_imm        -> literal constant
 //         * loop_begin     -> loop trip count
 //         * set_mask_imm   -> active element count
+//         * vload_masked / vstore_masked -> active element count
+//         * veltwise       -> eltwise algorithm (alg_kind_t)
 //         * inject_postops -> index into inject_postops_args()
 //         * if_begin       -> right-hand side of the comparison when s1 is
 //                             none
@@ -330,6 +339,10 @@ struct DNNL_API ir_t {
     // whose value is not needed afterwards.
     void vhreduce(vreg_t dst, vreg_t workspace);
     void vhreduce_max(vreg_t dst, vreg_t workspace);
+    // `alg` selects the elementwise function applied to `dst` in place.
+    void veltwise(alg_kind_t alg, vreg_t dst);
+    // Convenience wrapper for the common exp case.
+    void vexp(vreg_t dst) { veltwise(alg_kind::eltwise_exp, dst); }
 
     // vec (masked)
     // `mask` comes from `set_mask_imm` and is required. Use `vload`/`vstore`

@@ -221,6 +221,14 @@ void ir_t::vhreduce_max(vreg_t dst, vreg_t workspace) {
     ops_.push_back(op);
 }
 
+void ir_t::veltwise(alg_kind_t alg, vreg_t dst) {
+    op_t op;
+    op.kind = op_kind_t::veltwise;
+    op.dst = dst;
+    op.imm = (dim_t)alg;
+    ops_.push_back(op);
+}
+
 void ir_t::set_mask_imm(vreg_t mask, int n_elems) {
     op_t op;
     op.kind = op_kind_t::set_mask_imm;
@@ -470,6 +478,10 @@ void ir_t::def_use(
             u(op.dst);
             d(op.dst);
             d(op.s0);
+            break;
+        case op_kind_t::veltwise: // read-modify-write in place
+            u(op.dst);
+            d(op.dst);
             break;
         case op_kind_t::inject_postops: {
             // The injector transforms the accumulators in place (read and

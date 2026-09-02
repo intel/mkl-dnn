@@ -32,7 +32,7 @@ namespace ir {
 template <typename backend_t>
 void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
         const reg_config_t &rc, data_section_t &data,
-        postops_injector_t *postops) {
+        postops_injector_t *postops, const eltwise_fn_t &eltwise_fn) {
 
     // The backend holds the generator.
     jit_generator_t &gen = be.gen();
@@ -332,6 +332,18 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 break;
             }
 
+            // Lowers to the external JIT eltwise injector via the builder-
+            // provided callback, applying the algorithm in place. Like
+            // inject_postops, the injector preserves the registers it borrows
+            // and does not participate in register allocation, so the operand
+            // must be in its allocated register (asserted below).
+            case op_kind_t::veltwise: { // reads and writes dst in place
+                JIT_ASSERT(!spilled(op.dst) && "veltwise: operand spilled");
+                JIT_ASSERT(eltwise_fn && "veltwise: missing injector callback");
+                eltwise_fn((alg_kind_t)op.imm, phys(op.dst));
+                break;
+            }
+
             // Lowers to the external JIT injector (see `postops_injector_t`).
             // Spilled operands go through their temps like those of any other
             // operation. The injector saves and restores every other register
@@ -442,14 +454,14 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
 
 void emit(jit_generator_t &gen, const ir_t &ir, const reg_alloc_result_t &alloc,
         const reg_config_t &reg_cfg, data_section_t &data,
-        postops_injector_t *postops) {
+        postops_injector_t *postops, const eltwise_fn_t &eltwise_fn) {
     const cpu_isa_t isa = gen.max_cpu_isa();
     if (is_superset(isa, avx512_core)) {
         avx512_backend_t be(gen, isa);
-        emit(be, ir, alloc, reg_cfg, data, postops);
+        emit(be, ir, alloc, reg_cfg, data, postops, eltwise_fn);
     } else {
         avx2_backend_t be(gen, isa);
-        emit(be, ir, alloc, reg_cfg, data, postops);
+        emit(be, ir, alloc, reg_cfg, data, postops, eltwise_fn);
     }
 }
 

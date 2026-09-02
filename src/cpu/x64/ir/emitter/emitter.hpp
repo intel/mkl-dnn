@@ -77,6 +77,16 @@ struct data_section_t {
 // forward declaration keeps this header free of post-ops specifics.
 struct postops_injector_t;
 
+// `eltwise_fn` lowers the `veltwise` operation to the JIT eltwise injector.
+// Like `inject`, it is the interoperability layer between the IR and the non-IR
+// injector: given the eltwise algorithm and the physical vec register index
+// holding the value, it applies the algorithm in place. The injector preserves
+// the registers it borrows, so it stays outside the IR allocator. A single
+// callback serves every eltwise algorithm, so supporting a new one (tanh,
+// gelu, ...) needs no change here. When the IR has no `veltwise` op it is
+// unused and may be left empty.
+using eltwise_fn_t = std::function<void(alg_kind_t alg, int vec_phys)>;
+
 // This is the main entry point for the emitter. It dispatches by ISA family to
 // the matching backend.
 //
@@ -90,7 +100,8 @@ struct postops_injector_t;
 // Export for testing.
 void DNNL_API emit(jit_generator_t &gen, const ir_t &ir,
         const reg_alloc_result_t &alloc, const reg_config_t &reg_cfg,
-        data_section_t &data, postops_injector_t *postops = nullptr);
+        data_section_t &data, postops_injector_t *postops = nullptr,
+        const eltwise_fn_t &eltwise_fn = {});
 
 // Emit the accumulated static data after the kernel's postamble. It aligns,
 // binds each label and then write the data bytes with `db`.
