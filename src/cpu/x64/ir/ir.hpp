@@ -121,6 +121,12 @@ enum class op_kind_t {
     vdiv,
     // dst = max(dst, s0) (vector elementwise max)
     vmax,
+    // dst = mask ? s0 : dst, per-lane select in place. The mask vreg (from
+    // set_mask_imm) is held in s1: active lanes take s0, inactive lanes keep
+    // dst. Used to neutralize a masked tail's unused lanes before a reduction
+    // (seed dst with the reduction's identity), and to apply a where/select
+    // mask.
+    vblend,
     // dst = broadcast of s0's element 0 across all lanes (overwrites dst)
     vbcast,
     // horizontal reduction of dst; result in element 0. s0 is scratch
@@ -334,6 +340,8 @@ struct DNNL_API ir_t {
     void vmul(vreg_t dst, vreg_t src);
     void vdiv(vreg_t dst, vreg_t src);
     void vmax(vreg_t dst, vreg_t src);
+    // `mask` is a mask vreg from set_mask_imm.
+    void vblend(vreg_t dst, vreg_t src, vreg_t mask);
     void vbcast(vreg_t dst, vreg_t src);
     // `workspace` is scratch. It is overwritten by this call, so pass a vreg
     // whose value is not needed afterwards.

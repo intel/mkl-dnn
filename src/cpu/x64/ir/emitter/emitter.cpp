@@ -308,6 +308,15 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
+            case op_kind_t::vblend: { // rmw: dst = mask ? s0 : dst
+                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
+                if (spilled(op.dst)) spill_reload(op.dst, d);
+                int s = vec_use(op.s0, vec_scratch1);
+                int m = vec_use(op.s1, vec_scratch2);
+                be.vblend(d, s, m, dt_of(op.dst));
+                if (spilled(op.dst)) spill_store(op.dst, d);
+                break;
+            }
             case op_kind_t::vbcast: { // overwrites dst, reads s0
                 int s = vec_use(op.s0, vec_scratch1);
                 int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);

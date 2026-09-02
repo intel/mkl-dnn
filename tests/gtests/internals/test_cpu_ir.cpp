@@ -1710,6 +1710,10 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir.vdiv(x, y);
     const int i_max = ir.n_ops();
     ir.vmax(x, y);
+    const vreg_t mask = ir.new_mask();
+    ir.set_mask_imm(mask, simd_w - 1);
+    const int i_blend = ir.n_ops();
+    ir.vblend(x, y, mask);
     const vreg_t bc = ir.new_vec(data_type::f32);
     const int i_bc = ir.n_ops();
     ir.vbcast(bc, x);
@@ -1733,6 +1737,13 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir.def_use(ir.ops()[i_bc], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)bc}));
     EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    // vblend reads dst, s0 and the mask, and writes dst.
+    ir.def_use(ir.ops()[i_blend], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)x}));
+    ASSERT_EQ(uses.size(), 3u);
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)y), uses.end());
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)mask), uses.end());
     // vhreduce_max reads and writes both dst and workspace.
     ir.def_use(ir.ops()[i_hm], defs, uses);
     ASSERT_EQ(defs.size(), 2u);
@@ -1947,6 +1958,279 @@ TEST(IntegrationTests, TwoEltwiseAlgorithms) {
         const float tanh_ref = std::tanh(b[i]);
         EXPECT_NEAR(c[simd_w + i], tanh_ref, 1e-5f * std::abs(tanh_ref) + 1e-6f)
                 << "tanh lane " << i;
+    }
+}
+
+// Arguments for the online-softmax tile epilogue kernel. One score row of `w`
+// elements is updated in place; the running max/denominator and the tile's
+// renormalization coefficient are read and written through scalar pointers,
+// matching the per-row state the fused SDPA kernel carries across KV tiles.
+struct softmax_row_args_t {
+    float *scores; // in: raw scores row; out: normalized probabilities P
+    const float *scale; // scalar softmax scale
+    float *m; // in: running row max m_old; out: m_new
+    float *l; // in: running denominator l_old; out: l_new
+    float *old_coef; // out: corr * l_old / l_new (renormalizes the running acc)
+};
+
+// Builds the online-softmax epilogue for one score row of width `w` (any w >=
+// 1; the ragged tail beyond the last full simd_w block is handled with masked
+// loads/stores). Mirrors the scalar epilogue in sdp_fused_brgemm.cpp for a
+// single KV tile, minus the select mask (deferred). The op chain is: scale ->
+// running row max -> exp(scaled - m_new) -> running denominator -> divide by
+// l_new. The scalar running state is
+// kept in broadcast vectors so every step is one of the vector ops added for
+// this framework, with no float-immediate op needed (old_coef and the
+// normalization use vdiv). The tail's unused lanes are neutralized before each
+// reduction with `vblend`: seeded with m_old for the max (never beats the
+// running max) and 0 for the sum. The first KV tile (m_old == -inf, l_old == 0)
+// needs no explicit guard: the eltwise exp saturates -inf to exactly 0, so
+// corr == 0 and clo == l_old*corr == 0 fall out, and m_new is just the tile max.
+ir_t build_softmax_row_ir(int w) {
+    const int n_blk = w / simd_w;
+    const int tail = w % simd_w;
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
+    const dim_t tail_off = n_blk * vbytes;
+
+    ir_t ir;
+
+    const vreg_t sc_ptr = ir.new_gpr();
+    ir.load_param(sc_ptr, offsetof(softmax_row_args_t, scores));
+    const vreg_t scale_ptr = ir.new_gpr();
+    ir.load_param(scale_ptr, offsetof(softmax_row_args_t, scale));
+    const vreg_t m_ptr = ir.new_gpr();
+    ir.load_param(m_ptr, offsetof(softmax_row_args_t, m));
+    const vreg_t l_ptr = ir.new_gpr();
+    ir.load_param(l_ptr, offsetof(softmax_row_args_t, l));
+    const vreg_t oc_ptr = ir.new_gpr();
+    ir.load_param(oc_ptr, offsetof(softmax_row_args_t, old_coef));
+
+    // One mask, reused by every masked op, active for the `tail` lanes.
+    vreg_t mask = vreg_t::none;
+    if (tail) {
+        mask = ir.new_mask();
+        ir.set_mask_imm(mask, tail);
+    }
+
+    // Scratch shared by both horizontal reductions (overwritten each time).
+    const vreg_t ws = ir.new_vec(data_type::f32);
+
+    // Broadcast the scalar inputs so scalar arithmetic reuses the vector ops.
+    const vreg_t scale_bc = ir.new_vec(data_type::f32);
+    ir.vload_masked(scale_bc, scale_ptr, 0, vreg_t::none, 1);
+    ir.vbcast(scale_bc, scale_bc);
+
+    const vreg_t m_old = ir.new_vec(data_type::f32);
+    ir.vload_masked(m_old, m_ptr, 0, vreg_t::none, 1);
+    ir.vbcast(m_old, m_old);
+
+    const vreg_t l_old = ir.new_vec(data_type::f32);
+    ir.vload_masked(l_old, l_ptr, 0, vreg_t::none, 1);
+    ir.vbcast(l_old, l_old);
+
+    // Pass 1: scale each block, store it back, and fold it into the running max
+    // (seeded with m_old so the reduction yields m_new directly).
+    const vreg_t rmax = ir.new_vec(data_type::f32);
+    ir.vbcast(rmax, m_old);
+    for (int b = 0; b < n_blk; b++) {
+        const vreg_t blk = ir.new_vec(data_type::f32);
+        ir.vload(blk, sc_ptr, b * vbytes);
+        ir.vmul(blk, scale_bc);
+        ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
+        ir.vmax(rmax, blk);
+    }
+    if (tail) {
+        const vreg_t blk = ir.new_vec(data_type::f32);
+        ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
+        ir.vmul(blk, scale_bc);
+        ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
+        // Unused lanes take m_old so they never win the max.
+        const vreg_t tmax = ir.new_vec(data_type::f32);
+        ir.vbcast(tmax, m_old);
+        ir.vblend(tmax, blk, mask);
+        ir.vmax(rmax, tmax);
+    }
+    ir.vhreduce_max(rmax, ws); // rmax lane 0 = m_new
+    const vreg_t m_new = ir.new_vec(data_type::f32);
+    ir.vbcast(m_new, rmax);
+
+    // corr = exp(m_old - m_new): rescales the previous tiles' contributions.
+    const vreg_t corr = ir.new_vec(data_type::f32);
+    ir.vbcast(corr, m_old);
+    ir.vsub(corr, m_new);
+    ir.vexp(corr);
+
+    // Pass 2: P_unnorm = exp(scaled - m_new); accumulate the tile denominator.
+    const vreg_t rsum = ir.new_vec(data_type::f32);
+    ir.vzero(rsum);
+    for (int b = 0; b < n_blk; b++) {
+        const vreg_t blk = ir.new_vec(data_type::f32);
+        ir.vload(blk, sc_ptr, b * vbytes);
+        ir.vsub(blk, m_new);
+        ir.vexp(blk);
+        ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
+        ir.vadd(rsum, blk);
+    }
+    if (tail) {
+        const vreg_t blk = ir.new_vec(data_type::f32);
+        ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
+        ir.vsub(blk, m_new);
+        ir.vexp(blk);
+        ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
+        // Unused lanes take 0 so they add nothing to the denominator.
+        const vreg_t tsum = ir.new_vec(data_type::f32);
+        ir.vzero(tsum);
+        ir.vblend(tsum, blk, mask);
+        ir.vadd(rsum, tsum);
+    }
+    ir.vhreduce(rsum, ws); // rsum lane 0 = tile_sum
+    const vreg_t tile_sum = ir.new_vec(data_type::f32);
+    ir.vbcast(tile_sum, rsum);
+
+    // clo = l_old * corr; l_new = clo + tile_sum; old_coef = clo / l_new.
+    const vreg_t clo = ir.new_vec(data_type::f32);
+    ir.vbcast(clo, l_old);
+    ir.vmul(clo, corr);
+
+    const vreg_t l_new = ir.new_vec(data_type::f32);
+    ir.vbcast(l_new, clo);
+    ir.vadd(l_new, tile_sum);
+
+    const vreg_t old_coef = ir.new_vec(data_type::f32);
+    ir.vbcast(old_coef, clo);
+    ir.vdiv(old_coef, l_new);
+
+    // Pass 3: normalize P by the running denominator.
+    for (int b = 0; b < n_blk; b++) {
+        const vreg_t blk = ir.new_vec(data_type::f32);
+        ir.vload(blk, sc_ptr, b * vbytes);
+        ir.vdiv(blk, l_new);
+        ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
+    }
+    if (tail) {
+        const vreg_t blk = ir.new_vec(data_type::f32);
+        ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
+        ir.vdiv(blk, l_new);
+        ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
+    }
+
+    // Write back the scalar running state (lane 0).
+    ir.vstore_masked(m_ptr, 0, m_new, vreg_t::none, 1);
+    ir.vstore_masked(l_ptr, 0, l_new, vreg_t::none, 1);
+    ir.vstore_masked(oc_ptr, 0, old_coef, vreg_t::none, 1);
+
+    return ir;
+}
+
+// Scalar reference for one online-softmax tile update, matching
+// build_softmax_row_ir (no select mask).
+void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
+        float &l, float &old_coef) {
+    const int w = (int)scores.size();
+    const float neg_inf = -std::numeric_limits<float>::infinity();
+    const float m_old = m, l_old = l;
+    float m_new = m_old;
+    for (int j = 0; j < w; j++) {
+        scores[j] *= scale;
+        m_new = std::max(m_new, scores[j]);
+    }
+    // corr is 0 for the first tile (m_old == -inf), as in the fused kernel.
+    const float corr = m_old == neg_inf ? 0.f : std::exp(m_old - m_new);
+    float tile_sum = 0.f;
+    for (int j = 0; j < w; j++) {
+        const float e = std::exp(scores[j] - m_new);
+        scores[j] = e;
+        tile_sum += e;
+    }
+    const float l_new = l_old * corr + tile_sum;
+    for (int j = 0; j < w; j++)
+        scores[j] /= l_new;
+    m = m_new;
+    l = l_new;
+    old_coef = (l_old * corr) / l_new;
+}
+
+// Validates the online-softmax tile epilogue end to end: the JIT builder's row
+// update must match the scalar reference across several tile widths. This is
+// the first step-3 milestone, proving the whole builder -> alloc -> emit -> run
+// pipeline computes the real softmax math using the ops from steps 1 and 2. The
+// eltwise exp is a polynomial approximation, so denominator-dependent outputs
+// use a relative tolerance; m_new is a plain max and stays exact.
+TEST(IntegrationTests, SoftmaxOnlineTileRow) {
+    SKIP_IF_NO_AVX2();
+
+    // Widths span pure tails (< simd_w), exact multiples, and multiples plus a
+    // ragged tail, so the masked-tail path and its lane neutralization run.
+    for (int w : {1, 5, 7, simd_w, 9, 15, 2 * simd_w, 17, 23, 4 * simd_w - 1,
+                 4 * simd_w}) {
+        ir_kernel_t kernel(build_softmax_row_ir(w));
+        ASSERT_TRUE(kernel.run_ir_pipeline()) << "w=" << w;
+
+        std::vector<float> scores(w), ref(w);
+        for (int j = 0; j < w; j++) {
+            scores[j] = (float)((j * 5) % 13) * 0.5f - 3.f;
+            ref[j] = scores[j];
+        }
+        const float scale = 0.125f;
+        // Finite running state (a later, non-first KV tile).
+        float m = -1.5f, l = 2.0f;
+        float ref_m = m, ref_l = l, ref_oc = 0.f;
+        ref_softmax_row(ref, scale, ref_m, ref_l, ref_oc);
+
+        float oc = -12345.f;
+        softmax_row_args_t args {scores.data(), &scale, &m, &l, &oc};
+        kernel.run(&args);
+
+        EXPECT_NEAR(m, ref_m, 1e-5f * std::abs(ref_m) + 1e-6f) << "w=" << w;
+        EXPECT_NEAR(l, ref_l, 1e-4f * std::abs(ref_l) + 1e-6f) << "w=" << w;
+        EXPECT_NEAR(oc, ref_oc, 1e-4f * std::abs(ref_oc) + 1e-6f) << "w=" << w;
+        for (int j = 0; j < w; j++)
+            EXPECT_NEAR(scores[j], ref[j], 1e-4f * std::abs(ref[j]) + 1e-6f)
+                    << "w=" << w << " j=" << j;
+    }
+}
+
+// Validates the first-tile path (m_old == -inf, l_old == 0) and the running
+// state carried across tiles: one per-row state is threaded through two
+// successive KV tiles, matching two scalar-reference updates. The first tile
+// exercises the -inf seed (the max reduction and exp both saturate correctly so
+// corr == 0); the second tile then consumes the finite state it produced.
+TEST(IntegrationTests, SoftmaxOnlineFirstTile) {
+    SKIP_IF_NO_AVX2();
+
+    const float neg_inf = -std::numeric_limits<float>::infinity();
+    for (int w : {1, 5, 7, simd_w, 9, 15, 2 * simd_w, 17, 23, 4 * simd_w - 1,
+                 4 * simd_w}) {
+        ir_kernel_t kernel(build_softmax_row_ir(w));
+        ASSERT_TRUE(kernel.run_ir_pipeline()) << "w=" << w;
+
+        const float scale = 0.125f;
+        // Two KV tiles of `w` scores, threaded through one running state that
+        // starts at the first-tile seed.
+        float m = neg_inf, l = 0.f, oc = -12345.f;
+        float ref_m = neg_inf, ref_l = 0.f, ref_oc = -12345.f;
+
+        for (int tile = 0; tile < 2; tile++) {
+            std::vector<float> scores(w), ref(w);
+            for (int j = 0; j < w; j++) {
+                scores[j] = (float)((j * 7 + tile * 3) % 13) * 0.5f - 3.f;
+                ref[j] = scores[j];
+            }
+            ref_softmax_row(ref, scale, ref_m, ref_l, ref_oc);
+
+            softmax_row_args_t args {scores.data(), &scale, &m, &l, &oc};
+            kernel.run(&args);
+
+            EXPECT_NEAR(m, ref_m, 1e-5f * std::abs(ref_m) + 1e-6f)
+                    << "w=" << w << " tile=" << tile;
+            EXPECT_NEAR(l, ref_l, 1e-4f * std::abs(ref_l) + 1e-6f)
+                    << "w=" << w << " tile=" << tile;
+            EXPECT_NEAR(oc, ref_oc, 1e-4f * std::abs(ref_oc) + 1e-6f)
+                    << "w=" << w << " tile=" << tile;
+            for (int j = 0; j < w; j++)
+                EXPECT_NEAR(scores[j], ref[j], 1e-4f * std::abs(ref[j]) + 1e-6f)
+                        << "w=" << w << " tile=" << tile << " j=" << j;
+        }
     }
 }
 
