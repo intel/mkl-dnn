@@ -1661,4 +1661,160 @@ end x64ir
     }
 }
 
+// Validates def_use for the elementwise/reduction ops added for the softmax
+// epilogue. The rmw ops read dst and s0 and write dst; vbcast overwrites dst
+// and only reads s0; vhreduce_max reads and writes both dst and its scratch.
+TEST(IRBuilderTests, NewVectorOpsDefUse) {
+    ir_t ir;
+    const vreg_t ptr = ir.new_gpr();
+    ir.load_param(ptr, 0);
+    const vreg_t x = ir.new_vec(data_type::f32);
+    ir.vload(x, ptr, 0);
+    const vreg_t y = ir.new_vec(data_type::f32);
+    ir.vload(y, ptr, simd_w * (dim_t)sizeof(float));
+
+    const int i_sub = ir.n_ops();
+    ir.vsub(x, y);
+    const int i_div = ir.n_ops();
+    ir.vdiv(x, y);
+    const int i_max = ir.n_ops();
+    ir.vmax(x, y);
+    const vreg_t bc = ir.new_vec(data_type::f32);
+    const int i_bc = ir.n_ops();
+    ir.vbcast(bc, x);
+    const vreg_t ws = ir.new_vec(data_type::f32);
+    const int i_hm = ir.n_ops();
+    ir.vhreduce_max(x, ws);
+
+    std::vector<int> defs, uses;
+    // rmw ops read dst and s0 and write dst.
+    for (int idx : {i_sub, i_div, i_max}) {
+        ir.def_use(ir.ops()[idx], defs, uses);
+        EXPECT_EQ(defs, std::vector<int>({(int)x}));
+        ASSERT_EQ(uses.size(), 2u);
+        EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
+        EXPECT_NE(std::find(uses.begin(), uses.end(), (int)y), uses.end());
+    }
+    // vbcast overwrites dst and reads s0.
+    ir.def_use(ir.ops()[i_bc], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)bc}));
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    // vhreduce_max reads and writes both dst and workspace.
+    ir.def_use(ir.ops()[i_hm], defs, uses);
+    ASSERT_EQ(defs.size(), 2u);
+    EXPECT_NE(std::find(defs.begin(), defs.end(), (int)x), defs.end());
+    EXPECT_NE(std::find(defs.begin(), defs.end(), (int)ws), defs.end());
+    ASSERT_EQ(uses.size(), 2u);
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)ws), uses.end());
+}
+
+// Builds a kernel that applies one elementwise op to two loaded vectors and
+// stores the full result. `kind` selects vsub/vmul/vdiv/vmax.
+ir_t build_elementwise_ir(op_kind_t kind) {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(dot_args_t, b));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t acc = ir.new_vec(data_type::f32);
+    ir.vload(acc, a_ptr, 0);
+    const vreg_t b = ir.new_vec(data_type::f32);
+    ir.vload(b, b_ptr, 0);
+
+    switch (kind) {
+        case op_kind_t::vsub: ir.vsub(acc, b); break;
+        case op_kind_t::vmul: ir.vmul(acc, b); break;
+        case op_kind_t::vdiv: ir.vdiv(acc, b); break;
+        case op_kind_t::vmax: ir.vmax(acc, b); break;
+        default: break;
+    }
+
+    ir.vstore_masked(c_ptr, 0, acc, vreg_t::none, simd_w);
+    return ir;
+}
+
+// Validates the elementwise vector ops end to end against a scalar reference.
+TEST(IntegrationTests, ElementwiseVectorOps) {
+    SKIP_IF_NO_AVX2();
+
+    std::vector<float> a(simd_w), b(simd_w);
+    for (int i = 0; i < simd_w; i++) {
+        a[i] = (float)(i - 3) * 1.5f + 0.5f;
+        b[i] = (float)(i % 4) + 1.f; // nonzero for division
+    }
+
+    auto run = [&](op_kind_t kind) {
+        ir_kernel_t k(build_elementwise_ir(kind));
+        EXPECT_TRUE(k.run_ir_pipeline());
+        std::vector<float> c(simd_w, -12345.f);
+        dot_args_t args {a.data(), b.data(), c.data()};
+        k.run(&args);
+        return c;
+    };
+
+    {
+        const auto c = run(op_kind_t::vsub);
+        for (int i = 0; i < simd_w; i++)
+            EXPECT_FLOAT_EQ(c[i], a[i] - b[i]) << "lane " << i;
+    }
+    {
+        const auto c = run(op_kind_t::vmax);
+        for (int i = 0; i < simd_w; i++)
+            EXPECT_FLOAT_EQ(c[i], std::max(a[i], b[i])) << "lane " << i;
+    }
+    {
+        const auto c = run(op_kind_t::vdiv);
+        for (int i = 0; i < simd_w; i++)
+            EXPECT_FLOAT_EQ(c[i], a[i] / b[i]) << "lane " << i;
+    }
+}
+
+// Builds a kernel that reduces a vector to its horizontal max and broadcasts
+// that scalar back across all lanes.
+ir_t build_hmax_bcast_ir() {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t acc = ir.new_vec(data_type::f32);
+    ir.vload(acc, a_ptr, 0);
+
+    const vreg_t ws = ir.new_vec(data_type::f32);
+    ir.vhreduce_max(acc, ws);
+
+    const vreg_t out = ir.new_vec(data_type::f32);
+    ir.vbcast(out, acc);
+
+    ir.vstore_masked(c_ptr, 0, out, vreg_t::none, simd_w);
+    return ir;
+}
+
+// Validates horizontal-max reduction plus broadcast: every output lane must
+// equal the maximum input element. This is the row-max step of online softmax.
+TEST(IntegrationTests, HorizontalMaxBroadcast) {
+    SKIP_IF_NO_AVX2();
+
+    ir_kernel_t kernel(build_hmax_bcast_ir());
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a(simd_w), c(simd_w, -12345.f);
+    for (int i = 0; i < simd_w; i++)
+        a[i] = (float)((i * 3) % 7) - 2.f;
+
+    dot_args_t args {a.data(), nullptr, c.data()};
+    kernel.run(&args);
+
+    const float m = *std::max_element(a.begin(), a.end());
+    for (int i = 0; i < simd_w; i++)
+        EXPECT_FLOAT_EQ(c[i], m) << "lane " << i;
+}
+
 } // namespace dnnl

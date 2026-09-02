@@ -65,6 +65,47 @@ void horizontal_add_ps(
     horizontal_add_ps(code, ymm_src, ymm_ws);
 }
 
+void horizontal_max_ps(
+        jit_generator_t *code, Xbyak::Xmm src, Xbyak::Xmm workspace) {
+    // There is no horizontal-max instruction, so reduce with shuffle + vmaxps.
+    // vshufps has both VEX and EVEX encodings, so one path covers all registers,
+    // but ymm16-31 still need AVX-512.
+    const bool requires_evex = src.getIdx() >= 16 || workspace.getIdx() >= 16;
+    if (requires_evex) assert(code->is_valid_isa(avx512_core));
+
+    code->vshufps(workspace, src, src, 0xB1); // [1,0,3,2]
+    code->vmaxps(src, src, workspace);
+    code->vshufps(workspace, src, src, 0x4E); // [2,3,0,1]
+    code->vmaxps(src, src, workspace);
+}
+
+void horizontal_max_ps(
+        jit_generator_t *code, Xbyak::Ymm src, Xbyak::Ymm workspace) {
+    const Xbyak::Xmm xmm_ws {workspace.getIdx()};
+    const Xbyak::Xmm xmm_src {src.getIdx()};
+
+    // vextractf128 is VEX-only and cannot encode ymm16-31. Use the EVEX
+    // vextractf32x4 for high registers.
+    const bool requires_evex = src.getIdx() >= 16 || workspace.getIdx() >= 16;
+    if (requires_evex)
+        code->vextractf32x4(xmm_ws, src, 1);
+    else
+        code->vextractf128(xmm_ws, src, 1);
+
+    code->vmaxps(xmm_src, xmm_src, xmm_ws);
+    horizontal_max_ps(code, xmm_src, xmm_ws);
+}
+
+void horizontal_max_ps(
+        jit_generator_t *code, Xbyak::Zmm src, Xbyak::Zmm workspace) {
+    const Xbyak::Ymm ymm_ws {workspace.getIdx()};
+    const Xbyak::Ymm ymm_src {src.getIdx()};
+
+    code->vextractf64x4(ymm_ws, src, 1);
+    code->vmaxps(ymm_src, ymm_src, ymm_ws);
+    horizontal_max_ps(code, ymm_src, ymm_ws);
+}
+
 } // namespace regops
 } // namespace x64
 } // namespace cpu

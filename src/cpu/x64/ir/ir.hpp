@@ -113,11 +113,22 @@ enum class op_kind_t {
     vdot,
     // dst += s0 (vector add)
     vadd,
+    // dst -= s0 (vector subtract)
+    vsub,
     // dst *= s0 (vector multiply)
     vmul,
+    // dst /= s0 (vector divide)
+    vdiv,
+    // dst = max(dst, s0) (vector elementwise max)
+    vmax,
+    // dst = broadcast of s0's element 0 across all lanes (overwrites dst)
+    vbcast,
     // horizontal reduction of dst; result in element 0. s0 is scratch
     // (overwritten).
     vhreduce,
+    // horizontal max reduction of dst; result in element 0. s0 is scratch
+    // (overwritten).
+    vhreduce_max,
 
     // Post-ops
     //
@@ -310,10 +321,15 @@ struct DNNL_API ir_t {
     void vload_bcast(vreg_t dst, vreg_t base, dim_t disp, data_type_t mem_dt);
     void vdot(vreg_t dst, vreg_t a, vreg_t b);
     void vadd(vreg_t dst, vreg_t src);
+    void vsub(vreg_t dst, vreg_t src);
     void vmul(vreg_t dst, vreg_t src);
+    void vdiv(vreg_t dst, vreg_t src);
+    void vmax(vreg_t dst, vreg_t src);
+    void vbcast(vreg_t dst, vreg_t src);
     // `workspace` is scratch. It is overwritten by this call, so pass a vreg
     // whose value is not needed afterwards.
     void vhreduce(vreg_t dst, vreg_t workspace);
+    void vhreduce_max(vreg_t dst, vreg_t workspace);
 
     // vec (masked)
     // `mask` comes from `set_mask_imm` and is required. Use `vload`/`vstore`

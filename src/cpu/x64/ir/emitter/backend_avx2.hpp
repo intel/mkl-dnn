@@ -116,10 +116,35 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vadd: dtype not implemented"); }
     }
 
+    void vsub(int d, int s, data_type_t dt) { // dst -= s0
+        if (dt == data_type::f32)
+            gen().vsubps(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s));
+        else { JIT_ASSERT(!"vsub: dtype not implemented"); }
+    }
+
     void vmul(int d, int s, data_type_t dt) { // dst *= s0
         if (dt == data_type::f32)
             gen().vmulps(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s));
         else { JIT_ASSERT(!"vmul: dtype not implemented"); }
+    }
+
+    void vdiv(int d, int s, data_type_t dt) { // dst /= s0
+        if (dt == data_type::f32)
+            gen().vdivps(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s));
+        else { JIT_ASSERT(!"vdiv: dtype not implemented"); }
+    }
+
+    void vmax(int d, int s, data_type_t dt) { // dst = max(dst, s0)
+        if (dt == data_type::f32)
+            gen().vmaxps(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s));
+        else { JIT_ASSERT(!"vmax: dtype not implemented"); }
+    }
+
+    // dst = broadcast of s0's element 0 across all lanes.
+    void vbcast(int d, int s, data_type_t dt) {
+        if (dt == data_type::f32)
+            gen().vbroadcastss(Xbyak::Ymm(d), Xbyak::Xmm(s));
+        else { JIT_ASSERT(!"vbcast: dtype not implemented"); }
     }
 
     // dst += a * b. The multiplicand dtype `src_dt` selects the instruction.
@@ -137,6 +162,12 @@ struct avx2_backend_t {
         if (dt == data_type::f32)
             regops::horizontal_add_ps(&gen(), Xbyak::Ymm(d), Xbyak::Ymm(ws));
         else { JIT_ASSERT(!"vhreduce: dtype not implemented"); }
+    }
+
+    void vhreduce_max(int d, int ws, data_type_t dt) {
+        if (dt == data_type::f32)
+            regops::horizontal_max_ps(&gen(), Xbyak::Ymm(d), Xbyak::Ymm(ws));
+        else { JIT_ASSERT(!"vhreduce_max: dtype not implemented"); }
     }
 
     // Masked vector ops. On AVX2 a mask is a vector.
