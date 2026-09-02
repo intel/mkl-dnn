@@ -140,6 +140,15 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vmax: dtype not implemented"); }
     }
 
+    // dst = mask ? s0 : dst. vblendvps picks src2 where the mask sign bit is
+    // set, so pass dst as src1 and s0 as src2.
+    void vblend(int d, int s, int mask, data_type_t dt) {
+        if (dt == data_type::f32)
+            gen().vblendvps(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s),
+                    Xbyak::Ymm(mask));
+        else { JIT_ASSERT(!"vblend: dtype not implemented"); }
+    }
+
     // dst = broadcast of s0's element 0 across all lanes.
     void vbcast(int d, int s, data_type_t dt) {
         if (dt == data_type::f32)
