@@ -27,6 +27,7 @@
 #include "graph/backend/dnnl/kernels/large_partition.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp_training.hpp"
+#include "graph/backend/dnnl/kernels/sdp_fused_brgemm.hpp"
 #include "graph/backend/dnnl/kernels/sdp_primitive.hpp"
 
 #include "graph/backend/dnnl/dnnl_partition_impl.hpp"
@@ -46,36 +47,63 @@ struct sdp_base_t : public kernel_base_t {
 private:
     std::shared_ptr<kernel_base_t> kernel;
 
+    // Which SDPA implementation to use. `automatic` runs the default dispatch
+    // cascade; the others force a single implementation for debug/testing.
+    enum class sdpa_impl_kind_t {
+        automatic,
+        primitive,
+        decomp,
+        fused_brgemm,
+        large,
+    };
+
 public:
     status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
             const std::vector<logical_tensor_t> &inputs,
             const std::vector<logical_tensor_t> &outputs) override {
-        const bool use_larger_partition = force_larger_partition();
+        const sdpa_impl_kind_t forced = forced_impl();
 
         status_t ret = status::unimplemented;
 
-        if (use_larger_partition) {
-            kernel = std::make_shared<larger_partition_kernel_t>();
-            ret = kernel->compile_impl(part, eng, inputs, outputs);
-        } else {
-            kernel = std::make_shared<sdp_primitive_kernel_t<quantized>>();
-            ret = kernel->compile_impl(part, eng, inputs, outputs);
-
-            if (ret != status::success) {
-                kernel = std::make_shared<sdp_decomp_kernel_t<quantized, dt>>();
-                ret = kernel->compile_impl(part, eng, inputs, outputs);
-            }
-
-            // TODO(xxx): merge with the decomp kernel above.
-            if (ret != status::success) {
-                kernel = std::make_shared<sdp_decomp_training_kernel_t>();
-                ret = kernel->compile_impl(part, eng, inputs, outputs);
-            }
-
-            if (ret != status::success) {
+        switch (forced) {
+            case sdpa_impl_kind_t::large:
                 kernel = std::make_shared<larger_partition_kernel_t>();
                 ret = kernel->compile_impl(part, eng, inputs, outputs);
-            }
+                break;
+            case sdpa_impl_kind_t::primitive:
+                kernel = std::make_shared<sdp_primitive_kernel_t<quantized>>();
+                ret = kernel->compile_impl(part, eng, inputs, outputs);
+                break;
+            case sdpa_impl_kind_t::decomp:
+                kernel = std::make_shared<sdp_decomp_kernel_t<quantized, dt>>();
+                ret = kernel->compile_impl(part, eng, inputs, outputs);
+                break;
+            case sdpa_impl_kind_t::fused_brgemm:
+                kernel = std::make_shared<sdp_fused_brgemm_kernel_t>();
+                ret = kernel->compile_impl(part, eng, inputs, outputs);
+                break;
+            case sdpa_impl_kind_t::automatic:
+            default:
+                kernel = std::make_shared<sdp_primitive_kernel_t<quantized>>();
+                ret = kernel->compile_impl(part, eng, inputs, outputs);
+
+                if (ret != status::success) {
+                    kernel = std::make_shared<
+                            sdp_decomp_kernel_t<quantized, dt>>();
+                    ret = kernel->compile_impl(part, eng, inputs, outputs);
+                }
+
+                // TODO(xxx): merge with the decomp kernel above.
+                if (ret != status::success) {
+                    kernel = std::make_shared<sdp_decomp_training_kernel_t>();
+                    ret = kernel->compile_impl(part, eng, inputs, outputs);
+                }
+
+                if (ret != status::success) {
+                    kernel = std::make_shared<larger_partition_kernel_t>();
+                    ret = kernel->compile_impl(part, eng, inputs, outputs);
+                }
+                break;
         }
 
         if (ret == status::success)
@@ -86,12 +114,25 @@ public:
         return ret;
     }
 
-    // An internal env var is provided to force the larger-partition SDPA
-    // implementation. Currently it's for oneDNN debug and testing only.
-    bool force_larger_partition() const {
-        const int force = graph::utils::getenv_int_internal(
-                "GRAPH_SDPA_FORCE_PRIMITIVE", 0);
-        return force > 0;
+    // Internal env var to force a specific SDPA implementation, for oneDNN
+    // debug and testing only:
+    //   ONEDNN_GRAPH_SDPA_IMPL={auto|primitive|decomp|fused_brgemm|large}
+    // The legacy knob ONEDNN_GRAPH_SDPA_FORCE_PRIMITIVE>0 is preserved and maps
+    // to `large` (its historical behavior).
+    sdpa_impl_kind_t forced_impl() const {
+        using graph::utils::check_verbose_string_user;
+        if (check_verbose_string_user("GRAPH_SDPA_IMPL", "large"))
+            return sdpa_impl_kind_t::large;
+        if (check_verbose_string_user("GRAPH_SDPA_IMPL", "fused_brgemm"))
+            return sdpa_impl_kind_t::fused_brgemm;
+        if (check_verbose_string_user("GRAPH_SDPA_IMPL", "decomp"))
+            return sdpa_impl_kind_t::decomp;
+        if (check_verbose_string_user("GRAPH_SDPA_IMPL", "primitive"))
+            return sdpa_impl_kind_t::primitive;
+        if (graph::utils::getenv_int_internal("GRAPH_SDPA_FORCE_PRIMITIVE", 0)
+                > 0)
+            return sdpa_impl_kind_t::large;
+        return sdpa_impl_kind_t::automatic;
     }
 
     status_t execute_impl(stream_t *strm, const std::vector<tensor_t> &inputs,
