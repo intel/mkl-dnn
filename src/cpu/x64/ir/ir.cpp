@@ -195,6 +195,14 @@ void ir_t::vmax(vreg_t dst, vreg_t src) {
     ops_.push_back(op);
 }
 
+void ir_t::vcmp_ne_zero(vreg_t dst, vreg_t src) {
+    op_t op;
+    op.kind = op_kind_t::vcmp_ne_zero;
+    op.dst = dst;
+    op.s0 = src;
+    ops_.push_back(op);
+}
+
 void ir_t::vblend(vreg_t dst, vreg_t src, vreg_t mask) {
     op_t op;
     op.kind = op_kind_t::vblend;
@@ -485,6 +493,7 @@ void ir_t::def_use(
             d(op.dst);
             break;
         case op_kind_t::vbcast: // overwrites dst, reads s0
+        case op_kind_t::vcmp_ne_zero: // overwrites dst, reads s0
             u(op.s0);
             d(op.dst);
             break;

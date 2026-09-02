@@ -1717,6 +1717,9 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     const vreg_t bc = ir.new_vec(data_type::f32);
     const int i_bc = ir.n_ops();
     ir.vbcast(bc, x);
+    const vreg_t cm = ir.new_vec(data_type::f32);
+    const int i_cmp = ir.n_ops();
+    ir.vcmp_ne_zero(cm, x);
     const vreg_t ws = ir.new_vec(data_type::f32);
     const int i_hm = ir.n_ops();
     ir.vhreduce_max(x, ws);
@@ -1736,6 +1739,10 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     // vbcast overwrites dst and reads s0.
     ir.def_use(ir.ops()[i_bc], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)bc}));
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    // vcmp_ne_zero overwrites dst and reads s0.
+    ir.def_use(ir.ops()[i_cmp], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)cm}));
     EXPECT_EQ(uses, std::vector<int>({(int)x}));
     // vblend reads dst, s0 and the mask, and writes dst.
     ir.def_use(ir.ops()[i_blend], defs, uses);
@@ -1958,6 +1965,67 @@ TEST(IntegrationTests, TwoEltwiseAlgorithms) {
         const float tanh_ref = std::tanh(b[i]);
         EXPECT_NEAR(c[simd_w + i], tanh_ref, 1e-5f * std::abs(tanh_ref) + 1e-6f)
                 << "tanh lane " << i;
+    }
+}
+
+// Arguments for the select-mask kernel. `cond` drives a per-lane select
+// between the two candidate vectors `a` and `b`.
+struct select_mask_args_t {
+    const float *a;
+    const float *b;
+    const float *cond;
+    float *c;
+};
+
+// Validates vcmp_ne_zero end to end: a loaded condition vector is turned into a
+// lane mask, then vblend selects `b` where the condition is nonzero and `a`
+// where it is zero. This is the select/where primitive of the SDPA attention
+// mask, where the operand order of vblend encodes the keep-on-cond sense.
+TEST(IntegrationTests, SelectMaskFromCondition) {
+    SKIP_IF_NO_AVX2();
+
+    ir_t ir;
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(select_mask_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(select_mask_args_t, b));
+    const vreg_t cond_ptr = ir.new_gpr();
+    ir.load_param(cond_ptr, offsetof(select_mask_args_t, cond));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(select_mask_args_t, c));
+
+    const vreg_t a = ir.new_vec(data_type::f32);
+    ir.vload(a, a_ptr, 0);
+    const vreg_t b = ir.new_vec(data_type::f32);
+    ir.vload(b, b_ptr, 0);
+    const vreg_t cond = ir.new_vec(data_type::f32);
+    ir.vload(cond, cond_ptr, 0);
+
+    // mask lanes = (cond != 0); a = mask ? b : a  ->  lane = cond ? b : a.
+    const vreg_t mask = ir.new_vec(data_type::f32);
+    ir.vcmp_ne_zero(mask, cond);
+    ir.vblend(a, b, mask);
+    ir.vstore_masked(c_ptr, 0, a, vreg_t::none, simd_w);
+
+    ir_kernel_t kernel(ir);
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a_data(simd_w), b_data(simd_w), cond_data(simd_w),
+            c(simd_w, -12345.f);
+    for (int i = 0; i < simd_w; i++) {
+        a_data[i] = (float)(10 + i);
+        b_data[i] = (float)(100 + i);
+        // Mix zero and nonzero (including a negative) condition lanes.
+        cond_data[i] = (i % 3 == 0) ? 0.f : (float)(i - 4);
+    }
+
+    select_mask_args_t args {
+            a_data.data(), b_data.data(), cond_data.data(), c.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w; i++) {
+        const float expected = cond_data[i] != 0.f ? b_data[i] : a_data[i];
+        EXPECT_FLOAT_EQ(c[i], expected) << "lane " << i;
     }
 }
 
