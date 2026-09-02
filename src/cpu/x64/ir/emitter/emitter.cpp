@@ -324,6 +324,14 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
+            case op_kind_t::vcmp_ne_zero: { // overwrites dst, reads s0
+                int s = vec_use(op.s0, vec_scratch1);
+                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
+                // vec_scratch2 supplies the zero compare operand.
+                be.vcmp_ne_zero(d, s, vec_scratch2, dt_of(op.dst));
+                if (spilled(op.dst)) spill_store(op.dst, d);
+                break;
+            }
             case op_kind_t::vhreduce: { // reads and writes dst, overwrites ws
                 int d = vec_use(op.dst);
                 int ws = reg_of(op.s0);

@@ -140,6 +140,19 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vmax: dtype not implemented"); }
     }
 
+    // dst = (s0 != 0) ? all-ones : 0, per lane. `zero` is a scratch register,
+    // cleared here to form the compare operand. The result is a lane mask (all
+    // sign bits set where nonzero) that `vblend` consumes.
+    void vcmp_ne_zero(int d, int s, int zero, data_type_t dt) {
+        if (dt == data_type::f32) {
+            gen().vxorps(Xbyak::Ymm(zero), Xbyak::Ymm(zero), Xbyak::Ymm(zero));
+            gen().vcmpps(Xbyak::Ymm(d), Xbyak::Ymm(s), Xbyak::Ymm(zero),
+                    jit_generator_t::_cmp_neq_uq);
+        } else {
+            JIT_ASSERT(!"vcmp_ne_zero: dtype not implemented");
+        }
+    }
+
     // dst = mask ? s0 : dst. vblendvps picks src2 where the mask sign bit is
     // set, so pass dst as src1 and s0 as src2.
     void vblend(int d, int s, int mask, data_type_t dt) {

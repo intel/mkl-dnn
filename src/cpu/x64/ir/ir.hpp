@@ -121,6 +121,9 @@ enum class op_kind_t {
     vdiv,
     // dst = max(dst, s0) (vector elementwise max)
     vmax,
+    // dst = (s0 != 0) ? all-ones : 0, per lane. Builds a boolean mask from a
+    // loaded condition for a later `vblend` to select between two vectors.
+    vcmp_ne_zero,
     // dst = mask ? s0 : dst, per-lane select in place. The mask vreg (from
     // set_mask_imm) is held in s1: active lanes take s0, inactive lanes keep
     // dst. Used to neutralize a masked tail's unused lanes before a reduction
@@ -340,6 +343,7 @@ struct DNNL_API ir_t {
     void vmul(vreg_t dst, vreg_t src);
     void vdiv(vreg_t dst, vreg_t src);
     void vmax(vreg_t dst, vreg_t src);
+    void vcmp_ne_zero(vreg_t dst, vreg_t src);
     // `mask` is a mask vreg from set_mask_imm.
     void vblend(vreg_t dst, vreg_t src, vreg_t mask);
     void vbcast(vreg_t dst, vreg_t src);
