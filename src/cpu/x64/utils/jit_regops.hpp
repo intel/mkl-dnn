@@ -45,6 +45,27 @@ void horizontal_add_ps(
 void horizontal_add_ps(
         jit_generator_t *code, Xbyak::Zmm src, Xbyak::Zmm workspace);
 
+/**
+ * Horizontally reduces packed fp32 values in a 128-bit XMM register to their
+ * maximum, placing the result in every lane. @param workspace is temporary.
+ */
+void horizontal_max_ps(
+        jit_generator_t *code, Xbyak::Xmm src, Xbyak::Xmm workspace);
+
+/**
+ * Horizontally reduces packed fp32 values in a 256-bit YMM register to their
+ * maximum, using workspace as temporary storage.
+ */
+void horizontal_max_ps(
+        jit_generator_t *code, Xbyak::Ymm src, Xbyak::Ymm workspace);
+
+/**
+ * Horizontally reduces packed fp32 values in a 512-bit ZMM register to their
+ * maximum, using workspace as temporary storage.
+ */
+void horizontal_max_ps(
+        jit_generator_t *code, Xbyak::Zmm src, Xbyak::Zmm workspace);
+
 } // namespace regops
 } // namespace x64
 } // namespace cpu
