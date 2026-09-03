@@ -2131,32 +2131,41 @@ TEST(IntegrationTests, LoadU8SelectMask) {
 // written through scalar pointers, matching the per-row state the fused SDPA
 // kernel carries across KV tiles. scores holds seq_q*w floats (row i at i*w);
 // m/l/old_coef hold seq_q floats (row i at i); scale is shared by all rows.
+// cond/fill drive the optional select mask: a masked-out lane takes fill.
 struct softmax_row_args_t {
     float *scores; // in: raw scores rows; out: normalized probabilities P
     const float *scale; // scalar softmax scale (shared by all rows)
     float *m; // in: running row max m_old; out: m_new (one per row)
     float *l; // in: running denominator l_old; out: l_new (one per row)
     float *old_coef; // out: corr*l_old/l_new per row (renormalizes running acc)
+    const uint8_t *cond; // select condition bytes (seq_q*w, row i at i*w)
+    const float *fill; // scalar fill for masked-out lanes (shared by all rows)
 };
 
 // Builds the online-softmax epilogue for a tile of `seq_q` score rows, each of
 // width `w` (any w >= 1; the ragged tail beyond the last full simd_w block is
 // handled with masked loads/stores). Mirrors the per-row scalar epilogue in
-// sdp_fused_brgemm.cpp for a single KV tile, minus the select mask (deferred).
+// sdp_fused_brgemm.cpp for a single KV tile. With `has_select`, pass 1 also
+// applies the attention select mask: uint8 condition bytes are widened and
+// turned into a lane mask (vload_u8 -> vcmp_ne_zero), then vblend swaps in the
+// broadcast `fill` scalar. The keep sense follows the fused kernel: fusiable
+// keeps the score where cond != 0, non-fusiable where cond == 0 -- encoded by
+// the vblend operand order, no invert op needed.
 // The rows are processed by a runtime loop over seq_q (inlined when seq_q == 1);
 // the score and per-row state pointers advance one row per iteration. Per row
-// the op chain is: scale -> running row max -> exp(scaled - m_new) -> running
-// denominator -> divide by l_new. The scalar running state is kept in broadcast
-// vectors so every step is one of the vector ops added for this framework, with
-// no float-immediate op needed (old_coef and the normalization use vdiv). The
-// tail's unused lanes are neutralized before each reduction with `vblend`:
-// seeded with m_old for the max (never beats the running max) and 0 for the
-// sum. The first KV tile (m_old == -inf, l_old == 0) needs no explicit guard:
-// the eltwise exp saturates -inf to exactly 0, so corr == 0 and clo ==
-// l_old*corr == 0 fall out, and m_new is just the tile max. The scale pointer
-// and tail mask are loop invariant, set up once; the mask vreg stays live
-// across all rows (masked ops assert it is never spilled).
-ir_t build_softmax_tile_ir(int seq_q, int w) {
+// the op chain is: scale -> (select) -> running row max -> exp(scaled - m_new)
+// -> running denominator -> divide by l_new. The scalar running state is kept
+// in broadcast vectors so every step is one of the vector ops added for this
+// framework, with no float-immediate op needed (old_coef and the normalization
+// use vdiv). The tail's unused lanes are neutralized before each reduction with
+// `vblend`: seeded with m_old for the max (never beats the running max) and 0
+// for the sum. The first KV tile (m_old == -inf, l_old == 0) needs no explicit
+// guard: the eltwise exp saturates -inf to exactly 0, so corr == 0 and clo ==
+// l_old*corr == 0 fall out, and m_new is just the tile max. The scale, fill and
+// tail mask are loop invariant, set up once; the mask vreg stays live across
+// all rows (masked ops assert it is never spilled).
+ir_t build_softmax_tile_ir(
+        int seq_q, int w, bool has_select = false, bool fusiable = true) {
     const int n_blk = w / simd_w;
     const int tail = w % simd_w;
     const dim_t vbytes = simd_w * (dim_t)sizeof(float);
@@ -2178,6 +2187,17 @@ ir_t build_softmax_tile_ir(int seq_q, int w) {
     const vreg_t scale_ptr = ir.new_gpr();
     ir.load_param(scale_ptr, offsetof(softmax_row_args_t, scale));
 
+    // Select mask inputs: cond advances one row per iteration (one byte per
+    // score), fill is a loop-invariant scalar shared by every row.
+    vreg_t cond_ptr = vreg_t::none;
+    vreg_t fill_ptr = vreg_t::none;
+    if (has_select) {
+        cond_ptr = ir.new_gpr();
+        ir.load_param(cond_ptr, offsetof(softmax_row_args_t, cond));
+        fill_ptr = ir.new_gpr();
+        ir.load_param(fill_ptr, offsetof(softmax_row_args_t, fill));
+    }
+
     // One mask, reused by every masked op and every row, active for `tail`.
     vreg_t mask = vreg_t::none;
     if (tail) {
@@ -2195,6 +2215,34 @@ ir_t build_softmax_tile_ir(int seq_q, int w) {
         ir.vload_masked(scale_bc, scale_ptr, 0, vreg_t::none, 1);
         ir.vbcast(scale_bc, scale_bc);
 
+        vreg_t fill_bc = vreg_t::none;
+        if (has_select) {
+            fill_bc = ir.new_vec(data_type::f32);
+            ir.vload_masked(fill_bc, fill_ptr, 0, vreg_t::none, 1);
+            ir.vbcast(fill_bc, fill_bc);
+        }
+
+        // Apply the select mask to one scaled block of `n` elements at byte
+        // offset `cond_off` into this row's condition bytes, and return the
+        // vreg holding the result (unchanged when there is no select).
+        auto apply_select = [&](vreg_t blk, dim_t cond_off, int n) -> vreg_t {
+            if (!has_select) return blk;
+            const vreg_t cond = ir.new_vec(data_type::s32);
+            ir.vload_u8(cond, cond_ptr, cond_off, n);
+            const vreg_t cmask = ir.new_vec(data_type::s32);
+            ir.vcmp_ne_zero(cmask, cond);
+            if (fusiable) {
+                // Keep the score where cond != 0: cmask ? score : fill.
+                const vreg_t sel = ir.new_vec(data_type::f32);
+                ir.vbcast(sel, fill_bc);
+                ir.vblend(sel, blk, cmask);
+                return sel;
+            }
+            // Keep the score where cond == 0: cmask ? fill : score.
+            ir.vblend(blk, fill_bc, cmask);
+            return blk;
+        };
+
         const vreg_t m_old = ir.new_vec(data_type::f32);
         ir.vload_masked(m_old, m_ptr, 0, vreg_t::none, 1);
         ir.vbcast(m_old, m_old);
@@ -2208,16 +2256,18 @@ ir_t build_softmax_tile_ir(int seq_q, int w) {
         const vreg_t rmax = ir.new_vec(data_type::f32);
         ir.vbcast(rmax, m_old);
         for (int b = 0; b < n_blk; b++) {
-            const vreg_t blk = ir.new_vec(data_type::f32);
+            vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload(blk, sc_ptr, b * vbytes);
             ir.vmul(blk, scale_bc);
+            blk = apply_select(blk, (dim_t)b * simd_w, simd_w);
             ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
             ir.vmax(rmax, blk);
         }
         if (tail) {
-            const vreg_t blk = ir.new_vec(data_type::f32);
+            vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
             ir.vmul(blk, scale_bc);
+            blk = apply_select(blk, (dim_t)n_blk * simd_w, tail);
             ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
             // Unused lanes take m_old so they never win the max.
             const vreg_t tmax = ir.new_vec(data_type::f32);
@@ -2301,6 +2351,7 @@ ir_t build_softmax_tile_ir(int seq_q, int w) {
         ir.add_imm(m_ptr, fsz);
         ir.add_imm(l_ptr, fsz);
         ir.add_imm(oc_ptr, fsz);
+        if (has_select) ir.add_imm(cond_ptr, w); // one uint8 byte per score
     };
 
     emit_loop_imm(ir, seq_q, row_body, advance_row);
@@ -2321,6 +2372,39 @@ void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
         m_new = std::max(m_new, scores[j]);
     }
     // corr is 0 for the first tile (m_old == -inf), as in the fused kernel.
+    const float corr = m_old == neg_inf ? 0.f : std::exp(m_old - m_new);
+    float tile_sum = 0.f;
+    for (int j = 0; j < w; j++) {
+        const float e = std::exp(scores[j] - m_new);
+        scores[j] = e;
+        tile_sum += e;
+    }
+    const float l_new = l_old * corr + tile_sum;
+    for (int j = 0; j < w; j++)
+        scores[j] /= l_new;
+    m = m_new;
+    l = l_new;
+    old_coef = (l_old * corr) / l_new;
+}
+
+// Scalar reference for one online-softmax row update with the select mask, as
+// in build_softmax_tile_ir(..., has_select=true). A lane is kept when cond != 0
+// (fusiable) or cond == 0 (non-fusiable); otherwise it takes `fill`.
+void ref_softmax_row_masked(std::vector<float> &scores, float scale,
+        const std::vector<uint8_t> &cond, float fill, bool fusiable, float &m,
+        float &l, float &old_coef) {
+    const int w = (int)scores.size();
+    const float neg_inf = -std::numeric_limits<float>::infinity();
+    const float m_old = m, l_old = l;
+    float m_new = m_old;
+    for (int j = 0; j < w; j++) {
+        float v = scores[j] * scale;
+        const bool c = cond[j] != 0;
+        const bool keep = fusiable ? c : !c;
+        if (!keep) v = fill;
+        scores[j] = v;
+        m_new = std::max(m_new, v);
+    }
     const float corr = m_old == neg_inf ? 0.f : std::exp(m_old - m_new);
     float tile_sum = 0.f;
     for (int j = 0; j < w; j++) {
@@ -2473,6 +2557,87 @@ TEST(IntegrationTests, SoftmaxOnlineTileMultiRow) {
                             1e-4f * std::abs(ref[i][j]) + 1e-6f)
                             << "seq_q=" << seq_q << " w=" << w << " i=" << i
                             << " j=" << j;
+            }
+        }
+    }
+}
+
+// Validates the select mask fused into pass 1 of the softmax tile epilogue:
+// uint8 condition bytes choose between the scaled score and the fill scalar
+// before the running max/denominator update, in both the fusiable (keep where
+// cond != 0) and non-fusiable (keep where cond == 0) senses. Each row runs the
+// full scale -> select -> softmax chain against an independent scalar reference
+// over widths that exercise the ragged tail. The running state is finite (a
+// later KV tile) so even a fully masked row keeps l_new > 0.
+TEST(IntegrationTests, SoftmaxOnlineTileSelect) {
+    SKIP_IF_NO_AVX2();
+
+    const float scale = 0.125f;
+    const float fill = -30.f;
+    for (bool fusiable : {false, true}) {
+        for (int seq_q : {1, 2, 3}) {
+            for (int w : {1, 5, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
+                ir_kernel_t kernel(
+                        build_softmax_tile_ir(seq_q, w, true, fusiable));
+                ASSERT_TRUE(kernel.run_ir_pipeline())
+                        << "fusiable=" << fusiable << " seq_q=" << seq_q
+                        << " w=" << w;
+
+                std::vector<float> scores((size_t)seq_q * w);
+                std::vector<uint8_t> cond((size_t)seq_q * w);
+                std::vector<float> m(seq_q), l(seq_q), oc(seq_q, -12345.f);
+                std::vector<std::vector<float>> ref(
+                        seq_q, std::vector<float>(w));
+                std::vector<std::vector<uint8_t>> refc(
+                        seq_q, std::vector<uint8_t>(w));
+                std::vector<float> ref_m(seq_q), ref_l(seq_q), ref_oc(seq_q);
+                for (int i = 0; i < seq_q; i++) {
+                    for (int j = 0; j < w; j++) {
+                        const float v
+                                = (float)(((i + 1) * j * 5 + i * 3) % 13) * 0.5f
+                                - 3.f;
+                        scores[(size_t)i * w + j] = v;
+                        ref[i][j] = v;
+                        // Mix zeros and nonzero bytes, some > 127.
+                        const uint8_t c = ((i + j) % 2 == 0)
+                                ? 0
+                                : (uint8_t)(50 + (i * 7 + j * 13) % 200);
+                        cond[(size_t)i * w + j] = c;
+                        refc[i][j] = c;
+                    }
+                    // Distinct finite per-row running state (a later KV tile).
+                    m[i] = -1.5f + 0.25f * i;
+                    l[i] = 2.0f + 0.5f * i;
+                    ref_m[i] = m[i];
+                    ref_l[i] = l[i];
+                    ref_oc[i] = -12345.f;
+                    ref_softmax_row_masked(ref[i], scale, refc[i], fill,
+                            fusiable, ref_m[i], ref_l[i], ref_oc[i]);
+                }
+
+                softmax_row_args_t args {scores.data(), &scale, m.data(),
+                        l.data(), oc.data(), cond.data(), &fill};
+                kernel.run(&args);
+
+                for (int i = 0; i < seq_q; i++) {
+                    EXPECT_NEAR(
+                            m[i], ref_m[i], 1e-5f * std::abs(ref_m[i]) + 1e-6f)
+                            << "fusiable=" << fusiable << " seq_q=" << seq_q
+                            << " w=" << w << " i=" << i;
+                    EXPECT_NEAR(
+                            l[i], ref_l[i], 1e-4f * std::abs(ref_l[i]) + 1e-6f)
+                            << "fusiable=" << fusiable << " seq_q=" << seq_q
+                            << " w=" << w << " i=" << i;
+                    EXPECT_NEAR(oc[i], ref_oc[i],
+                            1e-4f * std::abs(ref_oc[i]) + 1e-6f)
+                            << "fusiable=" << fusiable << " seq_q=" << seq_q
+                            << " w=" << w << " i=" << i;
+                    for (int j = 0; j < w; j++)
+                        EXPECT_NEAR(scores[(size_t)i * w + j], ref[i][j],
+                                1e-4f * std::abs(ref[i][j]) + 1e-6f)
+                                << "fusiable=" << fusiable << " seq_q=" << seq_q
+                                << " w=" << w << " i=" << i << " j=" << j;
+                }
             }
         }
     }
