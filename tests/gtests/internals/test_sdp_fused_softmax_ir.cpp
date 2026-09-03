@@ -37,7 +37,7 @@ namespace dnnl {
 
 using namespace dnnl::impl;
 using namespace dnnl::impl::cpu::x64;
-using namespace dnnl::impl::graph::dnnl_impl::sdp_softmax_ir;
+using namespace dnnl::impl::cpu::x64::sdp_softmax_ir;
 
 // Tests that require generating a kernel require AVX2.
 #define SKIP_IF_NO_AVX2() \

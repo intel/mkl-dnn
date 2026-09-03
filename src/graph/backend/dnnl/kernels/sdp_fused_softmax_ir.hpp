@@ -44,11 +44,10 @@
 
 namespace dnnl {
 namespace impl {
-namespace graph {
-namespace dnnl_impl {
+namespace cpu {
+namespace x64 {
 namespace sdp_softmax_ir {
 
-using namespace dnnl::impl::cpu::x64;
 using namespace dnnl::impl::cpu::x64::ir;
 
 // The IR framework has only an AVX2 backend today, so the builders block at
@@ -62,14 +61,16 @@ constexpr int simd_w = cpu_isa_traits_t<avx2>::vlen / (int)sizeof(float);
 // written through scalar pointers, matching the per-row state the fused SDPA
 // kernel carries across KV tiles. scores holds seq_q*w floats (row i at i*w);
 // m/l/old_coef hold seq_q floats (row i at i); scale is shared by all rows.
-// cond/fill drive the optional select mask: a masked-out lane takes fill.
+// cond/fill drive the optional select mask: a masked-out lane takes fill. cond
+// points at this tile's first column; its row stride is the cond_row_stride
+// passed to the builder (columns are contiguous, one uint8 byte per score).
 struct softmax_row_args_t {
     float *scores; // in: raw scores rows; out: normalized probabilities P
     const float *scale; // scalar softmax scale (shared by all rows)
     float *m; // in: running row max m_old; out: m_new (one per row)
     float *l; // in: running denominator l_old; out: l_new (one per row)
     float *old_coef; // out: corr*l_old/l_new per row (renormalizes running acc)
-    const uint8_t *cond; // select condition bytes (seq_q*w, row i at i*w)
+    const uint8_t *cond; // select condition bytes (tile column 0 of row 0)
     const float *fill; // scalar fill for masked-out lanes (shared by all rows)
 };
 
@@ -105,14 +106,16 @@ struct acc_renorm_args_t {
 // exactly 0, so corr == 0 and clo == l_old*corr == 0 fall out, and m_new is
 // just the tile max. The scale, fill and tail mask are loop invariant, set up
 // once; the mask vreg stays live across all rows (masked ops assert it is never
-// spilled).
-inline ir_t build_softmax_tile_ir(
-        int seq_q, int w, bool has_select = false, bool fusiable = true) {
+// spilled). `cond_row_stride` is the condition tensor's row stride in elements;
+// < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
+inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
+        bool fusiable = true, int cond_row_stride = -1) {
     const int n_blk = w / simd_w;
     const int tail = w % simd_w;
     const dim_t vbytes = simd_w * (dim_t)sizeof(float);
     const dim_t tail_off = n_blk * vbytes;
     const dim_t fsz = (dim_t)sizeof(float);
+    const dim_t cond_stride = cond_row_stride < 0 ? w : cond_row_stride;
 
     ir_t ir;
 
@@ -293,7 +296,8 @@ inline ir_t build_softmax_tile_ir(
         ir.add_imm(m_ptr, fsz);
         ir.add_imm(l_ptr, fsz);
         ir.add_imm(oc_ptr, fsz);
-        if (has_select) ir.add_imm(cond_ptr, w); // one uint8 byte per score
+        if (has_select)
+            ir.add_imm(cond_ptr, cond_stride); // one uint8 byte per score
     };
 
     emit_loop_imm(ir, seq_q, row_body, advance_row);
@@ -449,8 +453,8 @@ private:
 };
 
 } // namespace sdp_softmax_ir
-} // namespace dnnl_impl
-} // namespace graph
+} // namespace x64
+} // namespace cpu
 } // namespace impl
 } // namespace dnnl
 
