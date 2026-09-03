@@ -146,6 +146,16 @@ void ir_t::vload_bcast(
     ops_.push_back(op);
 }
 
+void ir_t::vload_u8(vreg_t dst, vreg_t base, dim_t disp, int n_elems) {
+    op_t op;
+    op.kind = op_kind_t::vload_u8;
+    op.dst = dst;
+    op.imm = n_elems;
+    op.mem.base = base;
+    op.mem.disp = disp;
+    ops_.push_back(op);
+}
+
 void ir_t::vdot(vreg_t dst, vreg_t a, vreg_t b) {
     op_t op;
     op.kind = op_kind_t::vdot;
@@ -463,6 +473,7 @@ void ir_t::def_use(
         case op_kind_t::vload:
         case op_kind_t::vload_scalar:
         case op_kind_t::vload_bcast:
+        case op_kind_t::vload_u8:
             u(op.mem.base);
             d(op.dst);
             break;
