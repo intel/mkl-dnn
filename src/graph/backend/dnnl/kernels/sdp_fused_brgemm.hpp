@@ -32,10 +32,13 @@
 namespace dnnl {
 namespace impl {
 
-// Forward declaration to avoid including the BRGEMM header.
+// Forward declarations to avoid including the BRGEMM / IR headers.
 namespace cpu {
 namespace x64 {
 struct brgemm_kernel_t;
+namespace sdp_softmax_ir {
+class softmax_ir_kernel_t;
+} // namespace sdp_softmax_ir
 } // namespace x64
 } // namespace cpu
 
@@ -94,6 +97,22 @@ private:
     brgemm_kernel_t *mm1_tail_kernel_ = nullptr;
     brgemm_kernel_t *mm2_tail_kernel_ = nullptr;
 
+    // JIT online-softmax epilogue kernels built from the x64 CPU IR (AVX2). The
+    // softmax kernels apply scale + select-mask + streaming-softmax to one KV
+    // tile of scores (full/tail width); acc_renorm rescales the running output
+    // by old_coef and adds the tile's P*V. When use_ir_epilogue_ is false (no
+    // AVX2), execute_impl runs the scalar epilogue instead. x64-only: the
+    // kernel type is incomplete elsewhere, so the members are compiled out.
+#if DNNL_X64
+    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
+            softmax_ir_kernel_;
+    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
+            softmax_tail_ir_kernel_;
+    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
+            acc_renorm_ir_kernel_;
+#endif
+    bool use_ir_epilogue_ = false;
+
     // Per-thread scratchpad for the execute path's online-softmax working
     // buffers: one block per thread, sized in compile_impl. Replaces the
     // per-iteration std::vectors that would otherwise malloc in the hot loop.
@@ -101,7 +120,7 @@ private:
     int nthr_ = 0;
 
 public:
-    sdp_fused_brgemm_kernel_t() = default;
+    sdp_fused_brgemm_kernel_t();
     ~sdp_fused_brgemm_kernel_t() override;
 
     status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
