@@ -110,6 +110,20 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vload_bcast: dtype not implemented"); }
     }
 
+    // Load `n_elems` uint8 bytes at [base + disp] into the low `n_elems`
+    // element lanes of `d`, each zero-extended to `d`'s element type `dt`.
+    void vload_u8(int d, int base, dim_t disp, int n_elems, data_type_t dt) {
+        const int simd_w = vlen / (int)types::data_type_size(dt);
+        assert(n_elems <= simd_w);
+        MAYBE_UNUSED(simd_w);
+        if (dt != data_type::s32) {
+            JIT_ASSERT(!"vload_u8: dtype not implemented");
+            return;
+        }
+        gen().load_bytes_to_dword_extension(Xbyak::Ymm(d), Xbyak::Reg64(base),
+                (int)disp, /*is_signed=*/false, n_elems, /*zero_vmm=*/true);
+    }
+
     void vadd(int d, int s, data_type_t dt) { // dst += s0
         if (dt == data_type::f32)
             gen().vaddps(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s));
@@ -140,14 +154,16 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vmax: dtype not implemented"); }
     }
 
-    // dst = (s0 != 0) ? all-ones : 0, per lane. `zero` is a scratch register,
-    // cleared here to form the compare operand. The result is a lane mask (all
-    // sign bits set where nonzero) that `vblend` consumes.
-    void vcmp_ne_zero(int d, int s, int zero, data_type_t dt) {
-        if (dt == data_type::f32) {
-            gen().vxorps(Xbyak::Ymm(zero), Xbyak::Ymm(zero), Xbyak::Ymm(zero));
-            gen().vcmpps(Xbyak::Ymm(d), Xbyak::Ymm(s), Xbyak::Ymm(zero),
-                    jit_generator_t::_cmp_neq_uq);
+    // dst = (s0 != 0) ? all-ones : 0, per lane, tested on the integer bit
+    // pattern. The result is a lane mask (all bits set where nonzero).
+    void vcmp_ne_zero(int d, int s, int ws, data_type_t dt) {
+        if (dt == data_type::s32) {
+            gen().vpxor(Xbyak::Ymm(ws), Xbyak::Ymm(ws), Xbyak::Ymm(ws));
+            // d = (s == 0) ? -1 : 0
+            gen().vpcmpeqd(Xbyak::Ymm(d), Xbyak::Ymm(s), Xbyak::Ymm(ws));
+            // ws = -1 (all ones), then invert d: (s != 0) ? -1 : 0
+            gen().vpcmpeqd(Xbyak::Ymm(ws), Xbyak::Ymm(ws), Xbyak::Ymm(ws));
+            gen().vpxor(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(ws));
         } else {
             JIT_ASSERT(!"vcmp_ne_zero: dtype not implemented");
         }

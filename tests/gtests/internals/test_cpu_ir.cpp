@@ -1703,6 +1703,9 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir.vload(x, ptr, 0);
     const vreg_t y = ir.new_vec(data_type::f32);
     ir.vload(y, ptr, simd_w * (dim_t)sizeof(float));
+    const vreg_t u8 = ir.new_vec(data_type::s32);
+    const int i_u8 = ir.n_ops();
+    ir.vload_u8(u8, ptr, 0, simd_w);
 
     const int i_sub = ir.n_ops();
     ir.vsub(x, y);
@@ -1717,9 +1720,9 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     const vreg_t bc = ir.new_vec(data_type::f32);
     const int i_bc = ir.n_ops();
     ir.vbcast(bc, x);
-    const vreg_t cm = ir.new_vec(data_type::f32);
+    const vreg_t cm = ir.new_vec(data_type::s32);
     const int i_cmp = ir.n_ops();
-    ir.vcmp_ne_zero(cm, x);
+    ir.vcmp_ne_zero(cm, u8);
     const vreg_t ws = ir.new_vec(data_type::f32);
     const int i_hm = ir.n_ops();
     ir.vhreduce_max(x, ws);
@@ -1740,10 +1743,14 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir.def_use(ir.ops()[i_bc], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)bc}));
     EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    // vload_u8 overwrites dst and reads the base pointer.
+    ir.def_use(ir.ops()[i_u8], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)u8}));
+    EXPECT_EQ(uses, std::vector<int>({(int)ptr}));
     // vcmp_ne_zero overwrites dst and reads s0.
     ir.def_use(ir.ops()[i_cmp], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)cm}));
-    EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    EXPECT_EQ(uses, std::vector<int>({(int)u8}));
     // vblend reads dst, s0 and the mask, and writes dst.
     ir.def_use(ir.ops()[i_blend], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)x}));
@@ -1968,17 +1975,19 @@ TEST(IntegrationTests, TwoEltwiseAlgorithms) {
     }
 }
 
-// Arguments for the select-mask kernel. `cond` drives a per-lane select
-// between the two candidate vectors `a` and `b`.
+// Arguments for the select-mask kernel. `cond` is an integer condition that
+// drives a per-lane select between the two candidate vectors `a` and `b`:
+// a lane takes `b` where the condition is nonzero and `a` where it is zero.
+// Any nonzero value selects `b`.
 struct select_mask_args_t {
     const float *a;
     const float *b;
-    const float *cond;
+    const int32_t *cond;
     float *c;
 };
 
-// Validates vcmp_ne_zero end to end: a loaded condition vector is turned into a
-// lane mask, then vblend selects `b` where the condition is nonzero and `a`
+// Validates vcmp_ne_zero end to end: an integer condition vector is turned into
+// a lane mask, then vblend selects `b` where the condition is nonzero and `a`
 // where it is zero. This is the select/where primitive of the SDPA attention
 // mask, where the operand order of vblend encodes the keep-on-cond sense.
 TEST(IntegrationTests, SelectMaskFromCondition) {
@@ -1998,11 +2007,11 @@ TEST(IntegrationTests, SelectMaskFromCondition) {
     ir.vload(a, a_ptr, 0);
     const vreg_t b = ir.new_vec(data_type::f32);
     ir.vload(b, b_ptr, 0);
-    const vreg_t cond = ir.new_vec(data_type::f32);
+    const vreg_t cond = ir.new_vec(data_type::s32);
     ir.vload(cond, cond_ptr, 0);
 
     // mask lanes = (cond != 0); a = mask ? b : a  ->  lane = cond ? b : a.
-    const vreg_t mask = ir.new_vec(data_type::f32);
+    const vreg_t mask = ir.new_vec(data_type::s32);
     ir.vcmp_ne_zero(mask, cond);
     ir.vblend(a, b, mask);
     ir.vstore_masked(c_ptr, 0, a, vreg_t::none, simd_w);
@@ -2010,13 +2019,13 @@ TEST(IntegrationTests, SelectMaskFromCondition) {
     ir_kernel_t kernel(ir);
     ASSERT_TRUE(kernel.run_ir_pipeline());
 
-    std::vector<float> a_data(simd_w), b_data(simd_w), cond_data(simd_w),
-            c(simd_w, -12345.f);
+    std::vector<float> a_data(simd_w), b_data(simd_w), c(simd_w, -12345.f);
+    std::vector<int32_t> cond_data(simd_w);
     for (int i = 0; i < simd_w; i++) {
         a_data[i] = (float)(10 + i);
         b_data[i] = (float)(100 + i);
         // Mix zero and nonzero (including a negative) condition lanes.
-        cond_data[i] = (i % 3 == 0) ? 0.f : (float)(i - 4);
+        cond_data[i] = (i % 3 == 0) ? 0 : (i - 4);
     }
 
     select_mask_args_t args {
@@ -2024,9 +2033,96 @@ TEST(IntegrationTests, SelectMaskFromCondition) {
     kernel.run(&args);
 
     for (int i = 0; i < simd_w; i++) {
-        const float expected = cond_data[i] != 0.f ? b_data[i] : a_data[i];
+        const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
         EXPECT_FLOAT_EQ(c[i], expected) << "lane " << i;
     }
+}
+
+// Arguments for the load-u8 select-mask kernel. `cond` holds the uint8
+// condition bytes; per lane, `dst` takes `b` where the byte is nonzero and `a`
+// where it is zero, matching the SDPA attention-mask select.
+struct load_u8_args_t {
+    const uint8_t *cond;
+    const float *a;
+    const float *b;
+    float *dst;
+};
+
+// Validates vload_u8 feeding the select-mask path, the real SDPA attention-mask
+// use: uint8 condition bytes are widened into integer lanes, turned into a lane
+// mask with vcmp_ne_zero, and consumed by vblend to pick `b` where the byte is
+// nonzero and `a` where it is zero.
+TEST(IntegrationTests, LoadU8SelectMask) {
+    SKIP_IF_NO_AVX2();
+
+    const int tail = simd_w - 3;
+
+    ir_t ir;
+    const vreg_t cond_ptr = ir.new_gpr();
+    ir.load_param(cond_ptr, offsetof(load_u8_args_t, cond));
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(load_u8_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(load_u8_args_t, b));
+    const vreg_t dst_ptr = ir.new_gpr();
+    ir.load_param(dst_ptr, offsetof(load_u8_args_t, dst));
+
+    // Full block: widen bytes -> integer lanes -> mask -> select.
+    const vreg_t cond = ir.new_vec(data_type::s32);
+    ir.vload_u8(cond, cond_ptr, 0, simd_w);
+    const vreg_t mask = ir.new_vec(data_type::s32);
+    ir.vcmp_ne_zero(mask, cond);
+    const vreg_t a = ir.new_vec(data_type::f32);
+    ir.vload(a, a_ptr, 0);
+    const vreg_t b = ir.new_vec(data_type::f32);
+    ir.vload(b, b_ptr, 0);
+    ir.vblend(a, b, mask); // a = cond ? b : a
+    ir.vstore_masked(dst_ptr, 0, a, vreg_t::none, simd_w);
+
+    // Tail block: the tail bytes are packed one at a time by the load; lanes
+    // past the tail widen to zero and are dropped by the masked store.
+    const vreg_t condt = ir.new_vec(data_type::s32);
+    ir.vload_u8(condt, cond_ptr, 0, tail);
+    const vreg_t maskt = ir.new_vec(data_type::s32);
+    ir.vcmp_ne_zero(maskt, condt);
+    const vreg_t at = ir.new_vec(data_type::f32);
+    ir.vload(at, a_ptr, 0);
+    const vreg_t bt = ir.new_vec(data_type::f32);
+    ir.vload(bt, b_ptr, 0);
+    ir.vblend(at, bt, maskt);
+    const vreg_t tail_mask = ir.new_mask();
+    ir.set_mask_imm(tail_mask, tail);
+    ir.vstore_masked(
+            dst_ptr, simd_w * (dim_t)sizeof(float), at, tail_mask, tail);
+
+    ir_kernel_t kernel(ir);
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<uint8_t> cond_data(simd_w);
+    std::vector<float> a_data(simd_w), b_data(simd_w);
+    for (int i = 0; i < simd_w; i++) {
+        // Mix zero and nonzero bytes, including values > 127.
+        cond_data[i] = (i % 3 == 0) ? 0 : (uint8_t)(30 + i * 25);
+        a_data[i] = (float)(10 + i);
+        b_data[i] = (float)(100 + i);
+    }
+    std::vector<float> dst(2 * simd_w, -12345.f);
+
+    load_u8_args_t args {
+            cond_data.data(), a_data.data(), b_data.data(), dst.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w; i++) {
+        const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
+        EXPECT_FLOAT_EQ(dst[i], expected) << "full lane " << i;
+    }
+    for (int i = 0; i < tail; i++) {
+        const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
+        EXPECT_FLOAT_EQ(dst[simd_w + i], expected) << "tail lane " << i;
+    }
+    // Lanes past the tail must be left untouched by the masked store.
+    for (int i = tail; i < simd_w; i++)
+        EXPECT_FLOAT_EQ(dst[simd_w + i], -12345.f) << "tail pad lane " << i;
 }
 
 // Arguments for the online-softmax tile epilogue kernel. A tile of `seq_q`
