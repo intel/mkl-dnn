@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+#include "graph/backend/dnnl/platform.hpp"
+
 #include "graph/backend/dnnl/kernels/kernel_base.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp_config.hpp"
 
@@ -62,6 +64,7 @@ using brgemm_kernel_t = dnnl::impl::cpu::x64::brgemm_kernel_t;
 // the KV sequence in tiles with an online-softmax epilogue.
 struct sdp_fused_brgemm_kernel_t : public kernel_base_t {
 private:
+#if DNNL_X64
     std::shared_ptr<subgraph_t> subgraph_;
     memory_planner_t memory_planner_;
 
@@ -72,8 +75,8 @@ private:
 
     // Parsed problem geometry (fp32 GQA), captured at compile time.
     int ndims_ = 0;
-    dim_t batch_ = 0, num_head_kv_ = 0, num_head_q_ = 0, group_head_ = 1,
-          seq_q_ = 0, seq_kv_ = 0, hs_qk_ = 0, hs_v_ = 0;
+    dim_t batch_ = 0, num_head_q_ = 0, group_head_ = 1;
+    dim_t seq_q_ = 0, seq_kv_ = 0, hs_v_ = 0;
     // User strides of Q / K / V / output / select-condition, in elements.
     std::vector<dim_t> q_strides_, k_strides_, v_strides_, o_strides_,
             cond_strides_;
@@ -83,9 +86,8 @@ private:
     bool has_scale_ = false, scale_is_divide_ = false, has_select_ = false,
          select_fusiable_ = false;
     // KV tiling for the online (flash-style) softmax: seq_kv is processed in
-    // tiles of kv_blk_ (last tile is kv_tail_ wide when seq_kv is not a
-    // multiple).
-    dim_t kv_blk_ = 0, kv_tail_ = 0;
+    // tiles of kv_blk_.
+    dim_t kv_blk_ = 0;
     // Internal x64 BRGEMM kernels created in compile_impl. mm1 computes a
     // scores tile Q*K[:, tile]; mm2 computes the P_tile*V[tile, :] partial
     // (beta=0) that the epilogue rescales into the running output. The *_tail_
@@ -118,6 +120,7 @@ private:
     // per-iteration std::vectors that would otherwise malloc in the hot loop.
     registry_t sdp_registry_;
     int nthr_ = 0;
+#endif
 
 public:
     sdp_fused_brgemm_kernel_t();
@@ -167,7 +170,11 @@ public:
 
     DEF_KERNEL_METHOD_STR(sdp_fused_brgemm_kernel_t)
     size_t get_scratchpad_size() const override {
+#if DNNL_X64
         return sdp_registry_.size() * nthr_;
+#else
+        return 0;
+#endif
     }
     DNNL_DISALLOW_COPY_AND_ASSIGN(sdp_fused_brgemm_kernel_t)
 };
