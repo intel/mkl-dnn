@@ -63,12 +63,6 @@ enum mem_key : size_t {
     mem_old_coef,
 };
 
-// KV tiling width for the streaming softmax: K/V are processed in chunks of up
-// to this many columns, bounding the per-thread scores tile ([seq_q, kv_blk]).
-// TODO: this is a fixed heuristic; it should be derived from the cache size,
-// seq_q and head size so the scores/pv tiles stay cache-resident.
-constexpr dim_t kv_block_width = 512;
-
 // Constructor is defined here where the x64 IR kernel type is complete
 // (unique_ptr members to a forward-declared type).
 sdp_fused_brgemm_kernel_t::sdp_fused_brgemm_kernel_t() = default;
@@ -104,6 +98,13 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
             "supports OMP or Threadpool runtime only");
 #else
     using namespace dnnl::impl::cpu::x64;
+
+    // KV tiling width for the streaming softmax: K/V are processed in chunks
+    // of up to this many columns, bounding the per-thread scores tile
+    // ([seq_q, kv_blk]).
+    // TODO: this is a fixed heuristic; it should be derived from the cache
+    // size, seq_q and head size so the scores/pv tiles stay cache-resident.
+    constexpr dim_t kv_block_width = 512;
 
     p_engine_ = make_dnnl_engine(*eng);
 
@@ -165,11 +166,11 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // Capture the geometry and user strides for the execute path.
     ndims_ = static_cast<int>(sdp_cfg_.ndims);
     batch_ = sdp_cfg_.batch_size;
-    num_head_kv_ = sdp_cfg_.num_head_kv;
     num_head_q_ = sdp_cfg_.num_head_q;
-    group_head_ = num_head_q_ / num_head_kv_;
+    const dim_t num_head_kv = sdp_cfg_.num_head_kv;
+    group_head_ = num_head_q_ / num_head_kv;
     seq_q_ = sdp_cfg_.seq_len_q;
-    hs_qk_ = sdp_cfg_.head_size_qk;
+    const dim_t hs_qk = sdp_cfg_.head_size_qk;
     hs_v_ = sdp_cfg_.head_size_v;
 
     const auto &gi = sdp_cfg_.graph_inport;
@@ -192,11 +193,12 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // slice, so one kernel per (full/tail) tile width suffices.
     //   mm1 (beta=0): scores_tile[seq_q, w] = Q[seq_q, hs_qk] * K[hs_qk, w]
     //   mm2 (beta=0): pv_tile[seq_q, hs_v]  = P_tile[seq_q, w] * V[w, hs_v]
-    // where w is the KV tile width (kv_blk_ for full tiles, kv_tail_ for the
-    // last one). mm2 writes a per-tile buffer; the online-softmax epilogue
-    // accumulates it into the running output.
+    // where w is the KV tile width: kv_blk_ for full tiles, and the
+    // seq_kv % kv_blk_ remainder for the last tile. mm2 writes a per-tile
+    // buffer; the online-softmax epilogue accumulates it into the running
+    // output.
     kv_blk_ = nstl::min<dim_t>(seq_kv_, kv_block_width);
-    kv_tail_ = seq_kv_ % kv_blk_;
+    const dim_t kv_tail = seq_kv_ % kv_blk_;
 
     auto create_brgemm
             = [&](brgemm_kernel_t **out, float beta, dim_t M, dim_t N, dim_t K,
@@ -221,7 +223,7 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // stay O(|V|) (matches the decomp kernel's normalize-before accuracy).
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t w) {
-        CHECK(create_brgemm(mm1, /*beta=*/0.0f, seq_q_, w, hs_qk_,
+        CHECK(create_brgemm(mm1, /*beta=*/0.0f, seq_q_, w, hs_qk,
                 /*lda=*/q_strides_[row_dim],
                 /*ldb=*/k_strides_[row_dim],
                 /*ldc=*/w));
@@ -231,9 +233,9 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     };
 
     CHECK(create_tile_kernels(&mm1_kernel_, &mm2_kernel_, kv_blk_));
-    if (kv_tail_ != 0)
+    if (kv_tail != 0)
         CHECK(create_tile_kernels(
-                &mm1_tail_kernel_, &mm2_tail_kernel_, kv_tail_));
+                &mm1_tail_kernel_, &mm2_tail_kernel_, kv_tail));
 
     // Build the JIT online-softmax epilogue (AVX2 IR). One softmax kernel per
     // tile width (full/tail), plus one acc-renormalization kernel. If AVX2 is
@@ -255,9 +257,9 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         status_t st = build_ir_kernel(softmax_ir_kernel_,
                 build_softmax_tile_ir(sq, static_cast<int>(kv_blk_),
                         has_select_, select_fusiable_, cond_stride));
-        if (st == status::success && kv_tail_ != 0)
+        if (st == status::success && kv_tail != 0)
             st = build_ir_kernel(softmax_tail_ir_kernel_,
-                    build_softmax_tile_ir(sq, static_cast<int>(kv_tail_),
+                    build_softmax_tile_ir(sq, static_cast<int>(kv_tail),
                             has_select_, select_fusiable_, cond_stride));
         if (st == status::success)
             st = build_ir_kernel(acc_renorm_ir_kernel_,

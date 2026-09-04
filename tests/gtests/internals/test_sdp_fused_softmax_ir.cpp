@@ -35,7 +35,6 @@
 
 namespace dnnl {
 
-using namespace dnnl::impl;
 using namespace dnnl::impl::cpu::x64;
 using namespace dnnl::impl::cpu::x64::sdp_softmax_ir;
 
@@ -128,7 +127,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileRow) {
     for (int w : {1, 5, 7, simd_w, 9, 15, 2 * simd_w, 17, 23, 4 * simd_w - 1,
                  4 * simd_w}) {
         softmax_ir_kernel_t kernel(build_softmax_tile_ir(1, w));
-        ASSERT_EQ(kernel.create_kernel(), status::success) << "w=" << w;
+        ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
 
         std::vector<float> scores(w), ref(w);
         for (int j = 0; j < w; j++) {
@@ -166,7 +165,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineFirstTile) {
     for (int w : {1, 5, 7, simd_w, 9, 15, 2 * simd_w, 17, 23, 4 * simd_w - 1,
                  4 * simd_w}) {
         softmax_ir_kernel_t kernel(build_softmax_tile_ir(1, w));
-        ASSERT_EQ(kernel.create_kernel(), status::success) << "w=" << w;
+        ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
 
         const float scale = 0.125f;
         // Two KV tiles of `w` scores, threaded through one running state that
@@ -210,7 +209,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     for (int seq_q : {2, 3, 5}) {
         for (int w : {1, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
             softmax_ir_kernel_t kernel(build_softmax_tile_ir(seq_q, w));
-            ASSERT_EQ(kernel.create_kernel(), status::success)
+            ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " w=" << w;
 
             std::vector<float> scores((size_t)seq_q * w);
@@ -273,7 +272,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
             for (int w : {1, 5, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
                 softmax_ir_kernel_t kernel(
                         build_softmax_tile_ir(seq_q, w, true, fusiable));
-                ASSERT_EQ(kernel.create_kernel(), status::success)
+                ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                         << "fusiable=" << fusiable << " seq_q=" << seq_q
                         << " w=" << w;
 
@@ -350,7 +349,7 @@ TEST(SdpFusedSoftmaxIr, AccRenormTile) {
         // ragged tail, so the masked-tail path runs.
         for (int hs : {1, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
             softmax_ir_kernel_t kernel(build_acc_renorm_ir(seq_q, hs));
-            ASSERT_EQ(kernel.create_kernel(), status::success)
+            ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " hs=" << hs;
 
             std::vector<float> acc((size_t)seq_q * hs);
