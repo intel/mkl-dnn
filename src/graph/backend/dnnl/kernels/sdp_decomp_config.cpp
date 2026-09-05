@@ -32,7 +32,8 @@ namespace dnnl_impl {
 
 bool sdp_decomp_config_t::initial_check(const std::shared_ptr<subgraph_t> &sg,
         const std::vector<logical_tensor_t> &inputs,
-        const std::vector<logical_tensor_t> &outputs) {
+        const std::vector<logical_tensor_t> &outputs,
+        bool enforce_thread_ratio) {
     // The order of input logical tensors in inputs is not certain, we need
     // to record the input offset in a certain order of ops.
     CHECK_BOOL(record_input_offset(sg, inputs));
@@ -110,12 +111,16 @@ bool sdp_decomp_config_t::initial_check(const std::shared_ptr<subgraph_t> &sg,
 // TODO: Refine the inequation based on the relationship of cache size and sdp
 // memory footprint requirements.
 #define RATIO 2
-    VCHECK_SDP_DECOMP(batch_size * num_head_q > RATIO * nthr, false,
+    VCHECK_SDP_DECOMP(
+            !enforce_thread_ratio || batch_size * num_head_q > RATIO * nthr,
+            false,
             "Doesn't meet condition for decompose: Batch size * num_head_q "
             "should be larger than ratio * nthr, but got batch_size %ld, "
             "num_head_q %ld, ration %d , nthr %d",
             static_cast<long int>(batch_size),
             static_cast<long int>(num_head_q), RATIO, nthr);
+#else
+    UNUSED(enforce_thread_ratio);
 #endif
     return true;
 }

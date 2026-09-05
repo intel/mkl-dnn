@@ -128,9 +128,12 @@ public:
     // batch_size, num_head and thread num.
     // If the check passes, initialize few members according to inputs
     // If no, return unimplemented status directly and fallback to large kernel
+    // enforce_thread_ratio gates the batch*num_head vs nthr heuristic; callers
+    // that also parallelize over the query sequence (blocked driver) pass false.
     bool initial_check(const std::shared_ptr<subgraph_t> &sg,
             const std::vector<logical_tensor_t> &inputs,
-            const std::vector<logical_tensor_t> &outputs);
+            const std::vector<logical_tensor_t> &outputs,
+            bool enforce_thread_ratio = true);
 
     // Used to construct all params that SDP need
     template <bool quantized = false,

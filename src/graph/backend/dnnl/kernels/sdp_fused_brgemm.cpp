@@ -142,10 +142,11 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // Validate the SDP pattern and extract dims/flags. This fused kernel is
     // fp32-only, so the quantized lowering passes are skipped.
     //
-    // TODO(MFDNN-14723): initial_check() also enforces the sdp_decomp
-    // RATIO/thread gate. The fused kernel will parallelise over the query
-    // sequence, so this must eventually be replaced by a fused-specific check.
-    if (!sdp_cfg_.initial_check(subgraph_, inputs, outputs))
+    // The blocked driver parallelizes over (batch, num_head_q, query blocks),
+    // so it does not need the decomp RATIO/thread gate (which only saturates
+    // threads across batch*num_head); opt out of it.
+    if (!sdp_cfg_.initial_check(subgraph_, inputs, outputs,
+                /*enforce_thread_ratio=*/false))
         return status::unimplemented;
 
     // First iteration only supports the plain fp32 GQA pattern:
