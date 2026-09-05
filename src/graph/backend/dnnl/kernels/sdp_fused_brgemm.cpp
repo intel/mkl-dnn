@@ -282,6 +282,13 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         bp.select_fusiable = select_fusiable_;
         bp.mm1_transpose_b = mm1_transpose_b_;
         bp.softmax_inf_as_zero = softmax_inf_as_zero_;
+        // Compute type (Q/K/V) and output type. The scores/pv tiles stay f32
+        // (BRGEMM accumulates in f32); the driver down-converts P and the
+        // output to these types.
+        bp.mm_dt = static_cast<dnnl::impl::data_type_t>(
+                ltw(inputs[idx_q_]).data_type());
+        bp.out_dt = static_cast<dnnl::impl::data_type_t>(
+                ltw(outputs[0]).data_type());
         // mm1 post-op chain in graph order: scale (binary-mul, scalar rhs,
         // already reciprocated at execute if Divide) then the additive
         // attention mask (binary-add, tensor rhs offset per batch/head/tile).

@@ -42,7 +42,7 @@ namespace graph {
 namespace dnnl_impl {
 
 // -----------------------------------------------------------------------------
-// Decoupled blocked-softmax SDPA driver (x64, fp32).
+// Decoupled blocked-softmax SDPA driver (x64).
 //
 // This is a self-contained compute routine for the fused SDPA:
 //   scores = Q * K^T ; softmax(scale * scores [+ select-mask]) ; out = P * V
@@ -100,6 +100,14 @@ struct sdp_blocked_params_t {
     dim_t seq_kv = 0;
     dim_t head_size_qk = 0;
     dim_t head_size_v = 0;
+
+    // Compute data type for Q/K/V and the mm1/mm2 BRGEMM inputs (f32/f16/bf16).
+    // The scores and pv tiles are always accumulated in f32 (BRGEMM C is f32);
+    // the transposed-K buffer and P (mm2's A operand) are materialised in this
+    // type, and the softmax runs on the f32 scores.
+    dnnl::impl::data_type_t mm_dt = dnnl::impl::data_type::f32;
+    // SDPA output (result) data type; the f32 pv tile is down-converted to it.
+    dnnl::impl::data_type_t out_dt = dnnl::impl::data_type::f32;
 
     // User strides in elements. Q / output / select-condition carry the group
     // axis; K / V have group extent 1 (broadcast over the group).
@@ -169,7 +177,7 @@ public:
     // the base pointer to execute().
     size_t scratch_total(int nthr) const {
         return scratch_per_thread_ * static_cast<size_t>(nthr)
-                + kt_global_bytes_;
+                + kt_global_bytes_ + vt_global_bytes_;
     }
 
     // Run the blocked SDPA. scratch_base points at a buffer of at least
@@ -199,6 +207,12 @@ private:
     size_t kt_global_bytes_ = 0;
     dim_t num_head_kv_ = 0;
 
+    // bf16/f16 need mm2's V operand VNNI-packed too (the brgemm B for mm2). V is
+    // packed ONCE per (batch, kv_head) into a shared [batch x num_head_kv x
+    // rnd_up(seq_kv, k_pack) x hs_v] buffer that follows the transposed-K
+    // buffer. 0 for f32 (mm2 reads the user V in place). k_pack = 4/dt_size.
+    size_t vt_global_bytes_ = 0;
+
     // mm1 B must be consumed row-major as a dense [head_size_qk, seq_kv] tile,
     // i.e. with the seq_kv axis unit-stride. Whether that holds is decided from
     // the K tensor's PHYSICAL strides, not the graph transpose_b attr: a K that
@@ -211,6 +225,13 @@ private:
     dim_t k_seq_stride_ = 0;
     dim_t k_hs_stride_ = 0;
 
+    // BRGEMM B VNNI pack factor (consecutive reduction elements interleaved):
+    // 1 = plain B (f32, and f16 on the non-AMX avx512_core_fp16 FMA path), 2 =
+    // VNNI2 (bf16 always; f16 only on AMX-FP16 tiles). Decided in init from the
+    // compute type AND the ISA the ukernel will use; execute reads it back so
+    // the pack layout and the kernel's expected layout stay in sync.
+    dim_t b_k_pack_ = 1;
+
     // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
     // mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
     // *_tail handle the ragged last query tile (m = q_tail_).
@@ -218,6 +239,20 @@ private:
     cpu::x64::brgemm_kernel_t *mm2_kernel_ = nullptr;
     cpu::x64::brgemm_kernel_t *mm1_tail_kernel_ = nullptr;
     cpu::x64::brgemm_kernel_t *mm2_tail_kernel_ = nullptr;
+
+    // AMX tile configuration for a BRGEMM kernel. For non-AMX ISAs (e.g. f32 on
+    // avx512_core) need_config is false and wsp_size is 0. For AMX (bf16/f16 on
+    // avx512_core_amx*), the palette must be loaded via amx_tile_configure()
+    // before the kernel runs and each thread needs a wsp_size-byte tile-store
+    // scratch passed as the BRGEMM scratch argument.
+    struct brgemm_amx_cfg_t {
+        bool need_config = false;
+        size_t wsp_size = 0;
+        char palette[64] = {};
+    };
+    brgemm_amx_cfg_t mm1_amx_, mm2_amx_, mm1_tail_amx_, mm2_tail_amx_;
+    // Per-thread AMX tile-store scratch (max wsp over all kernels), 0 if none.
+    size_t amx_wsp_bytes_ = 0;
 
     // Reused vectorized softmax: the jit softmax kernel (max/exp/normalize over
     // the seq_kv axis, per query row) plus the primitive descriptor it reads
