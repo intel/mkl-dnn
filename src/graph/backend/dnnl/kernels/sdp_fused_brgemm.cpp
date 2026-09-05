@@ -127,6 +127,9 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
             matmul_ops.push_back(op.get());
         if (op->get_kind() == graph::op_kind::SoftMax) softmax_op = op.get();
     }
+    if (softmax_op && softmax_op->has_attr(op_attr::mode))
+        softmax_inf_as_zero_ = softmax_op->get_attr<std::string>(op_attr::mode)
+                == "inf_as_zero";
     // mm1 is the QK^T matmul: the one that does not consume the softmax output
     // (that is mm2 = P*V).
     for (op_t *mm : matmul_ops) {
@@ -278,6 +281,7 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         bp.has_select = has_select_;
         bp.select_fusiable = select_fusiable_;
         bp.mm1_transpose_b = mm1_transpose_b_;
+        bp.softmax_inf_as_zero = softmax_inf_as_zero_;
         // mm1 post-op chain in graph order: scale (binary-mul, scalar rhs,
         // already reciprocated at execute if Divide) then the additive
         // attention mask (binary-add, tensor rhs offset per batch/head/tile).

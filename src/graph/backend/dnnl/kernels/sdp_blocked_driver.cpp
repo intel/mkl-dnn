@@ -263,7 +263,12 @@ status_t sdp_blocked_driver_t::init(
             softmax_desc_t sd {};
             sd.primitive_kind = primitive_kind::softmax;
             sd.prop_kind = prop_kind::forward_inference;
-            sd.alg_kind = alg_kind::softmax_accurate;
+            // inf_as_zero: a fully-masked row (all -inf) must produce an
+            // all-zero row instead of NaN. The jit softmax kernel implements
+            // this natively for the softmax_accurate_inf_as_zero alg.
+            sd.alg_kind = p_.softmax_inf_as_zero
+                    ? alg_kind::softmax_accurate_inf_as_zero
+                    : alg_kind::softmax_accurate;
             sd.src_desc = sm_md;
             sd.dst_desc = sm_md;
             sd.softmax_axis = 1;
@@ -539,7 +544,15 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                     srow[j] = e;
                     row_sum += e;
                 }
-                const float inv = row_sum > 0.0f ? 1.0f / row_sum : 0.0f;
+                // A fully-masked row (row_max == -inf) has row_sum == 0. Under
+                // inf_as_zero it becomes an all-zero row; otherwise standard
+                // softmax yields NaN. Any finite row_max gives row_sum >= 1.
+                const float inv = row_sum > 0.0f
+                        ? 1.0f / row_sum
+                        : (p_.softmax_inf_as_zero
+                                          ? 0.0f
+                                          : std::numeric_limits<
+                                                    float>::quiet_NaN());
                 for (dim_t j = 0; j < seq_kv; ++j)
                     srow[j] *= inv;
             }

@@ -90,6 +90,10 @@ private:
     // and the driver transposes it in the BRGEMM; otherwise K is [.., head_size,
     // seq_kv] and consumed as is.
     bool mm1_transpose_b_ = false;
+    // SoftMax "inf_as_zero" mode: a fully-masked row (all -inf inputs) yields an
+    // all-zero probability row instead of NaN. Mirrors the graph SoftMax op's
+    // `mode` attribute; drives the softmax primitive alg_kind in the driver.
+    bool softmax_inf_as_zero_ = false;
     // KV tiling for the online (flash-style) softmax: seq_kv is processed in
     // tiles of kv_blk_.
     dim_t kv_blk_ = 0;

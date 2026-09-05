@@ -114,6 +114,11 @@ struct sdp_blocked_params_t {
     // and the mm1 BRGEMM transposes it; otherwise K is [.., head_size, seq_kv].
     bool mm1_transpose_b = false;
 
+    // SoftMax "inf_as_zero" mode: a fully-masked row (all -inf) produces an
+    // all-zero probability row instead of NaN. Selects the softmax primitive
+    // alg_kind (softmax_accurate_inf_as_zero vs softmax_accurate).
+    bool softmax_inf_as_zero = false;
+
     // The mm1 (QK^T) post-op chain, carried verbatim from the graph in graph
     // order (scale / soft-cap / attention-mask; the select is handled
     // separately). Mirrors decomp's sub_matmul1_attr post-ops but sliced to the
