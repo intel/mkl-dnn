@@ -218,20 +218,23 @@ status_t sdp_blocked_driver_t::init(
 
     // Per-thread scratch: one score tile [q_block x seq_kv] plus one pv tile
     // [q_block x hs_v]. The pv tile lets mm2 write a dense output that is then
-    // scattered to the (possibly strided) user output. When the QK^T uses
-    // transpose_b an extra dense [hs_qk x seq_kv] buffer holds the transposed
-    // K tile that mm1 consumes.
+    // scattered to the (possibly strided) user output.
     const size_t scores_bytes
             = static_cast<size_t>(q_block_) * seq_kv * sizeof(float);
     const size_t pv_bytes
             = static_cast<size_t>(q_block_) * hs_v * sizeof(float);
-    const size_t kt_bytes = p_.mm1_transpose_b
-            ? static_cast<size_t>(hs_qk) * seq_kv * sizeof(float)
-            : 0;
-    scratch_per_thread_
-            = align64(align64(align64(scores_bytes) + pv_bytes) + kt_bytes);
+    scratch_per_thread_ = align64(align64(scores_bytes) + pv_bytes);
 
     nthr_ = dnnl_get_max_threads();
+
+    // transpose_b QK^T: mm1 needs a dense [hs_qk, seq_kv] B tile per head, but
+    // the brgemm ukernel has no transposed-B mode. Transpose the whole K tensor
+    // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
+    // buffer that follows the per-thread blocks; kt_global_bytes_ sizes it.
+    num_head_kv_ = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
+    if (p_.mm1_transpose_b && num_head_kv_ > 0)
+        kt_global_bytes_ = static_cast<size_t>(p_.batch) * num_head_kv_ * hs_qk
+                * seq_kv * sizeof(float);
 
     // Reuse the vectorized jit softmax kernel for the max/exp/normalize over
     // the seq_kv axis. Build a plain 2D [q_block x seq_kv] f32 softmax pd
@@ -322,14 +325,36 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     const size_t block_size = scratch_per_thread_;
     const size_t scores_bytes
             = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
-    // The transposed-K buffer (transpose_b only) follows the scores and pv
-    // tiles; its offset mirrors the init-time scratch layout.
     const bool transpose_b = p_.mm1_transpose_b;
     const dim_t hs_qk = p_.head_size_qk;
-    const size_t pv_bytes = static_cast<size_t>(q_block) * hs_v * sizeof(float);
-    const size_t kt_off = align64(scores_bytes + pv_bytes);
     const dim_t k_row = p_.k_strides[row_dim];
     const dim_t k_col = p_.k_strides[ndims - 1];
+
+    // transpose_b QK^T: the mm1 B tile must be dense [hs_qk, seq_kv], but the
+    // brgemm ukernel has no transposed-B mode. Transpose the whole K tensor
+    // ONCE, up front, into the shared buffer that follows the per-thread blocks
+    // (each head becomes a dense [hs_qk, seq_kv] tile, mm1 reads it ldb=seq_kv).
+    // Doing it once per (batch, kv_head) avoids the redundant per-query-tile
+    // transpose. TODO(S3): swap this scalar pass for create_brgemm_matmul_copy_b
+    // (transposed_B) once VNNI-blocked B is needed for bf16/f16/int8/fp8 on AMX.
+    const dim_t num_head_kv = num_head_kv_;
+    const size_t kt_head_elems = static_cast<size_t>(hs_qk) * seq_kv;
+    float *kt_all = transpose_b
+            ? reinterpret_cast<float *>(static_cast<char *>(scratch_base)
+                      + static_cast<size_t>(nthr) * block_size)
+            : nullptr;
+    if (transpose_b) {
+        parallel_nd(p_.batch, num_head_kv, [&](dim_t bo, dim_t kvh) {
+            const float *kp = reinterpret_cast<const float *>(k_base
+                    + kv_side_off(p_.k_strides, bo, kvh) * sizeof(float));
+            float *kt = kt_all
+                    + (static_cast<size_t>(bo) * num_head_kv + kvh)
+                            * kt_head_elems;
+            for (dim_t kv = 0; kv < seq_kv; ++kv)
+                for (dim_t h = 0; h < hs_qk; ++h)
+                    kt[h * seq_kv + kv] = kp[kv * k_row + h * k_col];
+        });
+    }
 
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
             [&](int tid, int, dim_t bo, dim_t bi, dim_t qb) {
@@ -364,17 +389,14 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
         const auto *mm2 = is_tail ? mm2_tail_kernel_ : mm2_kernel_;
 
         // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv].
-        // The brgemm ukernel has no transposed-B mode, so a transpose_b QK^T
-        // is served by transposing the natural K tile [seq_kv, hs_qk] into a
-        // dense [hs_qk, seq_kv] scratch buffer that mm1 reads with ldb=seq_kv.
+        // For a transpose_b QK^T, K was transposed up front into kt_all; point
+        // B at this (batch, kv_head)'s dense [hs_qk, seq_kv] tile. Otherwise K
+        // is already [hs_qk, seq_kv] and read in place.
         const float *b_ptr = k_ptr;
-        if (transpose_b) {
-            float *kt = reinterpret_cast<float *>(my_scratch + kt_off);
-            for (dim_t kv = 0; kv < seq_kv; ++kv)
-                for (dim_t h = 0; h < hs_qk; ++h)
-                    kt[h * seq_kv + kv] = k_ptr[kv * k_row + h * k_col];
-            b_ptr = kt;
-        }
+        if (transpose_b)
+            b_ptr = kt_all
+                    + (static_cast<size_t>(bo) * num_head_kv + kvh)
+                            * kt_head_elems;
 
         brgemm_batch_element_t batch1;
         batch1.ptr.A = q_ptr;

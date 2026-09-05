@@ -257,7 +257,7 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         }
         CHECK(blocked_driver_.init(bp, eng));
         nthr_ = blocked_driver_.nthr();
-        blocked_scratch_total_ = blocked_driver_.scratch_per_thread() * nthr_;
+        blocked_scratch_total_ = blocked_driver_.scratch_total(nthr_);
         return status::success;
     }
 

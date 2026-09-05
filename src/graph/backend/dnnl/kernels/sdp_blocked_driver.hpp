@@ -158,8 +158,18 @@ public:
     size_t scratch_per_thread() const { return scratch_per_thread_; }
     int nthr() const { return nthr_; }
 
+    // Total scratch in bytes: nthr per-thread blocks plus, for a transpose_b
+    // QK^T, one shared [batch x num_head_kv x head_size_qk x seq_kv] buffer
+    // holding K transposed once (see execute). The caller books this and passes
+    // the base pointer to execute().
+    size_t scratch_total(int nthr) const {
+        return scratch_per_thread_ * static_cast<size_t>(nthr)
+                + kt_global_bytes_;
+    }
+
     // Run the blocked SDPA. scratch_base points at a buffer of at least
-    // nthr() * scratch_per_thread() bytes; each thread slices its own block.
+    // scratch_total(nthr()) bytes; each thread slices its own per-thread block
+    // and the shared transposed-K buffer (if any) follows them.
     status_t execute(const sdp_blocked_run_args_t &args, void *scratch_base,
             int nthr) const;
 
@@ -169,6 +179,20 @@ private:
     dim_t q_tail_ = 0; // seq_q % q_block_ (0 if evenly divided)
     size_t scratch_per_thread_ = 0;
     int nthr_ = 0;
+
+    // transpose_b QK^T: K is stored [.., seq_kv, head_size_qk] but mm1 needs a
+    // dense [head_size_qk, seq_kv] B tile (the brgemm ukernel has no transposed
+    // B). K is transposed ONCE for the whole tensor, by a scalar
+    // once-per-(batch,kv_head) pre-pass, into a shared buffer that follows the
+    // per-thread blocks. Its byte size is kt_global_bytes_ (0 when !transpose_b).
+    // TODO(S3 dtypes): for bf16/f16/int8/fp8 on AMX/AVX-VNNI, replace this plain
+    // transpose with matmul's create_brgemm_matmul_copy_b (transposed_B) so B
+    // lands in the VNNI-blocked layout the AMX tiles need, and reconfigure mm1's
+    // brgemm to read the blocked B (walk N in n_blk chunks / LDB2). For fp32
+    // (no AMX, VNNI granularity 1) the plain transpose already yields the
+    // ISA-optimal B layout, so this stays.
+    size_t kt_global_bytes_ = 0;
+    dim_t num_head_kv_ = 0;
 
     // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
     // mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
