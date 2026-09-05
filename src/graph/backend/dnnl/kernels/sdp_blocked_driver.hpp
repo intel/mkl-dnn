@@ -110,6 +110,10 @@ struct sdp_blocked_params_t {
     // fill elsewhere; non-fusiable (p1) is the inverse.
     bool select_fusiable = false;
 
+    // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
+    // and the mm1 BRGEMM transposes it; otherwise K is [.., head_size, seq_kv].
+    bool mm1_transpose_b = false;
+
     // The mm1 (QK^T) post-op chain, carried verbatim from the graph in graph
     // order (scale / soft-cap / attention-mask; the select is handled
     // separately). Mirrors decomp's sub_matmul1_attr post-ops but sliced to the

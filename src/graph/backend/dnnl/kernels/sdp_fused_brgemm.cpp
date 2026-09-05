@@ -114,9 +114,29 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     // Detect whether the scale op is a division before lowering rewrites the
-    // graph op kinds into dnnl_binary.
+    // graph op kinds into dnnl_binary. Also capture mm1's transpose_b: the
+    // blocked driver reads K straight from the user tensor, so it must honour
+    // the QK^T transpose itself (the permute pass only rewrites the internal
+    // matmul's operands, not the raw input the driver consumes).
+    op_t *softmax_op = nullptr;
+    std::vector<op_t *> matmul_ops;
     for (const auto &op : subgraph_->get_ops()) {
         if (op->get_kind() == graph::op_kind::Divide) scale_is_divide_ = true;
+        if (op->get_kind() == graph::op_kind::MatMul)
+            matmul_ops.push_back(op.get());
+        if (op->get_kind() == graph::op_kind::SoftMax) softmax_op = op.get();
+    }
+    // mm1 is the QK^T matmul: the one that does not consume the softmax output
+    // (that is mm2 = P*V).
+    for (op_t *mm : matmul_ops) {
+        bool consumes_softmax = false;
+        for (size_t i = 0; i < mm->num_inputs(); ++i) {
+            const auto &in = mm->get_input_value(i);
+            if (in->has_producer() && &in->get_producer() == softmax_op)
+                consumes_softmax = true;
+        }
+        if (!consumes_softmax && mm->has_attr(op_attr::transpose_b))
+            mm1_transpose_b_ = mm->get_attr<bool>(op_attr::transpose_b);
     }
 
     // Validate the SDP pattern and extract dims/flags. This fused kernel is
@@ -133,10 +153,9 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     has_scale_ = sdp_cfg_.has_scale;
     has_select_ = sdp_cfg_.has_select;
     select_fusiable_ = sdp_cfg_.select_fusiable;
+    has_mask_ = sdp_cfg_.has_attention_mask;
     VCHECK_SDP_FUSED_BRGEMM(!sdp_cfg_.has_soft_capping, status::unimplemented,
             "fused kernel does not support soft-capping yet");
-    VCHECK_SDP_FUSED_BRGEMM(!sdp_cfg_.has_attention_mask, status::unimplemented,
-            "fused kernel does not support additive mask yet");
 
     subgraph_visualizer_t vis(part->id(), [this](const value_t *val) {
         return this->memory_planner_.get_memory_info(val);
@@ -180,13 +199,16 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     idx_scale_ = gi[sdp_decomp_config_t::mm1_scale];
     idx_cond_ = gi[sdp_decomp_config_t::select_condition];
     idx_fill_ = gi[sdp_decomp_config_t::select_other_input];
+    idx_mask_ = gi[sdp_decomp_config_t::mm1_add];
 
     q_strides_ = ltw(inputs[idx_q_]).vstrides();
     k_strides_ = ltw(inputs[idx_k_]).vstrides();
     v_strides_ = ltw(inputs[idx_v_]).vstrides();
     o_strides_ = ltw(outputs[0]).vstrides();
-    // K is stored as [.., head_size, seq_kv]; its last dim is seq_kv.
-    seq_kv_ = ltw(inputs[idx_k_]).vdims()[ndims_ - 1];
+    // K holds seq_kv on its last axis when consumed as K^T (transpose_b == 0),
+    // otherwise on its second-to-last axis (natural [.., seq_kv, head_size]).
+    seq_kv_ = mm1_transpose_b_ ? ltw(inputs[idx_k_]).vdims()[ndims_ - 2]
+                               : ltw(inputs[idx_k_]).vdims()[ndims_ - 1];
     if (has_select_) cond_strides_ = ltw(inputs[idx_cond_]).vstrides();
 
     // Alternative path: the decoupled query-axis blocked / two-pass-softmax
@@ -209,10 +231,11 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         bp.cond_strides = cond_strides_;
         bp.has_select = has_select_;
         bp.select_fusiable = select_fusiable_;
-        // mm1 post-op chain. Currently only the QK scale is supported; it is
-        // applied as a binary-mul with a scalar rhs (already reciprocated at
-        // execute if the graph used Divide). Soft-cap / attention-mask entries
-        // will be appended here in graph order as they are enabled.
+        bp.mm1_transpose_b = mm1_transpose_b_;
+        // mm1 post-op chain in graph order: scale (binary-mul, scalar rhs,
+        // already reciprocated at execute if Divide) then the additive
+        // attention mask (binary-add, tensor rhs offset per batch/head/tile).
+        // Soft-cap entries will be appended here as they are enabled.
         if (has_scale_) {
             sdp_mm1_post_op_t sc;
             sc.alg = dnnl::impl::alg_kind::binary_mul;
@@ -220,6 +243,17 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
             sc.rhs_is_scalar = true;
             sc.rhs_dt = dnnl::impl::data_type::f32;
             bp.mm1_post_ops.push_back(sc);
+        }
+        if (has_mask_) {
+            sdp_mm1_post_op_t mk;
+            mk.alg = dnnl::impl::alg_kind::binary_add;
+            mk.is_binary = true;
+            mk.rhs_is_scalar = false;
+            mk.rhs_dt = static_cast<dnnl::impl::data_type_t>(
+                    ltw(inputs[idx_mask_]).data_type());
+            mk.rhs_dims = ltw(inputs[idx_mask_]).vdims();
+            mk.rhs_strides = ltw(inputs[idx_mask_]).vstrides();
+            bp.mm1_post_ops.push_back(mk);
         }
         CHECK(blocked_driver_.init(bp, eng));
         nthr_ = blocked_driver_.nthr();
@@ -366,6 +400,8 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
         // the QK scale is present today; scale_val is a stable local that
         // outlives the execute call below.
         if (has_scale_) args.mm1_post_op_rhs.push_back(&scale_val);
+        if (has_mask_)
+            args.mm1_post_op_rhs.push_back(inputs[idx_mask_].get_data_handle());
         auto scratchpad = std::make_shared<scratchpad_t>(
                 scratchpad_buf, blocked_scratch_total_, p_engine_);
         return blocked_driver_.execute(args, scratchpad->get_buffer(), nthr_);

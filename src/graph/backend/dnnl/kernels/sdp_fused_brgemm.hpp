@@ -83,9 +83,13 @@ private:
             cond_strides_;
     // Indices into the external inputs vector (from sdp_cfg_.graph_inport).
     int idx_q_ = -1, idx_k_ = -1, idx_v_ = -1, idx_scale_ = -1, idx_cond_ = -1,
-        idx_fill_ = -1;
+        idx_fill_ = -1, idx_mask_ = -1;
     bool has_scale_ = false, scale_is_divide_ = false, has_select_ = false,
-         select_fusiable_ = false;
+         select_fusiable_ = false, has_mask_ = false;
+    // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
+    // and the driver transposes it in the BRGEMM; otherwise K is [.., head_size,
+    // seq_kv] and consumed as is.
+    bool mm1_transpose_b_ = false;
     // KV tiling for the online (flash-style) softmax: seq_kv is processed in
     // tiles of kv_blk_.
     dim_t kv_blk_ = 0;

@@ -56,17 +56,18 @@ inline size_t align64(size_t n) {
 status_t create_brgemm(brgemm_kernel_t **out, float beta, dim_t M, dim_t N,
         dim_t K, dim_t lda, dim_t ldb, dim_t ldc,
         const std::vector<sdp_mm1_post_op_t> *post_ops = nullptr,
-        bool select_postop = false) {
+        bool select_postop = false, bool transB = false) {
     brgemm_desc_t brg;
     CHECK(brgemm_desc_init(&brg, isa_undef, brgemm_addr,
             dnnl::impl::data_type::f32, dnnl::impl::data_type::f32,
-            /*transA=*/false, /*transB=*/false, brgemm_row_major,
+            /*transA=*/false, transB, brgemm_row_major,
             /*alpha=*/1.0f, beta, lda, ldb, ldc, M, N, K, /*strides=*/nullptr));
     // Fold the mm1 post-op chain (scale / soft-cap / attention-mask) and the
     // select-mask into the GEMM store as binary/eltwise post-ops, mirroring the
-    // decomp path. A scalar binary rhs is a [1 x 1] broadcast; a tensor rhs is a
-    // [M x N] tile; select is binary_select with a scalar fill rhs and a dense
-    // [M x N] condition rhs. Runtime pointers are supplied per execute call.
+    // decomp path. A scalar binary rhs is a [1 x 1] broadcast; a tensor rhs is
+    // its per-tile [rows x cols] slice (a broadcast axis stays 1); select is
+    // binary_select with a scalar fill rhs and a dense [M x N] condition rhs.
+    // Runtime pointers are supplied per execute call.
     const bool has_chain = post_ops && !post_ops->empty();
     if (has_chain || select_postop) {
         primitive_attr_t attr;
@@ -79,10 +80,22 @@ status_t create_brgemm(brgemm_kernel_t **out, float beta, dim_t M, dim_t N,
                     continue;
                 }
                 memory_desc_t rhs_md;
-                dims_t rhs_dims = {
-                        pop.rhs_is_scalar ? 1 : M, pop.rhs_is_scalar ? 1 : N};
-                CHECK(memory_desc_init_by_tag(
-                        rhs_md, 2, rhs_dims, pop.rhs_dt, format_tag::ab));
+                if (pop.rhs_is_scalar) {
+                    dims_t rhs_dims = {1, 1};
+                    CHECK(memory_desc_init_by_tag(
+                            rhs_md, 2, rhs_dims, pop.rhs_dt, format_tag::ab));
+                } else {
+                    // Per-tile slice of the user rhs: keep broadcast axes at 1
+                    // and carry the real row/column strides.
+                    const int rn = static_cast<int>(pop.rhs_dims.size());
+                    const dim_t rows = pop.rhs_dims[rn - 2] == 1 ? 1 : M;
+                    const dim_t cols = pop.rhs_dims[rn - 1] == 1 ? 1 : N;
+                    dims_t rhs_dims = {rows, cols};
+                    dims_t rhs_str = {
+                            pop.rhs_strides[rn - 2], pop.rhs_strides[rn - 1]};
+                    CHECK(memory_desc_init_by_strides(
+                            rhs_md, 2, rhs_dims, pop.rhs_dt, rhs_str));
+                }
                 CHECK(po.append_binary(pop.alg, &rhs_md));
             }
         }
@@ -148,11 +161,16 @@ status_t sdp_blocked_driver_t::init(
     // the user strides (row_dim = the M/K row axis), scores/pv are dense.
     //   mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
     //   mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
+    // The brgemm ukernel does not support a transposed B operand, so when the
+    // graph's QK^T uses transpose_b the driver first transposes the natural K
+    // tile [seq_kv, hs_qk] into a dense [hs_qk, seq_kv] scratch buffer (see
+    // execute) and mm1 reads that with ldb = seq_kv.
+    const dim_t mm1_ldb = p_.mm1_transpose_b ? seq_kv : p_.k_strides[row_dim];
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t m,
                       bool select_postop) -> status_t {
         CHECK(create_brgemm(mm1, /*beta=*/0.0f, m, seq_kv, hs_qk,
-                /*lda=*/p_.q_strides[row_dim], /*ldb=*/p_.k_strides[row_dim],
+                /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop));
         CHECK(create_brgemm(mm2, /*beta=*/0.0f, m, hs_v, seq_kv,
                 /*lda=*/seq_kv, /*ldb=*/p_.v_strides[row_dim], /*ldc=*/hs_v));
@@ -200,12 +218,18 @@ status_t sdp_blocked_driver_t::init(
 
     // Per-thread scratch: one score tile [q_block x seq_kv] plus one pv tile
     // [q_block x hs_v]. The pv tile lets mm2 write a dense output that is then
-    // scattered to the (possibly strided) user output.
+    // scattered to the (possibly strided) user output. When the QK^T uses
+    // transpose_b an extra dense [hs_qk x seq_kv] buffer holds the transposed
+    // K tile that mm1 consumes.
     const size_t scores_bytes
             = static_cast<size_t>(q_block_) * seq_kv * sizeof(float);
     const size_t pv_bytes
             = static_cast<size_t>(q_block_) * hs_v * sizeof(float);
-    scratch_per_thread_ = align64(align64(scores_bytes) + pv_bytes);
+    const size_t kt_bytes = p_.mm1_transpose_b
+            ? static_cast<size_t>(hs_qk) * seq_kv * sizeof(float)
+            : 0;
+    scratch_per_thread_
+            = align64(align64(align64(scores_bytes) + pv_bytes) + kt_bytes);
 
     nthr_ = dnnl_get_max_threads();
 
@@ -298,6 +322,14 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     const size_t block_size = scratch_per_thread_;
     const size_t scores_bytes
             = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
+    // The transposed-K buffer (transpose_b only) follows the scores and pv
+    // tiles; its offset mirrors the init-time scratch layout.
+    const bool transpose_b = p_.mm1_transpose_b;
+    const dim_t hs_qk = p_.head_size_qk;
+    const size_t pv_bytes = static_cast<size_t>(q_block) * hs_v * sizeof(float);
+    const size_t kt_off = align64(scores_bytes + pv_bytes);
+    const dim_t k_row = p_.k_strides[row_dim];
+    const dim_t k_col = p_.k_strides[ndims - 1];
 
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
             [&](int tid, int, dim_t bo, dim_t bi, dim_t qb) {
@@ -332,9 +364,21 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
         const auto *mm2 = is_tail ? mm2_tail_kernel_ : mm2_kernel_;
 
         // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv].
+        // The brgemm ukernel has no transposed-B mode, so a transpose_b QK^T
+        // is served by transposing the natural K tile [seq_kv, hs_qk] into a
+        // dense [hs_qk, seq_kv] scratch buffer that mm1 reads with ldb=seq_kv.
+        const float *b_ptr = k_ptr;
+        if (transpose_b) {
+            float *kt = reinterpret_cast<float *>(my_scratch + kt_off);
+            for (dim_t kv = 0; kv < seq_kv; ++kv)
+                for (dim_t h = 0; h < hs_qk; ++h)
+                    kt[h * seq_kv + kv] = k_ptr[kv * k_row + h * k_col];
+            b_ptr = kt;
+        }
+
         brgemm_batch_element_t batch1;
         batch1.ptr.A = q_ptr;
-        batch1.ptr.B = k_ptr;
+        batch1.ptr.B = b_ptr;
         if (has_mm1_postops) {
             // Build the binary post-op rhs table in chain order: one
             // entry per binary in mm1_post_ops (a scalar rhs is used as
@@ -348,10 +392,15 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                 const char *base
                         = static_cast<const char *>(args.mm1_post_op_rhs[pi]);
                 if (!pop.rhs_is_scalar) {
+                    // Offset the rhs base by (batch, head, query-tile) using
+                    // its OWN rank: a 4D rhs indexes the flat head bi, a 5D rhs
+                    // splits it into (kv_head, group); broadcast axes (dim==1)
+                    // contribute nothing. The query row is offset by q0.
                     const auto &d = pop.rhs_dims;
                     const auto &s = pop.rhs_strides;
+                    const int rn = static_cast<int>(d.size());
                     dim_t off = 0;
-                    if (ndims == 4) {
+                    if (rn == 4) {
                         if (d[0] != 1) off += bo * s[0];
                         if (d[1] != 1) off += bi * s[1];
                     } else {
@@ -359,7 +408,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                         if (d[1] != 1) off += kvh * s[1];
                         if (d[2] != 1) off += gid * s[2];
                     }
-                    if (d[row_dim] != 1) off += q0 * s[row_dim];
+                    if (d[rn - 2] != 1) off += q0 * s[rn - 2];
                     base += off * types::data_type_size(pop.rhs_dt);
                 }
                 rhs[n++] = base;
@@ -368,9 +417,17 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                 rhs[n++] = &fill;
                 rhs[n++] = c_ptr;
             }
+            // Position-dependent binary broadcasts (e.g. a per-key attention
+            // mask, or the dense select condition) address their rhs from the
+            // output element's logical offset, computed by the injector as
+            // (dst_element - data_C_ptr_) / dt_size. The scores tile is dense
+            // [M, seq_kv] and starts at logical (0, 0), so data_C_ptr_ is the
+            // tile base and the remaining logical offsets are zero.
             brgemm_post_ops_data_t pod(
                     /*bias=*/nullptr, /*binary_post_ops_rhs=*/rhs,
-                    /*oc_logical_off=*/0);
+                    /*oc_logical_off=*/0, /*dst_row_logical_off=*/0,
+                    /*data_C_ptr_=*/reinterpret_cast<const char *>(scores),
+                    /*first_mb_matrix_addr_off=*/0);
             brgemm_kernel_execute_postops(mm1, 1, &batch1,
                     /*ptr_C=*/scores, /*ptr_D=*/scores, pod, nullptr);
         } else {
