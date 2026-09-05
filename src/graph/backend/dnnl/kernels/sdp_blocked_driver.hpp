@@ -194,6 +194,18 @@ private:
     size_t kt_global_bytes_ = 0;
     dim_t num_head_kv_ = 0;
 
+    // mm1 B must be consumed row-major as a dense [head_size_qk, seq_kv] tile,
+    // i.e. with the seq_kv axis unit-stride. Whether that holds is decided from
+    // the K tensor's PHYSICAL strides, not the graph transpose_b attr: a K that
+    // is logically [.., head_size_qk, seq_kv] (transpose_b == false) but stored
+    // with head_size_qk contiguous (a transposed view) still needs a transpose,
+    // exactly like the natural [.., seq_kv, head_size_qk] transpose_b == true
+    // case. k_seq_stride_ / k_hs_stride_ are the element strides of the seq_kv
+    // and head_size_qk axes; mm1_transpose_k_ is set when k_seq_stride_ != 1.
+    bool mm1_transpose_k_ = false;
+    dim_t k_seq_stride_ = 0;
+    dim_t k_hs_stride_ = 0;
+
     // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
     // mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
     // *_tail handle the ragged last query tile (m = q_tail_).

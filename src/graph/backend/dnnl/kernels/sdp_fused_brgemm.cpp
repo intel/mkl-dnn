@@ -18,6 +18,7 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <unordered_set>
 
 #include "common/compiler_workarounds.hpp"
 #include "common/dnnl_thread.hpp"
@@ -183,6 +184,44 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         out = subgraph_->outs_[i];
     }
 
+    // Locate mm2 (the P*V matmul) in the lowered subgraph and capture ITS
+    // output value strides. A trailing StaticTranspose on the SDPA output
+    // (e.g. bert's [B,H,S,D] -> [B,S,H,D]) is folded into mm2's output by
+    // fuse_dst_transpose_to_predecessor: the partition output tensor then
+    // carries the post-transpose axis order [B,S,H,D], but mm2's own output
+    // value keeps the driver's [B,H,S,D] axis order with strides that encode
+    // the transpose. Reading the partition output tensor's strides directly
+    // would mis-map the head/seq axes; mm2's output value is the correct
+    // per-(batch,head,seq,head_size_v) stride source. mm2 is the matmul whose
+    // inputs trace back (through the softmax / reorder / permute ops) to the
+    // other (QK^T) matmul's output.
+    auto traces_to_other_matmul = [](op_t *m) -> bool {
+        std::vector<const value_t *> stack;
+        for (size_t i = 0; i < m->num_inputs(); ++i)
+            stack.push_back(m->get_input_value(i).get());
+        std::unordered_set<const value_t *> seen;
+        while (!stack.empty()) {
+            const value_t *v = stack.back();
+            stack.pop_back();
+            if (!v || !seen.insert(v).second) continue;
+            if (!v->has_producer()) continue;
+            op_t &prod = v->get_producer();
+            if (&prod != m && prod.get_kind() == graph::op_kind::_matmul)
+                return true;
+            for (size_t i = 0; i < prod.num_inputs(); ++i)
+                stack.push_back(prod.get_input_value(i).get());
+        }
+        return false;
+    };
+    op_t *mm2_op = nullptr;
+    for (const auto &op : subgraph_->get_ops()) {
+        if (op->get_kind() != graph::op_kind::_matmul) continue;
+        if (traces_to_other_matmul(op.get())) {
+            mm2_op = op.get();
+            break;
+        }
+    }
+
     // Capture the geometry and user strides for the execute path.
     ndims_ = static_cast<int>(sdp_cfg_.ndims);
     batch_ = sdp_cfg_.batch_size;
@@ -205,7 +244,13 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     q_strides_ = ltw(inputs[idx_q_]).vstrides();
     k_strides_ = ltw(inputs[idx_k_]).vstrides();
     v_strides_ = ltw(inputs[idx_v_]).vstrides();
-    o_strides_ = ltw(outputs[0]).vstrides();
+    // Output strides come from mm2's own output value (driver [B,H,S,D] axis
+    // order, transpose-fold aware), not the partition output tensor which may
+    // be in a permuted axis order after a folded StaticTranspose. Fall back to
+    // the partition output tensor if mm2 could not be located.
+    o_strides_ = mm2_op
+            ? ltw(mm2_op->get_output_value(0)->get_logical_tensor()).vstrides()
+            : ltw(outputs[0]).vstrides();
     // K holds seq_kv on its last axis when consumed as K^T (transpose_b == 0),
     // otherwise on its second-to-last axis (natural [.., seq_kv, head_size]).
     seq_kv_ = mm1_transpose_b_ ? ltw(inputs[idx_k_]).vdims()[ndims_ - 2]

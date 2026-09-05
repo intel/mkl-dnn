@@ -161,11 +161,24 @@ status_t sdp_blocked_driver_t::init(
     // the user strides (row_dim = the M/K row axis), scores/pv are dense.
     //   mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
     //   mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
-    // The brgemm ukernel does not support a transposed B operand, so when the
-    // graph's QK^T uses transpose_b the driver first transposes the natural K
-    // tile [seq_kv, hs_qk] into a dense [hs_qk, seq_kv] scratch buffer (see
-    // execute) and mm1 reads that with ldb = seq_kv.
-    const dim_t mm1_ldb = p_.mm1_transpose_b ? seq_kv : p_.k_strides[row_dim];
+    // The brgemm ukernel does not support a transposed B operand and needs mm1
+    // B row-major as [hs_qk, seq_kv] (seq_kv unit-stride). Decide the transpose
+    // from the K tensor's PHYSICAL strides, not the graph transpose_b attr:
+    //   * transpose_b == true  : K is [.., seq_kv, hs_qk] -> seq_kv axis is
+    //                            row_dim, hs_qk axis is the last dim.
+    //   * transpose_b == false : K is [.., hs_qk, seq_kv] -> hs_qk axis is
+    //                            row_dim, seq_kv axis is the last dim.
+    // In either orientation, if the seq_kv axis is not unit-stride the driver
+    // materialises a dense [hs_qk, seq_kv] transpose once (see execute); a K
+    // that is logically pre-transposed but physically stored with hs_qk
+    // contiguous therefore still gets transposed here.
+    k_seq_stride_ = p_.mm1_transpose_b ? p_.k_strides[row_dim]
+                                       : p_.k_strides[p_.ndims - 1];
+    k_hs_stride_ = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
+                                      : p_.k_strides[row_dim];
+    mm1_transpose_k_ = k_seq_stride_ != 1;
+    const dim_t mm1_ldb = mm1_transpose_k_ ? seq_kv : k_hs_stride_;
+
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t m,
                       bool select_postop) -> status_t {
@@ -232,7 +245,7 @@ status_t sdp_blocked_driver_t::init(
     // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
     // buffer that follows the per-thread blocks; kt_global_bytes_ sizes it.
     num_head_kv_ = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
-    if (p_.mm1_transpose_b && num_head_kv_ > 0)
+    if (mm1_transpose_k_ && num_head_kv_ > 0)
         kt_global_bytes_ = static_cast<size_t>(p_.batch) * num_head_kv_ * hs_qk
                 * seq_kv * sizeof(float);
 
@@ -325,10 +338,13 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     const size_t block_size = scratch_per_thread_;
     const size_t scores_bytes
             = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
-    const bool transpose_b = p_.mm1_transpose_b;
+    const bool transpose_b = mm1_transpose_k_;
     const dim_t hs_qk = p_.head_size_qk;
-    const dim_t k_row = p_.k_strides[row_dim];
-    const dim_t k_col = p_.k_strides[ndims - 1];
+    // Element strides to walk the K tensor's seq_kv / hs_qk axes when
+    // materialising the dense [hs_qk, seq_kv] transpose (see init: derived from
+    // the physical layout, so this handles both natural and pre-transposed K).
+    const dim_t k_row = k_seq_stride_;
+    const dim_t k_col = k_hs_stride_;
 
     // transpose_b QK^T: the mm1 B tile must be dense [hs_qk, seq_kv], but the
     // brgemm ukernel has no transposed-B mode. Transpose the whole K tensor
