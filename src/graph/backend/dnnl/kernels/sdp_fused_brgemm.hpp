@@ -24,6 +24,7 @@
 #include "graph/backend/dnnl/platform.hpp"
 
 #include "graph/backend/dnnl/kernels/kernel_base.hpp"
+#include "graph/backend/dnnl/kernels/sdp_blocked_driver.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp_config.hpp"
 
 #include "graph/backend/dnnl/dnnl_partition_impl.hpp"
@@ -120,10 +121,28 @@ private:
     // per-iteration std::vectors that would otherwise malloc in the hot loop.
     registry_t sdp_registry_;
     int nthr_ = 0;
+
+    // Alternative epilogue: when blocked_ is set (ONEDNN_GRAPH_SDPA_IMPL=
+    // fused_brgemm_blocked) the execute path uses the decoupled query-axis
+    // blocked / two-pass-softmax driver instead of the online-softmax
+    // epilogue above. Selectable for A/B benchmarking.
+    bool blocked_ = false;
+    sdp_blocked_driver_t blocked_driver_;
+    size_t blocked_scratch_total_ = 0;
 #endif
 
 public:
     sdp_fused_brgemm_kernel_t();
+
+    // Select the decoupled blocked / two-pass-softmax driver over the default
+    // online-softmax epilogue. Must be called before compile_impl.
+    void set_blocked(bool b) {
+#if DNNL_X64
+        blocked_ = b;
+#else
+        UNUSED(b);
+#endif
+    }
     ~sdp_fused_brgemm_kernel_t() override;
 
     status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
@@ -171,7 +190,7 @@ public:
     DEF_KERNEL_METHOD_STR(sdp_fused_brgemm_kernel_t)
     size_t get_scratchpad_size() const override {
 #if DNNL_X64
-        return sdp_registry_.size() * nthr_;
+        return blocked_ ? blocked_scratch_total_ : sdp_registry_.size() * nthr_;
 #else
         return 0;
 #endif

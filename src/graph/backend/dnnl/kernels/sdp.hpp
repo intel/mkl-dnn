@@ -54,6 +54,7 @@ private:
         primitive,
         decomp,
         fused_brgemm,
+        fused_brgemm_blocked,
         large,
     };
 
@@ -82,6 +83,13 @@ public:
                 kernel = std::make_shared<sdp_fused_brgemm_kernel_t>();
                 ret = kernel->compile_impl(part, eng, inputs, outputs);
                 break;
+            case sdpa_impl_kind_t::fused_brgemm_blocked: {
+                auto k = std::make_shared<sdp_fused_brgemm_kernel_t>();
+                k->set_blocked(true);
+                kernel = k;
+                ret = kernel->compile_impl(part, eng, inputs, outputs);
+                break;
+            }
             case sdpa_impl_kind_t::automatic:
             default:
                 kernel = std::make_shared<sdp_primitive_kernel_t<quantized>>();
@@ -116,13 +124,17 @@ public:
 
     // Internal env var to force a specific SDPA implementation, for oneDNN
     // debug and testing only:
-    //   ONEDNN_GRAPH_SDPA_IMPL={auto|primitive|decomp|fused_brgemm|large}
+    //   ONEDNN_GRAPH_SDPA_IMPL={auto|primitive|decomp|fused_brgemm
+    //       |fused_brgemm_blocked|large}
     // The legacy knob ONEDNN_GRAPH_SDPA_FORCE_PRIMITIVE>0 is preserved and maps
     // to `large` (its historical behavior).
     sdpa_impl_kind_t forced_impl() const {
         using graph::utils::check_verbose_string_user;
         if (check_verbose_string_user("GRAPH_SDPA_IMPL", "large"))
             return sdpa_impl_kind_t::large;
+        if (check_verbose_string_user(
+                    "GRAPH_SDPA_IMPL", "fused_brgemm_blocked"))
+            return sdpa_impl_kind_t::fused_brgemm_blocked;
         if (check_verbose_string_user("GRAPH_SDPA_IMPL", "fused_brgemm"))
             return sdpa_impl_kind_t::fused_brgemm;
         if (check_verbose_string_user("GRAPH_SDPA_IMPL", "decomp"))

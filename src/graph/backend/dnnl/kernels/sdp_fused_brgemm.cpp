@@ -189,6 +189,44 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     seq_kv_ = ltw(inputs[idx_k_]).vdims()[ndims_ - 1];
     if (has_select_) cond_strides_ = ltw(inputs[idx_cond_]).vstrides();
 
+    // Alternative path: the decoupled query-axis blocked / two-pass-softmax
+    // driver. It owns its own BRGEMM kernels and scratch sizing; the online
+    // epilogue below is skipped entirely.
+    if (blocked_) {
+        sdp_blocked_params_t bp;
+        bp.ndims = ndims_;
+        bp.batch = batch_;
+        bp.num_head_q = num_head_q_;
+        bp.group_head = group_head_;
+        bp.seq_q = seq_q_;
+        bp.seq_kv = seq_kv_;
+        bp.head_size_qk = hs_qk;
+        bp.head_size_v = hs_v_;
+        bp.q_strides = q_strides_;
+        bp.k_strides = k_strides_;
+        bp.v_strides = v_strides_;
+        bp.o_strides = o_strides_;
+        bp.cond_strides = cond_strides_;
+        bp.has_select = has_select_;
+        bp.select_fusiable = select_fusiable_;
+        // mm1 post-op chain. Currently only the QK scale is supported; it is
+        // applied as a binary-mul with a scalar rhs (already reciprocated at
+        // execute if the graph used Divide). Soft-cap / attention-mask entries
+        // will be appended here in graph order as they are enabled.
+        if (has_scale_) {
+            sdp_mm1_post_op_t sc;
+            sc.alg = dnnl::impl::alg_kind::binary_mul;
+            sc.is_binary = true;
+            sc.rhs_is_scalar = true;
+            sc.rhs_dt = dnnl::impl::data_type::f32;
+            bp.mm1_post_ops.push_back(sc);
+        }
+        CHECK(blocked_driver_.init(bp, eng));
+        nthr_ = blocked_driver_.nthr();
+        blocked_scratch_total_ = blocked_driver_.scratch_per_thread() * nthr_;
+        return status::success;
+    }
+
     // Create the BRGEMM kernels. Shapes/leading dims are identical for every
     // slice, so one kernel per (full/tail) tile width suffices.
     //   mm1 (beta=0): scores_tile[seq_q, w] = Q[seq_q, hs_qk] * K[hs_qk, w]
@@ -313,6 +351,24 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
                 inputs[idx_fill_].get_data_handle());
         cond_base = static_cast<const char *>(
                 inputs[idx_cond_].get_data_handle());
+    }
+
+    // Alternative path: run the decoupled blocked driver over its own scratch.
+    if (blocked_) {
+        sdp_blocked_run_args_t args;
+        args.q = q_base;
+        args.k = k_base;
+        args.v = v_base;
+        args.cond = cond_base;
+        args.out = o_base;
+        args.fill = fill_val;
+        // rhs base pointers for the mm1 binary post-ops, in chain order. Only
+        // the QK scale is present today; scale_val is a stable local that
+        // outlives the execute call below.
+        if (has_scale_) args.mm1_post_op_rhs.push_back(&scale_val);
+        auto scratchpad = std::make_shared<scratchpad_t>(
+                scratchpad_buf, blocked_scratch_total_, p_engine_);
+        return blocked_driver_.execute(args, scratchpad->get_buffer(), nthr_);
     }
 
     const dim_t seq_q = seq_q_, seq_kv = seq_kv_, hs_v = hs_v_;
