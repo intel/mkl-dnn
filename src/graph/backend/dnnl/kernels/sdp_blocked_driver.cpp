@@ -60,19 +60,17 @@ inline size_t align64(size_t n) {
 // Down-convert n contiguous f32 elements into dst as data type dt (f16/bf16).
 // Used to materialise P (mm2's A operand) from the f32 softmax output. f32 is
 // handled by the caller (it uses the f32 scores tile directly, no conversion).
+// Delegates to the jit-backed bulk converters (jit_cvt_ps_to_xf16_t) with a
+// scalar fallback, rather than converting element by element.
 inline void convert_from_f32(
         void *dst, data_type_t dt, const float *src, size_t n) {
     switch (dt) {
-        case data_type::f16: {
-            auto *d = static_cast<float16_t *>(dst);
-            for (size_t i = 0; i < n; ++i)
-                d[i] = float16_t(src[i]);
-        } break;
-        case data_type::bf16: {
-            auto *d = static_cast<bfloat16_t *>(dst);
-            for (size_t i = 0; i < n; ++i)
-                d[i] = bfloat16_t(src[i]);
-        } break;
+        case data_type::f16:
+            cvt_float_to_float16(static_cast<float16_t *>(dst), src, n);
+            break;
+        case data_type::bf16:
+            cvt_float_to_bfloat16(static_cast<bfloat16_t *>(dst), src, n);
+            break;
         default: break;
     }
 }
