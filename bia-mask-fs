@@ -1,0 +1,3 @@
+--reset --impl=jit:gemm:any --dt=f8_e4m3:f8_e4m3:f8_e4m3 --stag=abx --wtag=ba --dtag=abx --bia-dt=f32 --bia_mask=1 --attr-scales=src:per_tensor:e8m0:1x32+dst:mx:e8m0:1x32+wei:per_tensor:e8m0:32x32 --attr-post-ops=sqrt 112x2720:2720x320
+--reset --impl=jit:gemm:any --dt=f8_e5m2:f8_e5m2:f4_e2m1 --stag=abx --wtag=abx --dtag=abx --bia-dt=f32 --bia_mask=3 --attr-scales=src:per_tensor:e8m0:1x32+dst:mx:e8m0:1x32+wei:per_tensor:bf16:128x1 --attr-post-ops=add:s8:common 1532x896:896x32
+--reset --impl=jit:gemm:any --dt=f4_e2m1:f4_e2m1:f4_e2m1 --dtag=abx --strides=1664x1:: --bia-dt=f32 --bia_mask=1 --attr-scales=src:per_tensor:f8_e4m3:1x16+dst:mx:e8m0:1x32+wei:per_tensor:f8_e4m3:16x1 --attr-post-ops=gelu_erf 19x1632:1632x64

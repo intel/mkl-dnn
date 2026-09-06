@@ -155,23 +155,31 @@ inputs/matmul/test_\*.
 
 ## Experimental: paneled ("periodic") fast reference
 
-`DNNL_BENCHDNN_MATMUL_PANEL_FILL` is an experimental, opt-in environment variable
-that speeds up the native CPU reference used for GPU correctness validation. When
-set to `1`, the driver fills the inputs so the result is periodic along `M` and `N`
-(the `K` dimension is kept full), computes the reference for a single representative
-`panel_m x panel_n` panel, and broadcasts it across the whole output. This reduces
-the reference cost from `O(MB*M*N*K)` to roughly `O(panel_m*panel_n*K)` while the
-GPU primitive still runs the full shape.
+The `--mode-modifier=A` option speeds up the native CPU reference used for GPU
+correctness validation. When set, the driver fills the inputs so the result is
+periodic along `M` and `N` (the `K` dimension is kept full), computes the
+reference for a single representative `panel_m x panel_n` panel, and broadcasts it
+across the whole output. This reduces the reference cost from `O(MB*M*N*K)` to
+roughly `O(panel_m*panel_n*K)` while the GPU primitive still runs the full shape.
 
 ``` sh
-    DNNL_BENCHDNN_MATMUL_PANEL_FILL=1 ./benchdnn --matmul --engine=gpu \
-        --fast-ref=false 4096x4096:4096x4096
+    ./benchdnn --matmul --mode=C --mode-modifier=A --engine=gpu \
+        --dt=f8_e4m3:f8_e4m3:f16 4096x4096:4096x4096
 ```
 
+The environment variable `DNNL_BENCHDNN_MATMUL_PANEL_FILL=1` is kept as a
+deprecated alias for the modifier.
+
 Notes:
-- It only affects the *native* reference path, so it requires `--fast-ref=false`
-  (otherwise a CPU oneDNN primitive is used as the reference and the periodic fill
-  is skipped).
+- It only accelerates the *native* reference path, and only when that path is
+  actually used, i.e. when no fast CPU primitive reference is available for the
+  problem (`--fast-ref` cannot build a CPU primitive for the config, e.g. `f8`,
+  `f4`, `mx`, some weight-decompression cases) or when `--fast-ref=false` is
+  passed. When a fast CPU primitive reference *is* available it runs the full
+  shape with vectorized kernels and is generally faster than the paneled scalar
+  native reference, so the modifier is a no-op in that case (it does not disable
+  `--fast-ref`). This avoids regressing configs that already have a fast CPU
+  reference.
 - The panel width is at least 128 and is aligned to the destination scale/zero-point
   groups so no block/group quantization parameter straddles a panel boundary.
 - The driver prints whether the periodic fill was selected (and the chosen

@@ -53,6 +53,11 @@ enum class mode_modifier_t : unsigned {
     // Disable usage of reference memories in the flow. It removes mapping,
     // unmapping and filling functionality.
     no_ref_memory = 0x2,
+    // Accelerate the native correctness reference by filling inputs so the
+    // result is periodic along M and N, computing a single representative
+    // panel and broadcasting it. Currently honored by the matmul driver only;
+    // other drivers ignore it. Requires the native reference (`--fast-ref=false`).
+    ref_periodic_fill = 0x4,
 };
 
 mode_modifier_t operator|(mode_modifier_t lhs, mode_modifier_t rhs);

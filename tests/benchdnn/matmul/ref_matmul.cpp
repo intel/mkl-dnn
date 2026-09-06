@@ -563,10 +563,12 @@ static int64_t pick_panel(int64_t base, int64_t dim) {
 tiled_fill_t make_tiled_fill(const prb_t *prb) {
     tiled_fill_t t;
 
-    const int enabled_env
-            = benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0);
-    if (!enabled_env) {
-        t.reason = "env DNNL_BENCHDNN_MATMUL_PANEL_FILL is not set";
+    // Enabled via `--mode-modifier=A`. The env variable
+    // `DNNL_BENCHDNN_MATMUL_PANEL_FILL` is kept as a deprecated alias.
+    const bool enabled = has_bench_mode_modifier(mode_modifier_t::ref_periodic_fill)
+            || benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0);
+    if (!enabled) {
+        t.reason = "not enabled (pass --mode-modifier=A)";
         return t;
     }
 

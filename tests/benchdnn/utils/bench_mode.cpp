@@ -48,6 +48,7 @@ std::ostream &operator<<(std::ostream &s, mode_modifier_t modifier) {
     if (modifier == mode_modifier_t::none) s << "";
     if (has_bench_mode_modifier(mode_modifier_t::par_create)) s << "P";
     if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)) s << "M";
+    if (has_bench_mode_modifier(mode_modifier_t::ref_periodic_fill)) s << "A";
     return s;
 }
 

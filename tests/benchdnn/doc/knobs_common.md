@@ -171,6 +171,11 @@ Refer to [modes](benchdnn_general_info.md) for details.
   - empty for no modifiers (the default)
   - `P` or `p` for parallel backend object creation
   - `M` or `m` for disabling usage of reference memory
+  - `A` or `a` to accelerate the native correctness reference via a periodic
+               (paneled) input fill. Matmul driver only. Applies only when the
+               native reference is used (no fast CPU primitive reference is
+               available, or `--fast-ref=false`); it does not disable
+               `--fast-ref`. See [matmul driver](driver_matmul.md).
 
 Refer to [mode modifiers](benchdnn_general_info.md) for details.
 

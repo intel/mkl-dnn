@@ -1923,6 +1923,10 @@ static bool parse_mode_modifier(
               "    * `M` to disable usage of reference memory.\n"
               "          It removes any overheads for mapping, unmapping and \n"
               "          reorders used in filling functions (disabled).\n"
+              "    * `A` to accelerate the native correctness reference via a\n"
+              "          periodic (paneled) input fill. Matmul driver only;\n"
+              "          applies only when the native reference is used (no fast\n"
+              "          CPU primitive reference, or `--fast-ref=false`).\n"
               "    More details at "
             + doc_url + "benchdnn_general_info.md\n";
 
@@ -1934,6 +1938,8 @@ static bool parse_mode_modifier(
                 case 'P': modifier |= mode_modifier_t::par_create; break;
                 case 'm':
                 case 'M': modifier |= mode_modifier_t::no_ref_memory; break;
+                case 'a':
+                case 'A': modifier |= mode_modifier_t::ref_periodic_fill; break;
                 default:
                     BENCHDNN_PRINT(0, "%s\n%s",
                             "Error: modifier value is invalid.", help.c_str());

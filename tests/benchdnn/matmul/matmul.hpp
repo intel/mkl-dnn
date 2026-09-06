@@ -287,7 +287,8 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
 
 // Paneled ("periodic") fill PoC. See ref_matmul.cpp::make_tiled_fill().
 //
-// When enabled (env var DNNL_BENCHDNN_MATMUL_PANEL_FILL=1), inputs are filled so
+// When enabled (--mode-modifier=A; the env var DNNL_BENCHDNN_MATMUL_PANEL_FILL=1
+// is a deprecated alias), inputs are filled so
 // that the result is periodic along M (period `panel_m`) and N (period `panel_n`)
 // and, optionally, identical across the batch dimension (`tile_batch`). The native
 // reference then computes only the representative `panel_m x panel_n` panel (and a

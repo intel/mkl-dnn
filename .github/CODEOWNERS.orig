@@ -1,0 +1,72 @@
+#===============================================================================
+# Copyright 2019 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#===============================================================================
+
+<<<<<<< HEAD
+# Default
+* @uxlfoundation/onednn-arch
+
+# Github automation
+/.github/ @uxlfoundation/onednn-devops
+
+# CPU Engine
+/src/cpu/aarch64/ @uxlfoundation/onednn-cpu-aarch64
+/src/cpu/rv64/ @uxlfoundation/onednn-cpu-rv64
+/src/cpu/x64/ @uxlfoundation/onednn-cpu-x64
+/src/cpu/rnn/ @uxlfoundation/onednn-cpu-x64
+
+# GPU Engine
+/src/gpu/intel/ @uxlfoundation/onednn-gpu-intel
+/src/gpu/generic/ @uxlfoundation/onednn-arch
+
+# /src/gpu/amd/ @uxlfoundation/onednn-gpu-amd
+# /src/gpu/nvidia/ @uxlfoundation/onednn-gpu-nvidia
+# /src/gpu/generic/sycl/ @uxlfoundation/onednn-gpu-generic
+
+# Tests
+/tests/benchdnn/inputs/ @uxlfoundation/onednn-maintain
+## Special case of internal tests
+/tests/gtests/internals/test_sdpa.cpp @uxlfoundation/onednn-gpu-intel
+/tests/gtests/internals/test_utils.cpp @uxlfoundation/onednn-gpu-intel
+/tests/gtests/internals/test_utils.hpp @uxlfoundation/onednn-gpu-intel
+/tests/gtests/internals/test_gated_mlp.cpp @uxlfoundation/onednn-gpu-intel
+/tests/gtests/internals/test_cpu_ir.cpp @uxlfoundation/onednn-arch @uxlfoundation/onednn-cpu-x64
+
+# Documentation
+*.md  @uxlfoundation/onednn-doc
+/doc/ @uxlfoundation/onednn-doc
+/src/cpu/x64/ir/README.md @uxlfoundation/onednn-doc @uxlfoundation/onednn-cpu-x64
+
+# Third party components
+/third-party/ @uxlfoundation/onednn-arch
+/third_party/kleidiai/ @uxlfoundation/onednn-cpu-aarch64
+/third_party/opencl/ @uxlfoundation/onednn-gpu-intel
+/third_party/level_zero/ @uxlfoundation/onednn-gpu-intel
+/third_party/mdapi/ @uxlfoundation/onednn-gpu-intel
+/third_party/ngen/ @uxlfoundation/onednn-gpu-intel
+/third_party/xbyak/ @uxlfoundation/onednn-cpu-x64
+/third_party/xbyak_aarch64/ @uxlfoundation/onednn-cpu-aarch64
+/third_party/xbyak_riscv/ @uxlfoundation/onednn-cpu-rv64
+
+# Governance and process
+/.github/CODEOWNERS @uxlfoundation/onednn-maintain
+/SECURITY.md @uxlfoundation/onednn-maintain
+/MAINTAINERS.md @uxlfoundation/onednn-maintain
+/CONTRIBUTING.md @uxlfoundation/onednn-maintain
+/CODING_STANDARDS.md @uxlfoundation/onednn-maintain
+/CODE_OF_CONDUCT.md @uxlfoundation/onednn-maintain
+=======
+* @intel-innersource/dnn-gpu
+>>>>>>> 3a2319001c (github: restore notifications)

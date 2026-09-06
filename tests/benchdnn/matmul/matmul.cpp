@@ -854,7 +854,8 @@ static int apply_paneled_fill(dnn_mem_map_t &ref_mem_map,
 
     if (!tf.enabled) {
         // Only advertise the decision when the feature was explicitly requested.
-        if (benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0))
+        if (has_bench_mode_modifier(mode_modifier_t::ref_periodic_fill)
+                || benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0))
             BENCHDNN_PRINT(0,
                     "[MATMUL_PANEL_FILL] periodic fill NOT selected: %s\n",
                     tf.reason.c_str());
@@ -1138,15 +1139,23 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         if (!has_bench_mode_bit(mode_bit_t::corr)) ref_mem_map.clear();
     }
 
-    // Paneled ("periodic") fill PoC. Only applies to the native reference path
+    // Paneled ("periodic") fill. Only applies to the native reference path
     // (no CPU `prim_ref`) and to correctness mode where reference memory exists.
+    // This is intentional: when a fast CPU primitive reference is available it
+    // runs the full shape with vectorized kernels and is typically faster than
+    // the paneled scalar native reference, so we leave it untouched. Paneling
+    // targets exactly the configs where no fast CPU reference exists and
+    // benchdnn already falls back to the slow native `compute_ref`.
+    const bool panel_requested
+            = has_bench_mode_modifier(mode_modifier_t::ref_periodic_fill)
+            || benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0);
     if (has_bench_mode_bit(mode_bit_t::corr) && !prim_ref) {
         SAFE(apply_paneled_fill(ref_mem_map, mem_map, prb, cfg, res), WARN);
-    } else if (benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0)
-            && prim_ref) {
+    } else if (panel_requested && prim_ref) {
         BENCHDNN_PRINT(0, "%s\n",
-                "[MATMUL_PANEL_FILL] periodic fill NOT applied: a CPU primitive "
-                "reference is in use; pass --fast-ref=false to enable it");
+                "[MATMUL_PANEL_FILL] periodic fill not needed: a fast CPU "
+                "primitive reference is available (generally faster than the "
+                "paneled native reference). Pass --fast-ref=false to force it.");
     }
 
     if (ref_mem_map.count(
