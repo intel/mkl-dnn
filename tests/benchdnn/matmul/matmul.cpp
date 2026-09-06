@@ -16,6 +16,7 @@
 
 #include <float.h>
 #include <math.h>
+#include <cstring>
 #include <random>
 #include <set>
 #include <stdio.h>
@@ -606,7 +607,8 @@ static int fill_grouped_data(data_kind_t kind, const prb_t *prb,
 }
 
 int fill_data(data_kind_t kind, int exec_arg, const prb_t *prb,
-        const cfg_t &cfg, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *res) {
+        const cfg_t &cfg, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp, res_t *res,
+        bool skip_dt_reorder = false) {
 
     const auto nelems = mem_dt.nelems();
     if (nelems == 0) return OK;
@@ -687,7 +689,11 @@ int fill_data(data_kind_t kind, int exec_arg, const prb_t *prb,
         fill_dense_fp_values(kind, prb, cfg, mem_fp);
     }
 
-    SAFE(mem_dt.reorder(mem_fp, res, cfg.get_swapped_dt(kind)), WARN);
+    // Under paneled ("periodic") fill the reference f32 memory is about to be
+    // periodized in place and reordered to the device once, so skip the device
+    // reorder here to avoid a redundant full-tensor conversion.
+    if (!skip_dt_reorder)
+        SAFE(mem_dt.reorder(mem_fp, res, cfg.get_swapped_dt(kind)), WARN);
 
     return OK;
 }
@@ -826,6 +832,46 @@ static void periodize_ref(dnn_mem_t &fp, const std::vector<tile_role_t> &roles,
     int64_t total = 1;
     for (int d = 0; d < ndims; d++)
         total *= dims[d];
+
+    // Fast path: when the contiguous (stride-1) dimension is not periodized,
+    // each line along it is copied wholesale from its canonical source line.
+    // Written lines (non-canonical) and read lines (canonical) are disjoint
+    // sets that never overlap, so the broadcast copy is order-independent and
+    // safe to parallelize. This is the common matmul case (src/wei keep K, the
+    // contiguous dim, full) and turns the O(total) per-element stride decode
+    // into O(total / line) contiguous memcpys.
+    int cdim = -1;
+    for (int d = 0; d < ndims; d++)
+        if (strides[d] == 1) {
+            cdim = d;
+            break;
+        }
+    if (cdim >= 0 && period[cdim] == dims[cdim] && total > 0) {
+        const int64_t line = dims[cdim];
+        const int64_t outer = total / line;
+        float *base = static_cast<float *>(fp);
+        // Mixed-radix decode of the outer index over all dims except `cdim`,
+        // in descending (row-major) order.
+        std::vector<int> odims;
+        for (int d = 0; d < ndims; d++)
+            if (d != cdim) odims.push_back(d);
+        benchdnn_parallel_nd(outer, [&](int64_t o) {
+            int64_t rem = o, phys = 0, phys_c = 0;
+            bool is_canon = true;
+            for (int i = (int)odims.size() - 1; i >= 0; i--) {
+                const int d = odims[i];
+                const int64_t c = rem % dims[d];
+                rem /= dims[d];
+                const int64_t cc = c % period[d];
+                phys += c * strides[d];
+                phys_c += cc * strides[d];
+                if (cc != c) is_canon = false;
+            }
+            if (!is_canon)
+                std::memcpy(base + phys, base + phys_c, line * sizeof(float));
+        });
+        return;
+    }
 
     // Ascending row-major order guarantees every canonical element is finalized
     // (and left untouched) before it is read, so the in-place copy is safe.
@@ -981,6 +1027,16 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
     // Move cfg out of filling since its creation is not free.
     cfg_t cfg(prb, {SRC, WEI, BIA, DST});
 
+    // Decide once whether paneled ("periodic") fill is active for this problem.
+    // When it is, the data tensors are periodized in place and reordered to the
+    // device a single time by `apply_paneled_fill`, so their initial per-tensor
+    // device reorder in `fill_data` is redundant and skipped.
+    const bool panel_requested
+            = has_bench_mode_modifier(mode_modifier_t::ref_periodic_fill)
+            || benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0);
+    const bool paneling_on = has_bench_mode_bit(mode_bit_t::corr) && !prim_ref
+            && panel_requested && make_tiled_fill(prb).enabled;
+
     const auto wei_encoding
             = prb->sparse_options.get_encoding(DNNL_ARG_WEIGHTS);
 
@@ -1086,22 +1142,28 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
 
         switch (exec_arg) {
             case DNNL_ARG_SRC:
-                SAFE(fill_data(SRC, exec_arg, prb, cfg, mem, ref_mem, res),
+                SAFE(fill_data(SRC, exec_arg, prb, cfg, mem, ref_mem, res,
+                             paneling_on),
                         WARN);
                 break;
             case DNNL_ARG_WEIGHTS:
-                SAFE(fill_data(WEI, exec_arg, prb, cfg, mem, ref_mem, res),
+                SAFE(fill_data(WEI, exec_arg, prb, cfg, mem, ref_mem, res,
+                             paneling_on),
                         WARN);
                 break;
             case DNNL_ARG_BIAS:
-                SAFE(fill_data(BIA, exec_arg, prb, cfg, mem, ref_mem, res),
+                SAFE(fill_data(BIA, exec_arg, prb, cfg, mem, ref_mem, res,
+                             paneling_on),
                         WARN);
                 break;
             case DNNL_ARG_DST: {
                 const auto &po = prb->attr.post_ops;
                 const int sum_idx = po.find(attr_t::post_ops_t::SUM);
                 if ((sum_idx >= 0) || po.has_inplace_binary()) {
-                    SAFE(fill_data(DST, exec_arg, prb, cfg, mem, ref_mem, res),
+                    SAFE(fill_data(DST, exec_arg, prb, cfg, mem, ref_mem, res,
+                                 paneling_on && sum_idx >= 0
+                                         && !has_bench_mode_bit(
+                                                 mode_bit_t::bitwise)),
                             WARN);
                     // Bitwise mode for sum and in-place binary post-ops
                     // requires a copy due to data for post-op will be
@@ -1146,9 +1208,6 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
     // the paneled scalar native reference, so we leave it untouched. Paneling
     // targets exactly the configs where no fast CPU reference exists and
     // benchdnn already falls back to the slow native `compute_ref`.
-    const bool panel_requested
-            = has_bench_mode_modifier(mode_modifier_t::ref_periodic_fill)
-            || benchdnn_getenv_int("DNNL_BENCHDNN_MATMUL_PANEL_FILL", 0);
     if (has_bench_mode_bit(mode_bit_t::corr) && !prim_ref) {
         SAFE(apply_paneled_fill(ref_mem_map, mem_map, prb, cfg, res), WARN);
     } else if (panel_requested && prim_ref) {
