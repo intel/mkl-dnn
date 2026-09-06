@@ -909,9 +909,14 @@ static int apply_paneled_fill(dnn_mem_map_t &ref_mem_map,
     SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, ROLE_K,
                  ROLE_N, dnnl_data_type_undef),
             WARN);
-    SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, ROLE_M, ROLE_N,
-                 dnnl_data_type_undef),
-            WARN);
+    // Static dst scales are an input and must be periodized. Dynamic/derived
+    // dst scales (mx, dynamic_fp) are an OUTPUT computed by the reference, so
+    // they are broadcast in compute_ref_matmul_periodic instead, not here.
+    if (!prb->attr.scales.get(DNNL_ARG_DST).is_dynamic()) {
+        SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, ROLE_M,
+                     ROLE_N, dnnl_data_type_undef),
+                WARN);
+    }
     SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, ROLE_M,
                  ROLE_K, dnnl_data_type_undef),
             WARN);

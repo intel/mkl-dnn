@@ -180,7 +180,10 @@ Notes:
 - Periodic inputs can mask bugs in `M`/`N` address arithmetic, so this mode is
   intended for speeding up local validation of large shapes, not as a replacement
   for the default reference in CI. It is disabled by default.
-- Unsupported configurations (dynamic destination scales, dropout/stochastic
-  rounding, sparse/grouped dimensions, and shapes too small to form a 128-wide
-  panel) automatically fall back to the normal reference. Runtime dimensions and
-  binary/prelu post-ops are supported.
+- Unsupported configurations (dropout/stochastic rounding, sparse/grouped
+  dimensions, and shapes too small to form a 128-wide panel) automatically fall
+  back to the normal reference. Runtime dimensions, binary/prelu post-ops, and
+  dynamic/derived destination scales (e.g. `dst:dynamic_fp:...`, `dst:mx:e8m0:...`)
+  are supported: because the panel is a multiple of the destination-scale group,
+  the per-block dynamic scales are themselves periodic and are broadcast across the
+  full destination-scale tensor.

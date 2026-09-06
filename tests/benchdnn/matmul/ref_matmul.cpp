@@ -591,10 +591,11 @@ tiled_fill_t make_tiled_fill(const prb_t *prb) {
         t.reason = "stochastic rounding is unsupported";
         return t;
     }
-    if (prb->attr.scales.get(DNNL_ARG_DST).is_dynamic()) {
-        t.reason = "dynamic dst scales are unsupported";
-        return t;
-    }
+    // Dynamic/derived dst scales (mx, dynamic_fp) are supported: the scale is
+    // computed per dst block from that block's values, and because the periodic
+    // output repeats with a panel-aligned period, the per-block scales are
+    // periodic too. compute_ref_matmul_periodic computes them for the
+    // representative panel and broadcasts them across the whole DST_SCALES output.
     // Binary/prelu post-ops are supported: their operands are periodized on the
     // same M/N panel grid by apply_paneled_fill (see matmul.cpp), keeping the
     // post-op result periodic.
@@ -708,6 +709,34 @@ static void compute_ref_matmul_periodic(
         if (dst_off == src_off) return;
         dst_m.set_f32_elem(dst_off, dst_m.get_f32_elem(src_off));
     });
+
+    // Phase 3: for dynamic/derived dst scales, broadcast the per-block scales
+    // computed for the representative panel across the whole DST_SCALES output.
+    // Panels are multiples of the dst scale groups, so a block's representative
+    // is `block_coord % panel_blocks` along each tiled dimension.
+    if (params.has_dst_dynamic) {
+        const int64_t Mg = params.dst_M_group;
+        const int64_t Ng = params.dst_N_group;
+        const int64_t M_chunks = div_up(M, Mg);
+        const int64_t N_chunks = div_up(N, Ng);
+        const int64_t pm_chunks = div_up(MIN2(panel_m, M), Mg);
+        const int64_t pn_chunks = div_up(MIN2(panel_n, N), Ng);
+        benchdnn_parallel_nd(MB, M_chunks, N_chunks,
+                [&](int64_t mb, int64_t mc, int64_t nc) {
+            const int64_t repr_mb = tf.tile_batch ? 0 : mb;
+            const int64_t repr_mc = mc % pm_chunks;
+            const int64_t repr_nc = nc % pn_chunks;
+            const int64_t dst_off = (mb * M + mc * Mg) * N + nc * Ng;
+            const int64_t src_off = (repr_mb * M + repr_mc * Mg) * N + repr_nc * Ng;
+            if (dst_off == src_off) return;
+            const auto d_idx = dst_m.get_idx(dst_off, params.dst_scale_mask,
+                    dst_m.ndims(), params.dst_scale_groups);
+            const auto s_idx = dst_m.get_idx(src_off, params.dst_scale_mask,
+                    dst_m.ndims(), params.dst_scale_groups);
+            params.dst_scales->set_f32_elem(
+                    d_idx, params.dst_scales->get_f32_elem(s_idx));
+        });
+    }
 }
 
 void cvt_coo_indices_to_csr_pointers(const int32_t *indices, int32_t *pointers,
