@@ -810,24 +810,14 @@ enum tile_role_t { ROLE_BATCH, ROLE_M, ROLE_N, ROLE_K, ROLE_BCAST };
 
 // Rewrite `fp` in place so that its values become periodic: the value at a
 // logical coordinate `c` is replaced by the value at the canonical coordinate
-// `c'` where `c'[d] = c[d] % period[d]`. Operates on the plain f32 reference
-// memory (any layout, indexed through its physical strides), so the caller must
-// re-reorder the corresponding device memory afterwards.
-static void periodize_ref(dnn_mem_t &fp, const std::vector<tile_role_t> &roles,
-        int64_t panel_m, int64_t panel_n, bool tile_batch) {
+// `c'` where `c'[d] = c[d] % period[d]`. `period` is expressed in `fp`'s own
+// physical dims. Operates on the plain f32 reference memory (any layout,
+// indexed through its physical strides), so the caller must re-reorder the
+// corresponding device memory afterwards.
+static void periodize_ref(dnn_mem_t &fp, const std::vector<int64_t> &period) {
     const int ndims = fp.ndims();
     const auto &dims = fp.dims();
     const auto &strides = fp.strides();
-
-    std::vector<int64_t> period(ndims);
-    for (int d = 0; d < ndims; d++) {
-        switch (roles[d]) {
-            case ROLE_M: period[d] = MIN2(panel_m, dims[d]); break;
-            case ROLE_N: period[d] = MIN2(panel_n, dims[d]); break;
-            case ROLE_BATCH: period[d] = tile_batch ? 1 : dims[d]; break;
-            default: period[d] = dims[d]; break; // K / BCAST: left untiled.
-        }
-    }
 
     int64_t total = 1;
     for (int d = 0; d < ndims; d++)
@@ -890,6 +880,71 @@ static void periodize_ref(dnn_mem_t &fp, const std::vector<tile_role_t> &roles,
     }
 }
 
+// Period (in the tensor's own physical dims) for a FULL-RANK tensor whose last
+// two dims carry `secondlast`/`last` roles and whose leading dims are batch.
+// Used for data tensors (src/wei/dst), bias and post-op operands, all of which
+// are materialized with the full logical rank (broadcast dims have extent 1).
+static std::vector<int64_t> full_rank_period(const dnn_mem_t &fp,
+        tile_role_t secondlast, tile_role_t last, const tiled_fill_t &tf) {
+    const int nd = fp.ndims();
+    const auto &dims = fp.dims();
+    std::vector<int64_t> period(nd, 1);
+    for (int d = 0; d < nd; d++) {
+        tile_role_t role = ROLE_BATCH;
+        if (d == nd - 2) role = secondlast;
+        else if (d == nd - 1) role = last;
+        switch (role) {
+            case ROLE_M: period[d] = MIN2(tf.panel_m, dims[d]); break;
+            case ROLE_N: period[d] = MIN2(tf.panel_n, dims[d]); break;
+            case ROLE_BATCH: period[d] = tf.tile_batch ? 1 : dims[d]; break;
+            default: period[d] = dims[d]; break; // K / BCAST: left untiled.
+        }
+    }
+    return period;
+}
+
+// Period for a quantization tensor (scales / zero-points). Such tensors only
+// materialize the logical dims selected by `mask` (see md2dims()), so a purely
+// positional role assignment would misalign the physical dims (e.g. treat a
+// leading batch dim as K). Here we walk the OWNER tensor's `owner_ndims`
+// logical dims, keep only the masked ones (matching the physical layout), and
+// assign each the role of its logical axis: leading dims are batch, the last
+// two are `role_2nd`/`role_last`. Group sizes (applied to the last two logical
+// dims) scale the panel period into the tensor's grouped index space.
+static std::vector<int64_t> quant_period(const dnn_mem_t &fp, int owner_ndims,
+        int mask, const std::vector<dnnl_dim_t> &groups, tile_role_t role_2nd,
+        tile_role_t role_last, const tiled_fill_t &tf) {
+    const int pnd = fp.ndims();
+    const auto &pdims = fp.dims();
+    std::vector<int64_t> period(pnd, 1);
+    int p = 0;
+    for (int d = 0; d < owner_ndims && p < pnd; d++) {
+        if (!(mask & (1 << d))) continue;
+        tile_role_t role = ROLE_BATCH;
+        if (d == owner_ndims - 2) role = role_2nd;
+        else if (d == owner_ndims - 1) role = role_last;
+        const int gdim = d - (owner_ndims - 2);
+        const int64_t g = (gdim >= 0 && (size_t)gdim < groups.size() && groups[gdim] > 0)
+                ? groups[gdim]
+                : 1;
+        int64_t per;
+        switch (role) {
+            case ROLE_M: per = MIN2(tf.panel_m / g, pdims[p]); break;
+            case ROLE_N: per = MIN2(tf.panel_n / g, pdims[p]); break;
+            case ROLE_BATCH: per = tf.tile_batch ? 1 : pdims[p]; break;
+            default: per = pdims[p]; break; // K: never tiled.
+        }
+        period[p] = MAX2((int64_t)1, per);
+        p++;
+    }
+    // If the mask did not account for every physical dim (unexpected), fall
+    // back to no periodization on the unmatched trailing dims (correct, just
+    // not collapsed) to stay safe.
+    for (; p < pnd; p++)
+        period[p] = pdims[p];
+    return period;
+}
+
 // Make every supported input tensor periodic so that both the library and the
 // (periodic) reference produce a periodic output. Returns OK and does nothing
 // when the feature is disabled for this problem.
@@ -913,65 +968,96 @@ static int apply_paneled_fill(dnn_mem_map_t &ref_mem_map,
             " panel_n=" IFMT " tile_batch=%d\n",
             tf.panel_m, tf.panel_n, (int)tf.tile_batch);
 
-    auto periodize_and_sync = [&](int arg, tile_role_t secondlast,
-                                      tile_role_t last,
-                                      dnnl_data_type_t swapped_dt) -> int {
-        auto rit = ref_mem_map.find(arg);
-        if (rit == ref_mem_map.end() || !rit->second) return OK;
-        auto &ref = rit->second;
-        const int nd = ref.ndims();
-        std::vector<tile_role_t> roles(nd, ROLE_BATCH);
-        if (nd >= 2) roles[nd - 2] = secondlast;
-        if (nd >= 1) roles[nd - 1] = last;
-        periodize_ref(ref, roles, tf.panel_m, tf.panel_n, tf.tile_batch);
+    // Common reorder-back-to-device step shared by both fillers.
+    auto sync_to_device = [&](int arg, dnn_mem_t &ref,
+                                  dnnl_data_type_t swapped_dt) -> int {
         auto mit = mem_map.find(arg);
         if (mit != mem_map.end() && mit->second)
             SAFE(mit->second.reorder(ref, res, swapped_dt), WARN);
         return OK;
     };
 
+    // Full-rank tensors (data, bias, post-op operands): last two dims carry the
+    // given roles, leading dims are batch.
+    auto periodize_data = [&](int arg, tile_role_t secondlast, tile_role_t last,
+                                  dnnl_data_type_t swapped_dt) -> int {
+        auto rit = ref_mem_map.find(arg);
+        if (rit == ref_mem_map.end() || !rit->second) return OK;
+        auto &ref = rit->second;
+        periodize_ref(ref, full_rank_period(ref, secondlast, last, tf));
+        return sync_to_device(arg, ref, swapped_dt);
+    };
+
+    // Quantization tensors (scales / zero-points): only the masked logical dims
+    // of the owning tensor are materialized, so map physical dims via the mask.
+    auto periodize_quant = [&](int arg, const attr_t::arg_scales_t *scales,
+                                   const attr_t::zero_points_t *zps,
+                                   int owner_arg, tile_role_t role_2nd,
+                                   tile_role_t role_last) -> int {
+        auto rit = ref_mem_map.find(arg);
+        if (rit == ref_mem_map.end() || !rit->second) return OK;
+        auto &ref = rit->second;
+        int mask = 0;
+        std::vector<dnnl_dim_t> groups;
+        if (scales) {
+            mask = scales->get_mask(
+                    owner_arg, dnnl_undefined_primitive, prb->ndims);
+            groups = scales->get(owner_arg).groups;
+        } else {
+            mask = zps->get_mask(
+                    owner_arg, dnnl_undefined_primitive, prb->ndims);
+            groups = zps->get(owner_arg).groups;
+        }
+        periodize_ref(ref,
+                quant_period(
+                        ref, prb->ndims, mask, groups, role_2nd, role_last, tf));
+        return sync_to_device(arg, ref, dnnl_data_type_undef);
+    };
+
     // Data tensors. Layouts: src [..,M,K], wei [..,K,N], bias [..,M,N],
     // dst (sum) [..,M,N].
-    SAFE(periodize_and_sync(DNNL_ARG_SRC, ROLE_M, ROLE_K,
-                 cfg.get_swapped_dt(SRC)),
+    SAFE(periodize_data(
+                 DNNL_ARG_SRC, ROLE_M, ROLE_K, cfg.get_swapped_dt(SRC)),
             WARN);
-    SAFE(periodize_and_sync(DNNL_ARG_WEIGHTS, ROLE_K, ROLE_N,
-                 cfg.get_swapped_dt(WEI)),
+    SAFE(periodize_data(
+                 DNNL_ARG_WEIGHTS, ROLE_K, ROLE_N, cfg.get_swapped_dt(WEI)),
             WARN);
-    SAFE(periodize_and_sync(
+    SAFE(periodize_data(
                  DNNL_ARG_BIAS, ROLE_M, ROLE_N, cfg.get_swapped_dt(BIA)),
             WARN);
     // dst is periodized only when it is a genuine input (sum post-op); otherwise
     // it is pure output and compute_ref fully overwrites it.
     if (prb->attr.post_ops.find(attr_t::post_ops_t::SUM) >= 0) {
-        SAFE(periodize_and_sync(
+        SAFE(periodize_data(
                      DNNL_ARG_DST, ROLE_M, ROLE_N, cfg.get_swapped_dt(DST)),
                 WARN);
     }
 
-    // Quantization tensors are stored in abx over their owning tensor's dims.
-    SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, ROLE_M, ROLE_K,
-                 dnnl_data_type_undef),
+    // Quantization tensors carry only the masked logical dims of their owner.
+    const attr_t::arg_scales_t *sc = &prb->attr.scales;
+    const attr_t::zero_points_t *zp = &prb->attr.zero_points;
+    SAFE(periodize_quant(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, sc, nullptr,
+                 DNNL_ARG_SRC, ROLE_M, ROLE_K),
             WARN);
-    SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, ROLE_K,
-                 ROLE_N, dnnl_data_type_undef),
+    SAFE(periodize_quant(DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, sc, nullptr,
+                 DNNL_ARG_WEIGHTS, ROLE_K, ROLE_N),
             WARN);
     // Static dst scales are an input and must be periodized. Dynamic/derived
     // dst scales (mx, dynamic_fp) are an OUTPUT computed by the reference, so
     // they are broadcast in compute_ref_matmul_periodic instead, not here.
     if (!prb->attr.scales.get(DNNL_ARG_DST).is_dynamic()) {
-        SAFE(periodize_and_sync(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, ROLE_M,
-                     ROLE_N, dnnl_data_type_undef),
+        SAFE(periodize_quant(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, sc, nullptr,
+                     DNNL_ARG_DST, ROLE_M, ROLE_N),
                 WARN);
     }
-    SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, ROLE_M,
-                 ROLE_K, dnnl_data_type_undef),
+    SAFE(periodize_quant(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, nullptr, zp,
+                 DNNL_ARG_SRC, ROLE_M, ROLE_K),
             WARN);
-    SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, ROLE_K,
-                 ROLE_N, dnnl_data_type_undef),
+    SAFE(periodize_quant(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, nullptr,
+                 zp, DNNL_ARG_WEIGHTS, ROLE_K, ROLE_N),
             WARN);
-    SAFE(periodize_and_sync(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, ROLE_M,
-                 ROLE_N, dnnl_data_type_undef),
+    SAFE(periodize_quant(DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, nullptr, zp,
+                 DNNL_ARG_DST, ROLE_M, ROLE_N),
             WARN);
 
     // Binary/prelu post-op operands are addressed in the dst index space via
@@ -984,15 +1070,15 @@ static int apply_paneled_fill(dnn_mem_map_t &ref_mem_map,
         const auto &e = prb->attr.post_ops.entry[i];
         const int base = DNNL_ARG_ATTR_MULTIPLE_POST_OP(i);
         if (e.is_binary_kind()) {
-            SAFE(periodize_and_sync(base | DNNL_ARG_SRC_1, ROLE_M, ROLE_N,
+            SAFE(periodize_data(base | DNNL_ARG_SRC_1, ROLE_M, ROLE_N,
                          dnnl_data_type_undef),
                     WARN);
             if (e.is_binary_kind_with_ternary_op())
-                SAFE(periodize_and_sync(base | DNNL_ARG_SRC_2, ROLE_M, ROLE_N,
+                SAFE(periodize_data(base | DNNL_ARG_SRC_2, ROLE_M, ROLE_N,
                              dnnl_data_type_undef),
                         WARN);
         } else if (e.is_prelu_kind()) {
-            SAFE(periodize_and_sync(base | DNNL_ARG_WEIGHTS, ROLE_M, ROLE_N,
+            SAFE(periodize_data(base | DNNL_ARG_WEIGHTS, ROLE_M, ROLE_N,
                          dnnl_data_type_undef),
                     WARN);
         }
