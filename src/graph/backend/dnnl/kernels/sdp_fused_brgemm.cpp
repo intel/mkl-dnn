@@ -258,7 +258,10 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // otherwise on its second-to-last axis (natural [.., seq_kv, head_size]).
     seq_kv_ = mm1_transpose_b_ ? ltw(inputs[idx_k_]).vdims()[ndims_ - 2]
                                : ltw(inputs[idx_k_]).vdims()[ndims_ - 1];
-    if (has_select_) cond_strides_ = ltw(inputs[idx_cond_]).vstrides();
+    if (has_select_) {
+        cond_strides_ = ltw(inputs[idx_cond_]).vstrides();
+        cond_dims_ = ltw(inputs[idx_cond_]).vdims();
+    }
 
     // Alternative path: the decoupled query-axis blocked / two-pass-softmax
     // driver. It owns its own BRGEMM kernels and scratch sizing; the online
@@ -278,6 +281,7 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         bp.v_strides = v_strides_;
         bp.o_strides = o_strides_;
         bp.cond_strides = cond_strides_;
+        bp.cond_dims = cond_dims_;
         bp.has_select = has_select_;
         bp.select_fusiable = select_fusiable_;
         bp.mm1_transpose_b = mm1_transpose_b_;
@@ -371,9 +375,12 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // unavailable the execute path falls back to the scalar epilogue.
     if (mayiuse(avx2)) {
         using namespace sdp_softmax_ir;
-        // Condition tensor row stride in elements; columns are contiguous.
-        const int cond_stride
-                = has_select_ ? static_cast<int>(cond_strides_[row_dim]) : 0;
+        // Condition tensor row stride in elements; columns are contiguous. A
+        // seq_q axis of extent 1 is a broadcast axis (meaningless
+        // stride), so every query row reads the same condition row -> stride 0.
+        const int cond_stride = has_select_ && cond_dims_[row_dim] != 1
+                ? static_cast<int>(cond_strides_[row_dim])
+                : 0;
         const int sq = static_cast<int>(seq_q_);
         auto build_ir_kernel = [](std::unique_ptr<softmax_ir_kernel_t> &slot,
                                        ir_t ir) -> status_t {
@@ -474,7 +481,16 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
     const dim_t v_row = v_strides_[row_dim]; // V[.., seq_kv, hs_v]: kv step
     const dim_t o_row = o_strides_[row_dim];
     const dim_t o_col = o_strides_[ndims - 1];
-    const dim_t cond_row = has_select_ ? cond_strides_[row_dim] : 0;
+    // Broadcast-aware select-condition strides: an axis with extent 1 is a
+    // broadcast axis whose stride is meaningless and must contribute 0.
+    std::vector<dim_t> eff_cond_strides;
+    if (has_select_) {
+        eff_cond_strides = cond_strides_;
+        for (int d = 0; d < ndims; ++d)
+            if (cond_dims_[d] == 1) eff_cond_strides[d] = 0;
+    }
+    const dim_t cond_row = has_select_ ? eff_cond_strides[row_dim] : 0;
+    const dim_t cond_col = has_select_ ? eff_cond_strides[ndims - 1] : 0;
     constexpr float neg_inf = -std::numeric_limits<float>::infinity();
 
     // Query-side offset (Q / out / select-cond carry the group axis).
@@ -510,7 +526,7 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
                 + q_side_off(o_strides_, bo, bi, kvh, gid) * sizeof(float));
         const uint8_t *c_ptr = has_select_
                 ? reinterpret_cast<const uint8_t *>(cond_base
-                          + q_side_off(cond_strides_, bo, bi, kvh, gid)
+                          + q_side_off(eff_cond_strides, bo, bi, kvh, gid)
                                   * sizeof(uint8_t))
                 : nullptr;
 
@@ -565,7 +581,7 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
                 sargs.old_coef = old_coef;
                 // cond points at this tile's first column (row 0); the kernel
                 // advances by the compiled cond row stride per row.
-                sargs.cond = c_ptr ? c_ptr + kv0 : nullptr;
+                sargs.cond = c_ptr ? c_ptr + kv0 * cond_col : nullptr;
                 sargs.fill = &fill_val;
                 (*sm)(&sargs);
             } else {
@@ -577,7 +593,7 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
                     for (dim_t j = 0; j < w; ++j) {
                         float v = srow[j] * scale_val;
                         if (crow) {
-                            const bool cond = crow[kv0 + j] != 0;
+                            const bool cond = crow[(kv0 + j) * cond_col] != 0;
                             // not-fusiable (p1): cond ? fill : scores
                             // fusiable    (p2): cond ? scores : fill
                             const bool keep = select_fusiable_ ? cond : !cond;

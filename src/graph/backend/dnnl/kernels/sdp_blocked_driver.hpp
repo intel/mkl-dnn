@@ -112,6 +112,9 @@ struct sdp_blocked_params_t {
     // User strides in elements. Q / output / select-condition carry the group
     // axis; K / V have group extent 1 (broadcast over the group).
     std::vector<dim_t> q_strides, k_strides, v_strides, o_strides, cond_strides;
+    // Logical dims of the select-condition tensor; a dim of 1 is a broadcast
+    // broadcast axis whose (meaningless) stride must contribute 0.
+    std::vector<dim_t> cond_dims;
 
     bool has_select = false;
     // Select semantics: fusiable (p2) keeps scores where cond != 0 and writes

@@ -262,9 +262,17 @@ status_t sdp_blocked_driver_t::init(
     // user condition tile is dense [m x seq_kv] -- the ukernel addresses the
     // condition via the dst tile offsets, so its row stride must equal seq_kv
     // and its column stride must be 1. Otherwise fall back to the pre-pass.
-    const dim_t cond_row_stride = p_.has_select ? p_.cond_strides[row_dim] : 0;
-    const dim_t cond_col_stride
-            = p_.has_select ? p_.cond_strides[p_.ndims - 1] : 0;
+    // A condition axis with extent 1 is a broadcast axis whose stride is
+    // meaningless (set to the collapsed extent), so it must
+    // contribute 0; a broadcast seq_q axis in particular makes the tile
+    // non-dense and disqualifies the post-op.
+    const dim_t cond_row_stride = p_.has_select
+            ? (p_.cond_dims[row_dim] == 1 ? 0 : p_.cond_strides[row_dim])
+            : 0;
+    const dim_t cond_col_stride = p_.has_select
+            ? (p_.cond_dims[p_.ndims - 1] == 1 ? 0
+                                               : p_.cond_strides[p_.ndims - 1])
+            : 0;
     const bool want_select_postop = p_.has_select && p_.select_fusiable
             && cond_row_stride == seq_kv && cond_col_stride == 1;
 
@@ -434,7 +442,19 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     const dim_t q_row = p_.q_strides[row_dim];
     const dim_t o_row = p_.o_strides[row_dim];
     const dim_t o_col = p_.o_strides[ndims - 1];
-    const dim_t cond_row = has_select ? p_.cond_strides[row_dim] : 0;
+    // Broadcast-aware select-condition strides: an axis with extent 1 is a
+    // broadcast axis whose stride is meaningless (set to the collapsed extent), so it must contribute 0. distill_bert's condition is
+    // [1,1,1,seq_kv] -- broadcast over head and seq_q -- so without this the
+    // per-head base offset and the per-row (cond_row) advance both overrun the
+    // seq_kv-element buffer.
+    std::vector<dim_t> eff_cond_strides;
+    if (has_select) {
+        eff_cond_strides = p_.cond_strides;
+        for (int d = 0; d < ndims; ++d)
+            if (p_.cond_dims[d] == 1) eff_cond_strides[d] = 0;
+    }
+    const dim_t cond_row = has_select ? eff_cond_strides[row_dim] : 0;
+    const dim_t cond_col = has_select ? eff_cond_strides[ndims - 1] : 0;
 
     const dim_t n_qblk = utils::div_up(seq_q, q_block);
     const size_t block_size = scratch_per_thread_;
@@ -544,7 +564,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                         * o_dt_sz;
         const uint8_t *c_ptr = has_select
                 ? reinterpret_cast<const uint8_t *>(cond_base
-                          + (q_side_off(p_.cond_strides, bo, bi, kvh, gid)
+                          + (q_side_off(eff_cond_strides, bo, bi, kvh, gid)
                                     + q0 * cond_row)
                                   * sizeof(uint8_t))
                 : nullptr;
@@ -660,7 +680,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                     for (dim_t j = 0; j < seq_kv; ++j) {
                         float v = srow[j];
                         if (crow) {
-                            const bool cond = crow[j] != 0;
+                            const bool cond = crow[j * cond_col] != 0;
                             const bool keep = select_fusiable ? cond : !cond;
                             if (!keep) v = fill;
                         }
@@ -696,7 +716,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                 for (dim_t j = 0; j < seq_kv; ++j) {
                     float v = srow[j];
                     if (crow) {
-                        const bool cond = crow[j] != 0;
+                        const bool cond = crow[j * cond_col] != 0;
                         const bool keep = select_fusiable ? cond : !cond;
                         if (!keep) v = fill;
                     }

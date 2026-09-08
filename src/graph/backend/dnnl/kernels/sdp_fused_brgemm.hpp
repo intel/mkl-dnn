@@ -81,6 +81,9 @@ private:
     // User strides of Q / K / V / output / select-condition, in elements.
     std::vector<dim_t> q_strides_, k_strides_, v_strides_, o_strides_,
             cond_strides_;
+    // Logical dims of the select-condition tensor; a dim of 1 is a broadcast
+    // broadcast axis whose (meaningless) stride must contribute 0.
+    std::vector<dim_t> cond_dims_;
     // Indices into the external inputs vector (from sdp_cfg_.graph_inport).
     int idx_q_ = -1, idx_k_ = -1, idx_v_ = -1, idx_scale_ = -1, idx_cond_ = -1,
         idx_fill_ = -1, idx_mask_ = -1;
