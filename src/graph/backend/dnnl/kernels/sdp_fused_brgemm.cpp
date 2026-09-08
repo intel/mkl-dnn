@@ -18,7 +18,6 @@
 #include <cmath>
 #include <limits>
 #include <vector>
-#include <unordered_set>
 
 #include "common/compiler_workarounds.hpp"
 #include "common/dnnl_thread.hpp"
@@ -195,34 +194,26 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // value keeps the driver's [B,H,S,D] axis order with strides that encode
     // the transpose. Reading the partition output tensor's strides directly
     // would mis-map the head/seq axes; mm2's output value is the correct
-    // per-(batch,head,seq,head_size_v) stride source. mm2 is the matmul whose
-    // inputs trace back (through the softmax / reorder / permute ops) to the
-    // other (QK^T) matmul's output.
-    auto traces_to_other_matmul = [](op_t *m) -> bool {
-        std::vector<const value_t *> stack;
-        for (size_t i = 0; i < m->num_inputs(); ++i)
-            stack.push_back(m->get_input_value(i).get());
-        std::unordered_set<const value_t *> seen;
-        while (!stack.empty()) {
-            const value_t *v = stack.back();
-            stack.pop_back();
-            if (!v || !seen.insert(v).second) continue;
-            if (!v->has_producer()) continue;
-            op_t &prod = v->get_producer();
-            if (&prod != m && prod.get_kind() == graph::op_kind::_matmul)
-                return true;
-            for (size_t i = 0; i < prod.num_inputs(); ++i)
-                stack.push_back(prod.get_input_value(i).get());
-        }
-        return false;
-    };
+    // per-(batch,head,seq,head_size_v) stride source. mm2 is the matmul that
+    // consumes the softmax output; walk forward from the lowered softmax,
+    // skipping any permute/reorder the lowering inserted, to that matmul.
     op_t *mm2_op = nullptr;
     for (const auto &op : subgraph_->get_ops()) {
-        if (op->get_kind() != graph::op_kind::_matmul) continue;
-        if (traces_to_other_matmul(op.get())) {
-            mm2_op = op.get();
-            break;
+        if (op->get_kind() != graph::op_kind::_softmax) continue;
+        std::vector<op_t *> stack {op.get()};
+        while (!stack.empty() && !mm2_op) {
+            op_t *cur = stack.back();
+            stack.pop_back();
+            for (const auto &c : cur->get_output_value(0)->get_consumers()) {
+                op_t *co = &c.get_op();
+                if (co->get_kind() == graph::op_kind::_matmul) {
+                    mm2_op = co;
+                    break;
+                }
+                stack.push_back(co);
+            }
         }
+        break;
     }
 
     // Capture the geometry and user strides for the execute path.
