@@ -50,119 +50,58 @@ namespace dnnl_impl {
 
 using brgemm_kernel_t = dnnl::impl::cpu::x64::brgemm_kernel_t;
 
-// Fused CPU SDPA kernel, built on the internal x64 BRGEMM microkernel plus an
-// online-softmax (flash-attention-style) epilogue, so the full S x S score
-// matrix is never materialized. This is the CPU counterpart to the GPU-only
-// fused sdp_primitive_kernel_t (which fuses via the sdpa primitive).
+// Parsed SDP problem (geometry, strides, flags, input indices), filled once by
+// sdp_fused_brgemm_base_t::parse() and read by both concrete kernels.
+struct sdp_problem_t {
+    // MHA/MQA/GQA are all expressed via num_head_q vs num_head_kv.
+    int ndims = 0;
+    dim_t batch = 0, num_head_q = 0, num_head_kv = 0, group_head = 1;
+    dim_t seq_q = 0, seq_kv = 0, head_size_qk = 0, head_size_v = 0;
+    // User strides (elements) of Q / K / V / output / select-condition.
+    std::vector<dim_t> q_strides, k_strides, v_strides, o_strides, cond_strides;
+    // Select-condition logical dims; a dim of 1 is a broadcast axis whose
+    // (meaningless) stride must contribute 0.
+    std::vector<dim_t> cond_dims;
+    // Indices into the external inputs vector (from sdp_cfg_.graph_inport).
+    int idx_q = -1, idx_k = -1, idx_v = -1, idx_scale = -1, idx_cond = -1,
+        idx_fill = -1, idx_mask = -1;
+    bool has_scale = false, scale_is_divide = false, has_select = false,
+         select_fusiable = false, has_mask = false;
+    // mm1 (QK^T) transpose_b (K stored [.., seq_kv, hs] and transposed in the
+    // BRGEMM when set), and the SoftMax "inf_as_zero" mode (fully-masked row ->
+    // all-zero probabilities instead of NaN).
+    bool mm1_transpose_b = false, softmax_inf_as_zero = false;
+};
+
+// Shared front-end for the two fused BRGEMM SDPA kernels, the CPU counterpart
+// to the GPU-only fused sdp_primitive_kernel_t. Owns the subgraph / pattern
+// plumbing and parse(), which validates + lowers the partition and fills prb_.
 //
 // Scope of the first iteration:
-//   * fp32 only (non-quantized);
-//   * the GQA attention pattern: QK^T -> scale -> select-mask -> softmax -> PV.
+//   * non-quantized (fp32; bf16/f16 in the blocked kernel);
+//   * the attention pattern: QK^T -> scale -> select-mask -> softmax -> PV.
 //
-// It is selectable for A/B testing via ONEDNN_GRAPH_SDPA_IMPL=fused_brgemm (see
-// sdp_base_t in sdp.hpp). The compile path reuses sdp_decomp_config only for
-// pattern validation and dim/stride/flag extraction; the execute path streams
-// the KV sequence in tiles with an online-softmax epilogue.
-struct sdp_fused_brgemm_kernel_t : public kernel_base_t {
-private:
-#if DNNL_X64
+// It is abstract: the two concrete kernels below add only their own compute
+// state (online-softmax BRGEMM + IR kernels, or the blocked driver) and
+// implement compile/execute. Selectable for A/B testing via
+// ONEDNN_GRAPH_SDPA_IMPL={fused_brgemm|fused_brgemm_blocked} (see sdp_base_t).
+struct sdp_fused_brgemm_base_t : public kernel_base_t {
+protected:
     std::shared_ptr<subgraph_t> subgraph_;
     memory_planner_t memory_planner_;
-
-    // Reused only to validate the pattern and to extract SDP dims, strides and
-    // feature flags (scale/mask/select). The fused kernel does NOT build the
-    // decomposed sub-primitives.
+    // Reused only to validate the pattern and extract dims/strides/flags; the
+    // fused kernels do NOT build the decomposed sub-primitives.
     sdp_decomp_config_t sdp_cfg_;
-
-    // Parsed problem geometry (fp32 GQA), captured at compile time.
-    int ndims_ = 0;
-    dim_t batch_ = 0, num_head_q_ = 0, group_head_ = 1;
-    dim_t seq_q_ = 0, seq_kv_ = 0, hs_v_ = 0;
-    // User strides of Q / K / V / output / select-condition, in elements.
-    std::vector<dim_t> q_strides_, k_strides_, v_strides_, o_strides_,
-            cond_strides_;
-    // Logical dims of the select-condition tensor; a dim of 1 is a broadcast
-    // broadcast axis whose (meaningless) stride must contribute 0.
-    std::vector<dim_t> cond_dims_;
-    // Indices into the external inputs vector (from sdp_cfg_.graph_inport).
-    int idx_q_ = -1, idx_k_ = -1, idx_v_ = -1, idx_scale_ = -1, idx_cond_ = -1,
-        idx_fill_ = -1, idx_mask_ = -1;
-    bool has_scale_ = false, scale_is_divide_ = false, has_select_ = false,
-         select_fusiable_ = false, has_mask_ = false;
-    // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
-    // and the driver transposes it in the BRGEMM; otherwise K is [.., head_size,
-    // seq_kv] and consumed as is.
-    bool mm1_transpose_b_ = false;
-    // SoftMax "inf_as_zero" mode: a fully-masked row (all -inf inputs) yields an
-    // all-zero probability row instead of NaN. Mirrors the graph SoftMax op's
-    // `mode` attribute; drives the softmax primitive alg_kind in the driver.
-    bool softmax_inf_as_zero_ = false;
-    // KV tiling for the online (flash-style) softmax: seq_kv is processed in
-    // tiles of kv_blk_.
-    dim_t kv_blk_ = 0;
-    // Internal x64 BRGEMM kernels created in compile_impl. mm1 computes a
-    // scores tile Q*K[:, tile]; mm2 computes the P_tile*V[tile, :] partial
-    // (beta=0) that the epilogue rescales into the running output. The *_tail_
-    // variants handle the ragged last KV tile. Null on non-x64 builds.
-    brgemm_kernel_t *mm1_kernel_
-            = nullptr; // scores[seq_q, kv_blk] = Q * K_tile
-    brgemm_kernel_t *mm2_kernel_
-            = nullptr; // pv[seq_q, head_size_v] = P * V_tile
-    brgemm_kernel_t *mm1_tail_kernel_ = nullptr;
-    brgemm_kernel_t *mm2_tail_kernel_ = nullptr;
-
-    // JIT online-softmax epilogue kernels built from the x64 CPU IR (AVX2). The
-    // softmax kernels apply scale + select-mask + streaming-softmax to one KV
-    // tile of scores (full/tail width); acc_renorm rescales the running output
-    // by old_coef and adds the tile's P*V. When use_ir_epilogue_ is false (no
-    // AVX2), execute_impl runs the scalar epilogue instead. x64-only: the
-    // kernel type is incomplete elsewhere, so the members are compiled out.
-#if DNNL_X64
-    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
-            softmax_ir_kernel_;
-    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
-            softmax_tail_ir_kernel_;
-    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
-            acc_renorm_ir_kernel_;
-#endif
-    bool use_ir_epilogue_ = false;
-
-    // Per-thread scratchpad for the execute path's online-softmax working
-    // buffers: one block per thread, sized in compile_impl. Replaces the
-    // per-iteration std::vectors that would otherwise malloc in the hot loop.
-    registry_t sdp_registry_;
+    sdp_problem_t prb_;
     int nthr_ = 0;
 
-    // Alternative epilogue: when blocked_ is set (ONEDNN_GRAPH_SDPA_IMPL=
-    // fused_brgemm_blocked) the execute path uses the decoupled query-axis
-    // blocked / two-pass-softmax driver instead of the online-softmax
-    // epilogue above. Selectable for A/B benchmarking.
-    bool blocked_ = false;
-    sdp_blocked_driver_t blocked_driver_;
-    size_t blocked_scratch_total_ = 0;
-#endif
+    // Build the subgraph, validate + lower the SDP pattern, and fill prb_.
+    status_t parse(const dnnl_partition_impl_t *part, engine_t *eng,
+            const std::vector<logical_tensor_t> &inputs,
+            const std::vector<logical_tensor_t> &outputs);
 
 public:
-    sdp_fused_brgemm_kernel_t();
-
-    // Select the decoupled blocked / two-pass-softmax driver over the default
-    // online-softmax epilogue. Must be called before compile_impl.
-    void set_blocked(bool b) {
-#if DNNL_X64
-        blocked_ = b;
-#else
-        UNUSED(b);
-#endif
-    }
-    ~sdp_fused_brgemm_kernel_t() override;
-
-    status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
-            const std::vector<logical_tensor_t> &inputs,
-            const std::vector<logical_tensor_t> &outputs) override;
-
-    status_t execute_impl(stream_t *strm, const std::vector<tensor_t> &inputs,
-            const std::vector<tensor_t> &outputs,
-            const tensor_t *scratchpad_buf) override;
+    ~sdp_fused_brgemm_base_t() override = default;
 
 #ifdef DNNL_WITH_SYCL
     status_t sycl_execute_impl(stream_t *strm,
@@ -197,16 +136,90 @@ public:
         return status::unimplemented;
     }
 #endif
+};
 
-    DEF_KERNEL_METHOD_STR(sdp_fused_brgemm_kernel_t)
+// Online-softmax (flash-attention-style) fused SDPA kernel: streams the KV
+// sequence in tiles with an online-softmax epilogue, so the full S x S score
+// matrix is never materialized. Selected by ONEDNN_GRAPH_SDPA_IMPL=fused_brgemm.
+struct sdp_fused_brgemm_online_kernel_t : public sdp_fused_brgemm_base_t {
+private:
+#if DNNL_X64
+    // KV tiling width for the streaming softmax: seq_kv is processed in tiles
+    // of kv_blk_.
+    dim_t kv_blk_ = 0;
+    // Internal x64 BRGEMM kernels: mm1 computes a scores tile Q*K[:, tile];
+    // mm2 computes the P_tile*V[tile, :] partial (beta=0) that the epilogue
+    // rescales into the running output. The *_tail_ variants handle the ragged
+    // last KV tile.
+    brgemm_kernel_t *mm1_kernel_ = nullptr, *mm2_kernel_ = nullptr,
+                    *mm1_tail_kernel_ = nullptr, *mm2_tail_kernel_ = nullptr;
+    // JIT online-softmax epilogue built from the x64 CPU IR (AVX2): the softmax
+    // kernels apply scale + select-mask + streaming-softmax to one KV tile
+    // (full/tail width); acc_renorm rescales the running output by old_coef and
+    // adds the tile's P*V. When use_ir_epilogue_ is false (no AVX2), execute
+    // runs a scalar epilogue instead.
+    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
+            softmax_ir_kernel_, softmax_tail_ir_kernel_, acc_renorm_ir_kernel_;
+    bool use_ir_epilogue_ = false;
+    // Per-thread scratchpad for the online-softmax working buffers (one block
+    // per thread, sized in compile_impl).
+    registry_t sdp_registry_;
+#endif
+
+public:
+    // Out-of-line ctor/dtor: unique_ptr members to a forward-declared IR type.
+    sdp_fused_brgemm_online_kernel_t();
+    ~sdp_fused_brgemm_online_kernel_t() override;
+
+    status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
+            const std::vector<logical_tensor_t> &inputs,
+            const std::vector<logical_tensor_t> &outputs) override;
+
+    status_t execute_impl(stream_t *strm, const std::vector<tensor_t> &inputs,
+            const std::vector<tensor_t> &outputs,
+            const tensor_t *scratchpad_buf) override;
+
+    DEF_KERNEL_METHOD_STR(sdp_fused_brgemm_online_kernel_t)
     size_t get_scratchpad_size() const override {
 #if DNNL_X64
-        return blocked_ ? blocked_scratch_total_ : sdp_registry_.size() * nthr_;
+        return sdp_registry_.size() * nthr_;
 #else
         return 0;
 #endif
     }
-    DNNL_DISALLOW_COPY_AND_ASSIGN(sdp_fused_brgemm_kernel_t)
+    DNNL_DISALLOW_COPY_AND_ASSIGN(sdp_fused_brgemm_online_kernel_t)
+};
+
+// Query-axis blocked / two-pass-softmax fused SDPA kernel: delegates to the
+// decoupled blocked driver (which owns its own BRGEMM kernels and scratch).
+// Selected by ONEDNN_GRAPH_SDPA_IMPL=fused_brgemm_blocked.
+struct sdp_fused_brgemm_blocked_kernel_t : public sdp_fused_brgemm_base_t {
+private:
+#if DNNL_X64
+    sdp_blocked_driver_t blocked_driver_;
+    size_t blocked_scratch_total_ = 0;
+#endif
+
+public:
+    sdp_fused_brgemm_blocked_kernel_t() = default;
+
+    status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
+            const std::vector<logical_tensor_t> &inputs,
+            const std::vector<logical_tensor_t> &outputs) override;
+
+    status_t execute_impl(stream_t *strm, const std::vector<tensor_t> &inputs,
+            const std::vector<tensor_t> &outputs,
+            const tensor_t *scratchpad_buf) override;
+
+    DEF_KERNEL_METHOD_STR(sdp_fused_brgemm_blocked_kernel_t)
+    size_t get_scratchpad_size() const override {
+#if DNNL_X64
+        return blocked_scratch_total_;
+#else
+        return 0;
+#endif
+    }
+    DNNL_DISALLOW_COPY_AND_ASSIGN(sdp_fused_brgemm_blocked_kernel_t)
 };
 
 } // namespace dnnl_impl

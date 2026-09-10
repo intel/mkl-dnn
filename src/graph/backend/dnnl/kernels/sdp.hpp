@@ -80,16 +80,13 @@ public:
                 ret = kernel->compile_impl(part, eng, inputs, outputs);
                 break;
             case sdpa_impl_kind_t::fused_brgemm:
-                kernel = std::make_shared<sdp_fused_brgemm_kernel_t>();
+                kernel = std::make_shared<sdp_fused_brgemm_online_kernel_t>();
                 ret = kernel->compile_impl(part, eng, inputs, outputs);
                 break;
-            case sdpa_impl_kind_t::fused_brgemm_blocked: {
-                auto k = std::make_shared<sdp_fused_brgemm_kernel_t>();
-                k->set_blocked(true);
-                kernel = k;
+            case sdpa_impl_kind_t::fused_brgemm_blocked:
+                kernel = std::make_shared<sdp_fused_brgemm_blocked_kernel_t>();
                 ret = kernel->compile_impl(part, eng, inputs, outputs);
                 break;
-            }
             case sdpa_impl_kind_t::automatic:
             default:
                 kernel = std::make_shared<sdp_primitive_kernel_t<quantized>>();

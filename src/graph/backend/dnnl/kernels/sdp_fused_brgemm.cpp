@@ -45,8 +45,8 @@
 #endif
 
 #define VCHECK_SDP_FUSED_BRGEMM(cond, status, msg, ...) \
-    VCONDCHECK(graph, create, check, sdp_fused_brgemm_kernel_t, (cond), \
-            status, msg, ##__VA_ARGS__);
+    VCONDCHECK(graph, create, check, sdp_fused_brgemm_base_t, (cond), status, \
+            msg, ##__VA_ARGS__);
 
 namespace dnnl {
 namespace impl {
@@ -63,11 +63,11 @@ enum mem_key : size_t {
     mem_old_coef,
 };
 
-// Constructor is defined here where the x64 IR kernel type is complete
-// (unique_ptr members to a forward-declared type).
-sdp_fused_brgemm_kernel_t::sdp_fused_brgemm_kernel_t() = default;
+// Ctor/dtor defined here where the x64 IR kernel type is complete (the online
+// kernel holds unique_ptr members to a forward-declared type).
+sdp_fused_brgemm_online_kernel_t::sdp_fused_brgemm_online_kernel_t() = default;
 
-sdp_fused_brgemm_kernel_t::~sdp_fused_brgemm_kernel_t() {
+sdp_fused_brgemm_online_kernel_t::~sdp_fused_brgemm_online_kernel_t() {
 #if DNNL_X64
     for (auto *k :
             {mm1_kernel_, mm2_kernel_, mm1_tail_kernel_, mm2_tail_kernel_}) {
@@ -76,9 +76,8 @@ sdp_fused_brgemm_kernel_t::~sdp_fused_brgemm_kernel_t() {
 #endif
 }
 
-status_t sdp_fused_brgemm_kernel_t::compile_impl(
-        const dnnl_partition_impl_t *part, engine_t *eng,
-        const std::vector<logical_tensor_t> &inputs,
+status_t sdp_fused_brgemm_base_t::parse(const dnnl_partition_impl_t *part,
+        engine_t *eng, const std::vector<logical_tensor_t> &inputs,
         const std::vector<logical_tensor_t> &outputs) {
     VCHECK_SDP_FUSED_BRGEMM(eng->kind() == engine_kind::cpu,
             status::unimplemented, "supports cpu only");
@@ -99,13 +98,6 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
 #else
     using namespace dnnl::impl::cpu::x64;
 
-    // KV tiling width for the streaming softmax: K/V are processed in chunks
-    // of up to this many columns, bounding the per-thread scores tile
-    // ([seq_q, kv_blk]).
-    // TODO: this is a fixed heuristic; it should be derived from the cache
-    // size, seq_q and head size so the scores/pv tiles stay cache-resident.
-    constexpr dim_t kv_block_width = 512;
-
     p_engine_ = make_dnnl_engine(*eng);
 
     // Get subgraph from the deep copied partition.
@@ -121,13 +113,15 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     op_t *softmax_op = nullptr;
     std::vector<op_t *> matmul_ops;
     for (const auto &op : subgraph_->get_ops()) {
-        if (op->get_kind() == graph::op_kind::Divide) scale_is_divide_ = true;
+        if (op->get_kind() == graph::op_kind::Divide)
+            prb_.scale_is_divide = true;
         if (op->get_kind() == graph::op_kind::MatMul)
             matmul_ops.push_back(op.get());
         if (op->get_kind() == graph::op_kind::SoftMax) softmax_op = op.get();
     }
     if (softmax_op && softmax_op->has_attr(op_attr::mode))
-        softmax_inf_as_zero_ = softmax_op->get_attr<std::string>(op_attr::mode)
+        prb_.softmax_inf_as_zero
+                = softmax_op->get_attr<std::string>(op_attr::mode)
                 == "inf_as_zero";
     // mm1 is the QK^T matmul: the one that does not consume the softmax output
     // (that is mm2 = P*V).
@@ -139,11 +133,11 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
                 consumes_softmax = true;
         }
         if (!consumes_softmax && mm->has_attr(op_attr::transpose_b))
-            mm1_transpose_b_ = mm->get_attr<bool>(op_attr::transpose_b);
+            prb_.mm1_transpose_b = mm->get_attr<bool>(op_attr::transpose_b);
     }
 
     // Validate the SDP pattern and extract dims/flags. This fused kernel is
-    // fp32-only, so the quantized lowering passes are skipped.
+    // non-quantized, so the quantized lowering passes are skipped.
     //
     // The blocked driver parallelizes over (batch, num_head_q, query blocks),
     // so it does not need the decomp RATIO/thread gate (which only saturates
@@ -152,12 +146,12 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
                 /*enforce_thread_ratio=*/false))
         return status::unimplemented;
 
-    // First iteration only supports the plain fp32 GQA pattern:
+    // First iteration supports the non-quantized attention pattern:
     // QK^T -> scale -> select-mask -> softmax -> PV.
-    has_scale_ = sdp_cfg_.has_scale;
-    has_select_ = sdp_cfg_.has_select;
-    select_fusiable_ = sdp_cfg_.select_fusiable;
-    has_mask_ = sdp_cfg_.has_attention_mask;
+    prb_.has_scale = sdp_cfg_.has_scale;
+    prb_.has_select = sdp_cfg_.has_select;
+    prb_.select_fusiable = sdp_cfg_.select_fusiable;
+    prb_.has_mask = sdp_cfg_.has_attention_mask;
     VCHECK_SDP_FUSED_BRGEMM(!sdp_cfg_.has_soft_capping, status::unimplemented,
             "fused kernel does not support soft-capping yet");
 
@@ -216,102 +210,72 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         break;
     }
 
-    // Capture the geometry and user strides for the execute path.
-    ndims_ = static_cast<int>(sdp_cfg_.ndims);
-    batch_ = sdp_cfg_.batch_size;
-    num_head_q_ = sdp_cfg_.num_head_q;
-    const dim_t num_head_kv = sdp_cfg_.num_head_kv;
-    group_head_ = num_head_q_ / num_head_kv;
-    seq_q_ = sdp_cfg_.seq_len_q;
-    const dim_t hs_qk = sdp_cfg_.head_size_qk;
-    hs_v_ = sdp_cfg_.head_size_v;
+    // Geometry and user strides. Both concrete kernels consume prb_ at compile
+    // time; the online kernel also reads it at execute, and the blocked kernel
+    // copies the relevant fields into its driver params.
+    prb_.ndims = static_cast<int>(sdp_cfg_.ndims);
+    prb_.batch = sdp_cfg_.batch_size;
+    prb_.num_head_q = sdp_cfg_.num_head_q;
+    prb_.num_head_kv = sdp_cfg_.num_head_kv;
+    prb_.group_head = prb_.num_head_q / prb_.num_head_kv;
+    prb_.seq_q = sdp_cfg_.seq_len_q;
+    prb_.head_size_qk = sdp_cfg_.head_size_qk;
+    prb_.head_size_v = sdp_cfg_.head_size_v;
 
     const auto &gi = sdp_cfg_.graph_inport;
-    idx_q_ = gi[sdp_decomp_config_t::mm1_src];
-    idx_k_ = gi[sdp_decomp_config_t::mm1_wei];
-    idx_v_ = gi[sdp_decomp_config_t::mm2_wei];
-    idx_scale_ = gi[sdp_decomp_config_t::mm1_scale];
-    idx_cond_ = gi[sdp_decomp_config_t::select_condition];
-    idx_fill_ = gi[sdp_decomp_config_t::select_other_input];
-    idx_mask_ = gi[sdp_decomp_config_t::mm1_add];
+    prb_.idx_q = gi[sdp_decomp_config_t::mm1_src];
+    prb_.idx_k = gi[sdp_decomp_config_t::mm1_wei];
+    prb_.idx_v = gi[sdp_decomp_config_t::mm2_wei];
+    prb_.idx_scale = gi[sdp_decomp_config_t::mm1_scale];
+    prb_.idx_cond = gi[sdp_decomp_config_t::select_condition];
+    prb_.idx_fill = gi[sdp_decomp_config_t::select_other_input];
+    prb_.idx_mask = gi[sdp_decomp_config_t::mm1_add];
 
-    q_strides_ = ltw(inputs[idx_q_]).vstrides();
-    k_strides_ = ltw(inputs[idx_k_]).vstrides();
-    v_strides_ = ltw(inputs[idx_v_]).vstrides();
+    prb_.q_strides = ltw(inputs[prb_.idx_q]).vstrides();
+    prb_.k_strides = ltw(inputs[prb_.idx_k]).vstrides();
+    prb_.v_strides = ltw(inputs[prb_.idx_v]).vstrides();
     // Output strides come from mm2's own output value (driver [B,H,S,D] axis
     // order, transpose-fold aware), not the partition output tensor which may
     // be in a permuted axis order after a folded StaticTranspose. Fall back to
     // the partition output tensor if mm2 could not be located.
-    o_strides_ = mm2_op
+    prb_.o_strides = mm2_op
             ? ltw(mm2_op->get_output_value(0)->get_logical_tensor()).vstrides()
             : ltw(outputs[0]).vstrides();
     // K holds seq_kv on its last axis when consumed as K^T (transpose_b == 0),
     // otherwise on its second-to-last axis (natural [.., seq_kv, head_size]).
-    seq_kv_ = mm1_transpose_b_ ? ltw(inputs[idx_k_]).vdims()[ndims_ - 2]
-                               : ltw(inputs[idx_k_]).vdims()[ndims_ - 1];
-    if (has_select_) {
-        cond_strides_ = ltw(inputs[idx_cond_]).vstrides();
-        cond_dims_ = ltw(inputs[idx_cond_]).vdims();
+    prb_.seq_kv = prb_.mm1_transpose_b
+            ? ltw(inputs[prb_.idx_k]).vdims()[prb_.ndims - 2]
+            : ltw(inputs[prb_.idx_k]).vdims()[prb_.ndims - 1];
+    if (prb_.has_select) {
+        prb_.cond_strides = ltw(inputs[prb_.idx_cond]).vstrides();
+        prb_.cond_dims = ltw(inputs[prb_.idx_cond]).vdims();
     }
 
-    // Alternative path: the decoupled query-axis blocked / two-pass-softmax
-    // driver. It owns its own BRGEMM kernels and scratch sizing; the online
-    // epilogue below is skipped entirely.
-    if (blocked_) {
-        sdp_blocked_params_t bp;
-        bp.ndims = ndims_;
-        bp.batch = batch_;
-        bp.num_head_q = num_head_q_;
-        bp.group_head = group_head_;
-        bp.seq_q = seq_q_;
-        bp.seq_kv = seq_kv_;
-        bp.head_size_qk = hs_qk;
-        bp.head_size_v = hs_v_;
-        bp.q_strides = q_strides_;
-        bp.k_strides = k_strides_;
-        bp.v_strides = v_strides_;
-        bp.o_strides = o_strides_;
-        bp.cond_strides = cond_strides_;
-        bp.cond_dims = cond_dims_;
-        bp.has_select = has_select_;
-        bp.select_fusiable = select_fusiable_;
-        bp.mm1_transpose_b = mm1_transpose_b_;
-        bp.softmax_inf_as_zero = softmax_inf_as_zero_;
-        // Compute type (Q/K/V) and output type. The scores/pv tiles stay f32
-        // (BRGEMM accumulates in f32); the driver down-converts P and the
-        // output to these types.
-        bp.mm_dt = static_cast<dnnl::impl::data_type_t>(
-                ltw(inputs[idx_q_]).data_type());
-        bp.out_dt = static_cast<dnnl::impl::data_type_t>(
-                ltw(outputs[0]).data_type());
-        // mm1 post-op chain in graph order: scale (binary-mul, scalar rhs,
-        // already reciprocated at execute if Divide) then the additive
-        // attention mask (binary-add, tensor rhs offset per batch/head/tile).
-        // Soft-cap entries will be appended here as they are enabled.
-        if (has_scale_) {
-            sdp_mm1_post_op_t sc;
-            sc.alg = dnnl::impl::alg_kind::binary_mul;
-            sc.is_binary = true;
-            sc.rhs_is_scalar = true;
-            sc.rhs_dt = dnnl::impl::data_type::f32;
-            bp.mm1_post_ops.push_back(sc);
-        }
-        if (has_mask_) {
-            sdp_mm1_post_op_t mk;
-            mk.alg = dnnl::impl::alg_kind::binary_add;
-            mk.is_binary = true;
-            mk.rhs_is_scalar = false;
-            mk.rhs_dt = static_cast<dnnl::impl::data_type_t>(
-                    ltw(inputs[idx_mask_]).data_type());
-            mk.rhs_dims = ltw(inputs[idx_mask_]).vdims();
-            mk.rhs_strides = ltw(inputs[idx_mask_]).vstrides();
-            bp.mm1_post_ops.push_back(mk);
-        }
-        CHECK(blocked_driver_.init(bp, eng));
-        nthr_ = blocked_driver_.nthr();
-        blocked_scratch_total_ = blocked_driver_.scratch_total(nthr_);
-        return status::success;
-    }
+    return status::success;
+#endif
+}
+
+status_t sdp_fused_brgemm_online_kernel_t::compile_impl(
+        const dnnl_partition_impl_t *part, engine_t *eng,
+        const std::vector<logical_tensor_t> &inputs,
+        const std::vector<logical_tensor_t> &outputs) {
+    CHECK(parse(part, eng, inputs, outputs));
+#if DNNL_X64
+    using namespace dnnl::impl::cpu::x64;
+
+    const int ndims = prb_.ndims;
+    const dim_t seq_q = prb_.seq_q;
+    const dim_t seq_kv = prb_.seq_kv;
+    const dim_t hs_qk = prb_.head_size_qk;
+    const dim_t hs_v = prb_.head_size_v;
+    const dim_t row_dim = ndims - 2;
+
+    // KV tiling width for the streaming softmax: K/V are processed in chunks of
+    // up to this many columns, bounding the per-thread scores tile
+    // ([seq_q, kv_blk]).
+    // TODO: this is a fixed heuristic; it should be derived from the cache
+    // size, seq_q and head size so the scores/pv tiles stay cache-resident.
+    constexpr dim_t kv_block_width = 512;
 
     // Create the BRGEMM kernels. Shapes/leading dims are identical for every
     // slice, so one kernel per (full/tail) tile width suffices.
@@ -321,8 +285,8 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     // seq_kv % kv_blk_ remainder for the last tile. mm2 writes a per-tile
     // buffer; the online-softmax epilogue accumulates it into the running
     // output.
-    kv_blk_ = nstl::min<dim_t>(seq_kv_, kv_block_width);
-    const dim_t kv_tail = seq_kv_ % kv_blk_;
+    kv_blk_ = nstl::min<dim_t>(seq_kv, kv_block_width);
+    const dim_t kv_tail = seq_kv % kv_blk_;
 
     auto create_brgemm
             = [&](brgemm_kernel_t **out, float beta, dim_t M, dim_t N, dim_t K,
@@ -340,19 +304,18 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         return status::success;
     };
 
-    const dim_t row_dim = ndims_ - 2;
     // mm1 writes a dense [seq_q, w] tile (ldc = w); mm2 multiplies that dense
-    // tile by V into a dense [seq_q, hs_v] per-tile buffer (beta=0). The
-    // running normalized output is combined in the epilogue, so magnitudes
-    // stay O(|V|) (matches the decomp kernel's normalize-before accuracy).
+    // tile by V into a dense [seq_q, hs_v] per-tile buffer (beta=0). The running
+    // normalized output is combined in the epilogue, so magnitudes stay O(|V|)
+    // (matches the decomp kernel's normalize-before accuracy).
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t w) {
-        CHECK(create_brgemm(mm1, /*beta=*/0.0f, seq_q_, w, hs_qk,
-                /*lda=*/q_strides_[row_dim],
-                /*ldb=*/k_strides_[row_dim],
+        CHECK(create_brgemm(mm1, /*beta=*/0.0f, seq_q, w, hs_qk,
+                /*lda=*/prb_.q_strides[row_dim],
+                /*ldb=*/prb_.k_strides[row_dim],
                 /*ldc=*/w));
-        CHECK(create_brgemm(mm2, /*beta=*/0.0f, seq_q_, hs_v_, w,
-                /*lda=*/w, /*ldb=*/v_strides_[row_dim], /*ldc=*/hs_v_));
+        CHECK(create_brgemm(mm2, /*beta=*/0.0f, seq_q, hs_v, w,
+                /*lda=*/w, /*ldb=*/prb_.v_strides[row_dim], /*ldc=*/hs_v));
         return status::success;
     };
 
@@ -367,12 +330,12 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     if (mayiuse(avx2)) {
         using namespace sdp_softmax_ir;
         // Condition tensor row stride in elements; columns are contiguous. A
-        // seq_q axis of extent 1 is a broadcast axis (meaningless
-        // stride), so every query row reads the same condition row -> stride 0.
-        const int cond_stride = has_select_ && cond_dims_[row_dim] != 1
-                ? static_cast<int>(cond_strides_[row_dim])
+        // seq_q axis of extent 1 is a broadcast axis (meaningless stride), so
+        // every query row reads the same condition row -> stride 0.
+        const int cond_stride = prb_.has_select && prb_.cond_dims[row_dim] != 1
+                ? static_cast<int>(prb_.cond_strides[row_dim])
                 : 0;
-        const int sq = static_cast<int>(seq_q_);
+        const int sq = static_cast<int>(seq_q);
         auto build_ir_kernel = [](std::unique_ptr<softmax_ir_kernel_t> &slot,
                                        ir_t ir) -> status_t {
             std::unique_ptr<softmax_ir_kernel_t> k(
@@ -383,14 +346,15 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
         };
         status_t st = build_ir_kernel(softmax_ir_kernel_,
                 build_softmax_tile_ir(sq, static_cast<int>(kv_blk_),
-                        has_select_, select_fusiable_, cond_stride));
+                        prb_.has_select, prb_.select_fusiable, cond_stride));
         if (st == status::success && kv_tail != 0)
             st = build_ir_kernel(softmax_tail_ir_kernel_,
                     build_softmax_tile_ir(sq, static_cast<int>(kv_tail),
-                            has_select_, select_fusiable_, cond_stride));
+                            prb_.has_select, prb_.select_fusiable,
+                            cond_stride));
         if (st == status::success)
             st = build_ir_kernel(acc_renorm_ir_kernel_,
-                    build_acc_renorm_ir(sq, static_cast<int>(hs_v_)));
+                    build_acc_renorm_ir(sq, static_cast<int>(hs_v)));
         use_ir_epilogue_ = st == status::success;
     }
 
@@ -399,18 +363,136 @@ status_t sdp_fused_brgemm_kernel_t::compile_impl(
     nthr_ = dnnl_get_max_threads();
     const size_t fsz = sizeof(float);
     registrar_t reg = sdp_registry_.registrar();
-    reg.book(mem_scores, static_cast<size_t>(seq_q_) * kv_blk_ * fsz);
-    reg.book(mem_acc, static_cast<size_t>(seq_q_) * hs_v_ * fsz);
-    reg.book(mem_pv, static_cast<size_t>(seq_q_) * hs_v_ * fsz);
-    reg.book(mem_row_max, static_cast<size_t>(seq_q_) * fsz);
-    reg.book(mem_row_denom, static_cast<size_t>(seq_q_) * fsz);
-    reg.book(mem_old_coef, static_cast<size_t>(seq_q_) * fsz);
+    reg.book(mem_scores, static_cast<size_t>(seq_q) * kv_blk_ * fsz);
+    reg.book(mem_acc, static_cast<size_t>(seq_q) * hs_v * fsz);
+    reg.book(mem_pv, static_cast<size_t>(seq_q) * hs_v * fsz);
+    reg.book(mem_row_max, static_cast<size_t>(seq_q) * fsz);
+    reg.book(mem_row_denom, static_cast<size_t>(seq_q) * fsz);
+    reg.book(mem_old_coef, static_cast<size_t>(seq_q) * fsz);
 
     return status::success;
+#else
+    return status::unimplemented;
 #endif
 }
 
-status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
+status_t sdp_fused_brgemm_blocked_kernel_t::compile_impl(
+        const dnnl_partition_impl_t *part, engine_t *eng,
+        const std::vector<logical_tensor_t> &inputs,
+        const std::vector<logical_tensor_t> &outputs) {
+    CHECK(parse(part, eng, inputs, outputs));
+#if DNNL_X64
+    sdp_blocked_params_t bp;
+    bp.ndims = prb_.ndims;
+    bp.batch = prb_.batch;
+    bp.num_head_q = prb_.num_head_q;
+    bp.group_head = prb_.group_head;
+    bp.seq_q = prb_.seq_q;
+    bp.seq_kv = prb_.seq_kv;
+    bp.head_size_qk = prb_.head_size_qk;
+    bp.head_size_v = prb_.head_size_v;
+    bp.q_strides = prb_.q_strides;
+    bp.k_strides = prb_.k_strides;
+    bp.v_strides = prb_.v_strides;
+    bp.o_strides = prb_.o_strides;
+    bp.cond_strides = prb_.cond_strides;
+    bp.cond_dims = prb_.cond_dims;
+    bp.has_select = prb_.has_select;
+    bp.select_fusiable = prb_.select_fusiable;
+    bp.mm1_transpose_b = prb_.mm1_transpose_b;
+    bp.softmax_inf_as_zero = prb_.softmax_inf_as_zero;
+    // Compute type (Q/K/V) and output type. The scores/pv tiles stay f32
+    // (BRGEMM accumulates in f32); the driver down-converts P and the output to
+    // these types.
+    bp.mm_dt = static_cast<dnnl::impl::data_type_t>(
+            ltw(inputs[prb_.idx_q]).data_type());
+    bp.out_dt
+            = static_cast<dnnl::impl::data_type_t>(ltw(outputs[0]).data_type());
+    // mm1 post-op chain in graph order: scale (binary-mul, scalar rhs, already
+    // reciprocated at execute if Divide) then the additive attention mask
+    // (binary-add, tensor rhs offset per batch/head/tile). Soft-cap entries will
+    // be appended here as they are enabled.
+    if (prb_.has_scale) {
+        sdp_mm1_post_op_t sc;
+        sc.alg = dnnl::impl::alg_kind::binary_mul;
+        sc.is_binary = true;
+        sc.rhs_is_scalar = true;
+        sc.rhs_dt = dnnl::impl::data_type::f32;
+        bp.mm1_post_ops.push_back(sc);
+    }
+    if (prb_.has_mask) {
+        sdp_mm1_post_op_t mk;
+        mk.alg = dnnl::impl::alg_kind::binary_add;
+        mk.is_binary = true;
+        mk.rhs_is_scalar = false;
+        mk.rhs_dt = static_cast<dnnl::impl::data_type_t>(
+                ltw(inputs[prb_.idx_mask]).data_type());
+        mk.rhs_dims = ltw(inputs[prb_.idx_mask]).vdims();
+        mk.rhs_strides = ltw(inputs[prb_.idx_mask]).vstrides();
+        bp.mm1_post_ops.push_back(mk);
+    }
+    CHECK(blocked_driver_.init(bp, eng));
+    nthr_ = blocked_driver_.nthr();
+    blocked_scratch_total_ = blocked_driver_.scratch_total(nthr_);
+    return status::success;
+#else
+    return status::unimplemented;
+#endif
+}
+
+status_t sdp_fused_brgemm_blocked_kernel_t::execute_impl(stream_t *strm,
+        const std::vector<tensor_t> &inputs,
+        const std::vector<tensor_t> &outputs, const tensor_t *scratchpad_buf) {
+    UNUSED(strm);
+#if !DNNL_X64
+    UNUSED(inputs);
+    UNUSED(outputs);
+    UNUSED(scratchpad_buf);
+    return status::unimplemented;
+#else
+    auto *q_base
+            = static_cast<const char *>(inputs[prb_.idx_q].get_data_handle());
+    auto *k_base
+            = static_cast<const char *>(inputs[prb_.idx_k].get_data_handle());
+    auto *v_base
+            = static_cast<const char *>(inputs[prb_.idx_v].get_data_handle());
+    auto *o_base = static_cast<char *>(outputs[0].get_data_handle());
+
+    float scale_val = 1.0f;
+    if (prb_.has_scale) {
+        scale_val = *static_cast<const float *>(
+                inputs[prb_.idx_scale].get_data_handle());
+        if (prb_.scale_is_divide) scale_val = 1.0f / scale_val;
+    }
+    float fill_val = 0.0f;
+    const char *cond_base = nullptr;
+    if (prb_.has_select) {
+        fill_val = *static_cast<const float *>(
+                inputs[prb_.idx_fill].get_data_handle());
+        cond_base = static_cast<const char *>(
+                inputs[prb_.idx_cond].get_data_handle());
+    }
+
+    sdp_blocked_run_args_t args;
+    args.q = q_base;
+    args.k = k_base;
+    args.v = v_base;
+    args.cond = cond_base;
+    args.out = o_base;
+    args.fill = fill_val;
+    // rhs base pointers for the mm1 binary post-ops, in chain order. Only the QK
+    // scale is present today; scale_val is a stable local that outlives the
+    // execute call below.
+    if (prb_.has_scale) args.mm1_post_op_rhs.push_back(&scale_val);
+    if (prb_.has_mask)
+        args.mm1_post_op_rhs.push_back(inputs[prb_.idx_mask].get_data_handle());
+    auto scratchpad = std::make_shared<scratchpad_t>(
+            scratchpad_buf, blocked_scratch_total_, p_engine_);
+    return blocked_driver_.execute(args, scratchpad->get_buffer(), nthr_);
+#endif
+}
+
+status_t sdp_fused_brgemm_online_kernel_t::execute_impl(stream_t *strm,
         const std::vector<tensor_t> &inputs,
         const std::vector<tensor_t> &outputs, const tensor_t *scratchpad_buf) {
     UNUSED(strm);
@@ -422,66 +504,51 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
 #else
     using namespace dnnl::impl::cpu::x64;
 
-    auto *q_base = static_cast<const char *>(inputs[idx_q_].get_data_handle());
-    auto *k_base = static_cast<const char *>(inputs[idx_k_].get_data_handle());
-    auto *v_base = static_cast<const char *>(inputs[idx_v_].get_data_handle());
+    auto *q_base
+            = static_cast<const char *>(inputs[prb_.idx_q].get_data_handle());
+    auto *k_base
+            = static_cast<const char *>(inputs[prb_.idx_k].get_data_handle());
+    auto *v_base
+            = static_cast<const char *>(inputs[prb_.idx_v].get_data_handle());
     auto *o_base = static_cast<char *>(outputs[0].get_data_handle());
 
     float scale_val = 1.0f;
-    if (has_scale_) {
+    if (prb_.has_scale) {
         scale_val = *static_cast<const float *>(
-                inputs[idx_scale_].get_data_handle());
-        if (scale_is_divide_) scale_val = 1.0f / scale_val;
+                inputs[prb_.idx_scale].get_data_handle());
+        if (prb_.scale_is_divide) scale_val = 1.0f / scale_val;
     }
     float fill_val = 0.0f;
     const char *cond_base = nullptr;
-    if (has_select_) {
+    if (prb_.has_select) {
         fill_val = *static_cast<const float *>(
-                inputs[idx_fill_].get_data_handle());
+                inputs[prb_.idx_fill].get_data_handle());
         cond_base = static_cast<const char *>(
-                inputs[idx_cond_].get_data_handle());
+                inputs[prb_.idx_cond].get_data_handle());
     }
 
-    // Alternative path: run the decoupled blocked driver over its own scratch.
-    if (blocked_) {
-        sdp_blocked_run_args_t args;
-        args.q = q_base;
-        args.k = k_base;
-        args.v = v_base;
-        args.cond = cond_base;
-        args.out = o_base;
-        args.fill = fill_val;
-        // rhs base pointers for the mm1 binary post-ops, in chain order. Only
-        // the QK scale is present today; scale_val is a stable local that
-        // outlives the execute call below.
-        if (has_scale_) args.mm1_post_op_rhs.push_back(&scale_val);
-        if (has_mask_)
-            args.mm1_post_op_rhs.push_back(inputs[idx_mask_].get_data_handle());
-        auto scratchpad = std::make_shared<scratchpad_t>(
-                scratchpad_buf, blocked_scratch_total_, p_engine_);
-        return blocked_driver_.execute(args, scratchpad->get_buffer(), nthr_);
-    }
-
-    const dim_t seq_q = seq_q_, seq_kv = seq_kv_, hs_v = hs_v_;
+    const dim_t seq_q = prb_.seq_q, seq_kv = prb_.seq_kv,
+                hs_v = prb_.head_size_v;
     const dim_t kv_blk = kv_blk_;
-    const dim_t group = group_head_;
-    const int ndims = ndims_;
+    const dim_t group = prb_.group_head;
+    const int ndims = prb_.ndims;
     const int row_dim = ndims - 2;
     // Element strides for addressing a KV tile within K / V.
-    const dim_t k_col = k_strides_[ndims - 1]; // K[.., hs, seq_kv]: seq_kv step
-    const dim_t v_row = v_strides_[row_dim]; // V[.., seq_kv, hs_v]: kv step
-    const dim_t o_row = o_strides_[row_dim];
-    const dim_t o_col = o_strides_[ndims - 1];
+    const dim_t k_col
+            = prb_.k_strides[ndims - 1]; // K[.., hs, seq_kv]: seq step
+    const dim_t v_row = prb_.v_strides[row_dim]; // V[.., seq_kv, hs_v]: kv step
+    const dim_t o_row = prb_.o_strides[row_dim];
+    const dim_t o_col = prb_.o_strides[ndims - 1];
     // Broadcast-aware select-condition strides: an axis with extent 1 is a
     // broadcast axis whose stride is meaningless and must contribute 0.
     std::vector<dim_t> eff_cond_strides;
-    if (has_select_) {
-        eff_cond_strides = cond_strides_;
+    if (prb_.has_select) {
+        eff_cond_strides = prb_.cond_strides;
         for (int d = 0; d < ndims; ++d)
-            if (cond_dims_[d] == 1) eff_cond_strides[d] = 0;
+            if (prb_.cond_dims[d] == 1) eff_cond_strides[d] = 0;
     }
-    const dim_t cond_row = has_select_ ? eff_cond_strides[row_dim] : 0;
-    const dim_t cond_col = has_select_ ? eff_cond_strides[ndims - 1] : 0;
+    const dim_t cond_row = prb_.has_select ? eff_cond_strides[row_dim] : 0;
+    const dim_t cond_col = prb_.has_select ? eff_cond_strides[ndims - 1] : 0;
     constexpr float neg_inf = -std::numeric_limits<float>::infinity();
 
     // Query-side offset (Q / out / select-cond carry the group axis).
@@ -502,20 +569,20 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
             scratchpad_buf, block_size * nthr_, p_engine_);
     grantor_t var_grantor = sdp_registry_.grantor(scratchpad->get_buffer());
 
-    parallel_nd_ext(
-            nthr_, batch_, num_head_q_, [&](int tid, int, dim_t bo, dim_t bi) {
+    parallel_nd_ext(nthr_, prb_.batch, prb_.num_head_q,
+            [&](int tid, int, dim_t bo, dim_t bi) {
         const dim_t kvh = bi / group;
         const dim_t gid = bi % group;
 
         const float *q_ptr = reinterpret_cast<const float *>(q_base
-                + q_side_off(q_strides_, bo, bi, kvh, gid) * sizeof(float));
+                + q_side_off(prb_.q_strides, bo, bi, kvh, gid) * sizeof(float));
         const float *k_ptr = reinterpret_cast<const float *>(
-                k_base + kv_side_off(k_strides_, bo, kvh) * sizeof(float));
+                k_base + kv_side_off(prb_.k_strides, bo, kvh) * sizeof(float));
         const float *v_ptr = reinterpret_cast<const float *>(
-                v_base + kv_side_off(v_strides_, bo, kvh) * sizeof(float));
+                v_base + kv_side_off(prb_.v_strides, bo, kvh) * sizeof(float));
         float *o_ptr = reinterpret_cast<float *>(o_base
-                + q_side_off(o_strides_, bo, bi, kvh, gid) * sizeof(float));
-        const uint8_t *c_ptr = has_select_
+                + q_side_off(prb_.o_strides, bo, bi, kvh, gid) * sizeof(float));
+        const uint8_t *c_ptr = prb_.has_select
                 ? reinterpret_cast<const uint8_t *>(cond_base
                           + q_side_off(eff_cond_strides, bo, bi, kvh, gid)
                                   * sizeof(uint8_t))
@@ -587,7 +654,8 @@ status_t sdp_fused_brgemm_kernel_t::execute_impl(stream_t *strm,
                             const bool cond = crow[(kv0 + j) * cond_col] != 0;
                             // not-fusiable (p1): cond ? fill : scores
                             // fusiable    (p2): cond ? scores : fill
-                            const bool keep = select_fusiable_ ? cond : !cond;
+                            const bool keep
+                                    = prb_.select_fusiable ? cond : !cond;
                             if (!keep) v = fill_val;
                         }
                         srow[j] = v;
