@@ -37,13 +37,6 @@
 
 #include "graph/backend/dnnl/op_executable.hpp"
 
-#if DNNL_X64
-#include "cpu/x64/brgemm/brgemm.hpp"
-#include "cpu/x64/cpu_isa_traits.hpp"
-
-#include "graph/backend/dnnl/kernels/sdp_fused_softmax_ir.hpp"
-#endif
-
 #define VCHECK_SDP_FUSED_BRGEMM(cond, status, msg, ...) \
     VCONDCHECK(graph, create, check, sdp_fused_brgemm_base_t, (cond), status, \
             msg, ##__VA_ARGS__);
@@ -53,28 +46,10 @@ namespace impl {
 namespace graph {
 namespace dnnl_impl {
 
-// Scratchpad keys for the per-thread online-softmax working buffers.
-enum mem_key : size_t {
-    mem_scores = 0,
-    mem_acc,
-    mem_pv,
-    mem_row_max,
-    mem_row_denom,
-    mem_old_coef,
-};
-
-// Ctor/dtor defined here where the x64 IR kernel type is complete (the online
-// kernel holds unique_ptr members to a forward-declared type).
-sdp_fused_brgemm_online_kernel_t::sdp_fused_brgemm_online_kernel_t() = default;
-
-sdp_fused_brgemm_online_kernel_t::~sdp_fused_brgemm_online_kernel_t() {
-#if DNNL_X64
-    for (auto *k :
-            {mm1_kernel_, mm2_kernel_, mm1_tail_kernel_, mm2_tail_kernel_}) {
-        if (k) brgemm_kernel_destroy(k);
-    }
-#endif
-}
+// Defined out-of-line so std::make_shared<sdp_fused_brgemm_online_kernel_t>()
+// does not need to instantiate the destructor inline; fused_driver_ (whose own
+// destructor needs the complete softmax_ir_kernel_t type) is complete here.
+sdp_fused_brgemm_online_kernel_t::~sdp_fused_brgemm_online_kernel_t() = default;
 
 status_t sdp_fused_brgemm_base_t::parse(const dnnl_partition_impl_t *part,
         engine_t *eng, const std::vector<logical_tensor_t> &inputs,
@@ -261,115 +236,26 @@ status_t sdp_fused_brgemm_online_kernel_t::compile_impl(
         const std::vector<logical_tensor_t> &outputs) {
     CHECK(parse(part, eng, inputs, outputs));
 #if DNNL_X64
-    using namespace dnnl::impl::cpu::x64;
-
-    const int ndims = prb_.ndims;
-    const dim_t seq_q = prb_.seq_q;
-    const dim_t seq_kv = prb_.seq_kv;
-    const dim_t hs_qk = prb_.head_size_qk;
-    const dim_t hs_v = prb_.head_size_v;
-    const dim_t row_dim = ndims - 2;
-
-    // KV tiling width for the streaming softmax: K/V are processed in chunks of
-    // up to this many columns, bounding the per-thread scores tile
-    // ([seq_q, kv_blk]).
-    // TODO: this is a fixed heuristic; it should be derived from the cache
-    // size, seq_q and head size so the scores/pv tiles stay cache-resident.
-    constexpr dim_t kv_block_width = 512;
-
-    // Create the BRGEMM kernels. Shapes/leading dims are identical for every
-    // slice, so one kernel per (full/tail) tile width suffices.
-    //   mm1 (beta=0): scores_tile[seq_q, w] = Q[seq_q, hs_qk] * K[hs_qk, w]
-    //   mm2 (beta=0): pv_tile[seq_q, hs_v]  = P_tile[seq_q, w] * V[w, hs_v]
-    // where w is the KV tile width: kv_blk_ for full tiles, and the
-    // seq_kv % kv_blk_ remainder for the last tile. mm2 writes a per-tile
-    // buffer; the online-softmax epilogue accumulates it into the running
-    // output.
-    kv_blk_ = nstl::min<dim_t>(seq_kv, kv_block_width);
-    const dim_t kv_tail = seq_kv % kv_blk_;
-
-    auto create_brgemm
-            = [&](brgemm_kernel_t **out, float beta, dim_t M, dim_t N, dim_t K,
-                      dim_t lda, dim_t ldb, dim_t ldc) -> status_t {
-        brgemm_desc_t brg;
-        CHECK(brgemm_desc_init(&brg, isa_undef, brgemm_addr,
-                dnnl::impl::data_type::f32, dnnl::impl::data_type::f32,
-                /*transA=*/false, /*transB=*/false, brgemm_row_major,
-                /*alpha=*/1.0f, beta, lda, ldb, ldc, M, N, K,
-                /*strides=*/nullptr));
-        CHECK(brgemm_desc_finalize(&brg));
-        brgemm_kernel_t *k = nullptr;
-        CHECK(brgemm_kernel_create(&k, brg));
-        *out = k;
-        return status::success;
-    };
-
-    // mm1 writes a dense [seq_q, w] tile (ldc = w); mm2 multiplies that dense
-    // tile by V into a dense [seq_q, hs_v] per-tile buffer (beta=0). The running
-    // normalized output is combined in the epilogue, so magnitudes stay O(|V|)
-    // (matches the decomp kernel's normalize-before accuracy).
-    auto create_tile_kernels
-            = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t w) {
-        CHECK(create_brgemm(mm1, /*beta=*/0.0f, seq_q, w, hs_qk,
-                /*lda=*/prb_.q_strides[row_dim],
-                /*ldb=*/prb_.k_strides[row_dim],
-                /*ldc=*/w));
-        CHECK(create_brgemm(mm2, /*beta=*/0.0f, seq_q, hs_v, w,
-                /*lda=*/w, /*ldb=*/prb_.v_strides[row_dim], /*ldc=*/hs_v));
-        return status::success;
-    };
-
-    CHECK(create_tile_kernels(&mm1_kernel_, &mm2_kernel_, kv_blk_));
-    if (kv_tail != 0)
-        CHECK(create_tile_kernels(
-                &mm1_tail_kernel_, &mm2_tail_kernel_, kv_tail));
-
-    // Build the JIT online-softmax epilogue (AVX2 IR). One softmax kernel per
-    // tile width (full/tail), plus one acc-renormalization kernel. If AVX2 is
-    // unavailable the execute path falls back to the scalar epilogue.
-    if (mayiuse(avx2)) {
-        using namespace sdp_softmax_ir;
-        // Condition tensor row stride in elements; columns are contiguous. A
-        // seq_q axis of extent 1 is a broadcast axis (meaningless stride), so
-        // every query row reads the same condition row -> stride 0.
-        const int cond_stride = prb_.has_select && prb_.cond_dims[row_dim] != 1
-                ? static_cast<int>(prb_.cond_strides[row_dim])
-                : 0;
-        const int sq = static_cast<int>(seq_q);
-        auto build_ir_kernel = [](std::unique_ptr<softmax_ir_kernel_t> &slot,
-                                       ir_t ir) -> status_t {
-            std::unique_ptr<softmax_ir_kernel_t> k(
-                    new softmax_ir_kernel_t(std::move(ir)));
-            CHECK(k->create_kernel());
-            slot = std::move(k);
-            return status::success;
-        };
-        status_t st = build_ir_kernel(softmax_ir_kernel_,
-                build_softmax_tile_ir(sq, static_cast<int>(kv_blk_),
-                        prb_.has_select, prb_.select_fusiable, cond_stride));
-        if (st == status::success && kv_tail != 0)
-            st = build_ir_kernel(softmax_tail_ir_kernel_,
-                    build_softmax_tile_ir(sq, static_cast<int>(kv_tail),
-                            prb_.has_select, prb_.select_fusiable,
-                            cond_stride));
-        if (st == status::success)
-            st = build_ir_kernel(acc_renorm_ir_kernel_,
-                    build_acc_renorm_ir(sq, static_cast<int>(hs_v)));
-        use_ir_epilogue_ = st == status::success;
-    }
-
-    // Book one online-softmax working set per thread; execute_impl slices this
-    // by thread id instead of allocating std::vectors in the parallel loop.
-    nthr_ = dnnl_get_max_threads();
-    const size_t fsz = sizeof(float);
-    registrar_t reg = sdp_registry_.registrar();
-    reg.book(mem_scores, static_cast<size_t>(seq_q) * kv_blk_ * fsz);
-    reg.book(mem_acc, static_cast<size_t>(seq_q) * hs_v * fsz);
-    reg.book(mem_pv, static_cast<size_t>(seq_q) * hs_v * fsz);
-    reg.book(mem_row_max, static_cast<size_t>(seq_q) * fsz);
-    reg.book(mem_row_denom, static_cast<size_t>(seq_q) * fsz);
-    reg.book(mem_old_coef, static_cast<size_t>(seq_q) * fsz);
-
+    sdp_fused_params_t fp;
+    fp.ndims = prb_.ndims;
+    fp.batch = prb_.batch;
+    fp.num_head_q = prb_.num_head_q;
+    fp.group_head = prb_.group_head;
+    fp.seq_q = prb_.seq_q;
+    fp.seq_kv = prb_.seq_kv;
+    fp.head_size_qk = prb_.head_size_qk;
+    fp.head_size_v = prb_.head_size_v;
+    fp.q_strides = prb_.q_strides;
+    fp.k_strides = prb_.k_strides;
+    fp.v_strides = prb_.v_strides;
+    fp.o_strides = prb_.o_strides;
+    fp.cond_strides = prb_.cond_strides;
+    fp.cond_dims = prb_.cond_dims;
+    fp.has_select = prb_.has_select;
+    fp.select_fusiable = prb_.select_fusiable;
+    CHECK(fused_driver_.init(fp, eng));
+    nthr_ = fused_driver_.nthr();
+    fused_scratch_total_ = fused_driver_.scratch_total(nthr_);
     return status::success;
 #else
     return status::unimplemented;
@@ -502,8 +388,6 @@ status_t sdp_fused_brgemm_online_kernel_t::execute_impl(stream_t *strm,
     UNUSED(scratchpad_buf);
     return status::unimplemented;
 #else
-    using namespace dnnl::impl::cpu::x64;
-
     auto *q_base
             = static_cast<const char *>(inputs[prb_.idx_q].get_data_handle());
     auto *k_base
@@ -527,201 +411,17 @@ status_t sdp_fused_brgemm_online_kernel_t::execute_impl(stream_t *strm,
                 inputs[prb_.idx_cond].get_data_handle());
     }
 
-    const dim_t seq_q = prb_.seq_q, seq_kv = prb_.seq_kv,
-                hs_v = prb_.head_size_v;
-    const dim_t kv_blk = kv_blk_;
-    const dim_t group = prb_.group_head;
-    const int ndims = prb_.ndims;
-    const int row_dim = ndims - 2;
-    // Element strides for addressing a KV tile within K / V.
-    const dim_t k_col
-            = prb_.k_strides[ndims - 1]; // K[.., hs, seq_kv]: seq step
-    const dim_t v_row = prb_.v_strides[row_dim]; // V[.., seq_kv, hs_v]: kv step
-    const dim_t o_row = prb_.o_strides[row_dim];
-    const dim_t o_col = prb_.o_strides[ndims - 1];
-    // Broadcast-aware select-condition strides: an axis with extent 1 is a
-    // broadcast axis whose stride is meaningless and must contribute 0.
-    std::vector<dim_t> eff_cond_strides;
-    if (prb_.has_select) {
-        eff_cond_strides = prb_.cond_strides;
-        for (int d = 0; d < ndims; ++d)
-            if (prb_.cond_dims[d] == 1) eff_cond_strides[d] = 0;
-    }
-    const dim_t cond_row = prb_.has_select ? eff_cond_strides[row_dim] : 0;
-    const dim_t cond_col = prb_.has_select ? eff_cond_strides[ndims - 1] : 0;
-    constexpr float neg_inf = -std::numeric_limits<float>::infinity();
-
-    // Query-side offset (Q / out / select-cond carry the group axis).
-    const auto q_side_off = [&](const std::vector<dim_t> &s, dim_t bo, dim_t bi,
-                                    dim_t kvh, dim_t gid) -> dim_t {
-        return ndims == 4 ? bo * s[0] + bi * s[1]
-                          : bo * s[0] + kvh * s[1] + gid * s[2];
-    };
-    // KV-side offset (K / V; the group axis has extent 1).
-    const auto kv_side_off
-            = [&](const std::vector<dim_t> &s, dim_t bo, dim_t kvh) -> dim_t {
-        return bo * s[0] + kvh * s[1];
-    };
-
-    // One online-softmax working set per thread, carved from the scratchpad.
-    const size_t block_size = sdp_registry_.size();
+    sdp_fused_run_args_t args;
+    args.q = q_base;
+    args.k = k_base;
+    args.v = v_base;
+    args.cond = cond_base;
+    args.out = o_base;
+    args.scale = scale_val;
+    args.fill = fill_val;
     auto scratchpad = std::make_shared<scratchpad_t>(
-            scratchpad_buf, block_size * nthr_, p_engine_);
-    grantor_t var_grantor = sdp_registry_.grantor(scratchpad->get_buffer());
-
-    parallel_nd_ext(nthr_, prb_.batch, prb_.num_head_q,
-            [&](int tid, int, dim_t bo, dim_t bi) {
-        const dim_t kvh = bi / group;
-        const dim_t gid = bi % group;
-
-        const float *q_ptr = reinterpret_cast<const float *>(q_base
-                + q_side_off(prb_.q_strides, bo, bi, kvh, gid) * sizeof(float));
-        const float *k_ptr = reinterpret_cast<const float *>(
-                k_base + kv_side_off(prb_.k_strides, bo, kvh) * sizeof(float));
-        const float *v_ptr = reinterpret_cast<const float *>(
-                v_base + kv_side_off(prb_.v_strides, bo, kvh) * sizeof(float));
-        float *o_ptr = reinterpret_cast<float *>(o_base
-                + q_side_off(prb_.o_strides, bo, bi, kvh, gid) * sizeof(float));
-        const uint8_t *c_ptr = prb_.has_select
-                ? reinterpret_cast<const uint8_t *>(cond_base
-                          + q_side_off(eff_cond_strides, bo, bi, kvh, gid)
-                                  * sizeof(uint8_t))
-                : nullptr;
-
-        // Online-softmax running state kept in a numerically stable form: the
-        // accumulator (acc) holds the *normalized* output so far, so its
-        // magnitude stays O(|V|). Per tile, mm2 produces the raw P_tile*V_tile
-        // into pv, then acc is renormalized. row_max (m) and row_denom (l) are
-        // the running max and denominator. This replaces the full [seq_q,
-        // seq_kv] scores materialization with [seq_q, kv_blk] + [seq_q, hs_v].
-        // Buffers are per-thread slices of the scratchpad (see compile_impl).
-        float *scores = reinterpret_cast<float *>(
-                var_grantor.get(mem_scores) + tid * block_size);
-        float *acc = reinterpret_cast<float *>(
-                var_grantor.get(mem_acc) + tid * block_size);
-        float *pv = reinterpret_cast<float *>(
-                var_grantor.get(mem_pv) + tid * block_size);
-        float *row_max = reinterpret_cast<float *>(
-                var_grantor.get(mem_row_max) + tid * block_size);
-        float *row_denom = reinterpret_cast<float *>(
-                var_grantor.get(mem_row_denom) + tid * block_size);
-        // Per-row renormalization coefficient for the current tile.
-        float *old_coef = reinterpret_cast<float *>(
-                var_grantor.get(mem_old_coef) + tid * block_size);
-        // acc/row_max/row_denom carry running state across tiles, so they must
-        // be initialized (scratchpad memory is uninitialized).
-        std::fill(row_max, row_max + seq_q, neg_inf);
-        std::fill(row_denom, row_denom + seq_q, 0.0f);
-        std::fill(acc, acc + static_cast<size_t>(seq_q) * hs_v, 0.0f);
-
-        for (dim_t kv0 = 0; kv0 < seq_kv; kv0 += kv_blk) {
-            const dim_t w = nstl::min(kv_blk, seq_kv - kv0);
-            const bool is_tail = w != kv_blk;
-            const auto *mm1 = is_tail ? mm1_tail_kernel_ : mm1_kernel_;
-            const auto *mm2 = is_tail ? mm2_tail_kernel_ : mm2_kernel_;
-
-            // mm1: scores_tile[seq_q, w] = Q * K[:, kv0 : kv0 + w].
-            brgemm_batch_element_t batch1;
-            batch1.ptr.A = q_ptr;
-            batch1.ptr.B = k_ptr + kv0 * k_col;
-            brgemm_kernel_execute(mm1, 1, &batch1, scores, nullptr);
-
-            // Online-softmax epilogue over this KV tile: apply scale + mask,
-            // update the running max/denom, and form P_tile = exp(s - m_new).
-            if (use_ir_epilogue_) {
-                const auto &sm = is_tail ? softmax_tail_ir_kernel_
-                                         : softmax_ir_kernel_;
-                sdp_softmax_ir::softmax_row_args_t sargs;
-                sargs.scores = scores;
-                sargs.scale = &scale_val;
-                sargs.m = row_max;
-                sargs.l = row_denom;
-                sargs.old_coef = old_coef;
-                // cond points at this tile's first column (row 0); the kernel
-                // advances by the compiled cond row stride per row.
-                sargs.cond = c_ptr ? c_ptr + kv0 * cond_col : nullptr;
-                sargs.fill = &fill_val;
-                (*sm)(&sargs);
-            } else {
-                for (dim_t i = 0; i < seq_q; ++i) {
-                    float *srow = scores + i * w;
-                    const uint8_t *crow
-                            = c_ptr ? c_ptr + i * cond_row : nullptr;
-                    float tile_max = neg_inf;
-                    for (dim_t j = 0; j < w; ++j) {
-                        float v = srow[j] * scale_val;
-                        if (crow) {
-                            const bool cond = crow[(kv0 + j) * cond_col] != 0;
-                            // not-fusiable (p1): cond ? fill : scores
-                            // fusiable    (p2): cond ? scores : fill
-                            const bool keep
-                                    = prb_.select_fusiable ? cond : !cond;
-                            if (!keep) v = fill_val;
-                        }
-                        srow[j] = v;
-                        if (v > tile_max) tile_max = v;
-                    }
-                    const float m_old = row_max[i];
-                    const float l_old = row_denom[i];
-                    const float m_new = nstl::max(m_old, tile_max);
-                    // corr rescales the old contributions to the new max; it is
-                    // 0 for the first (m_old == -inf) tile.
-                    const float corr
-                            = m_old == neg_inf ? 0.0f : expf(m_old - m_new);
-                    float tile_sum = 0.0f;
-                    for (dim_t j = 0; j < w; ++j) {
-                        const float e = expf(srow[j] - m_new);
-                        srow[j] = e;
-                        tile_sum += e;
-                    }
-                    const float l_new = l_old * corr + tile_sum;
-                    const float inv = l_new > 0.0f ? 1.0f / l_new : 0.0f;
-                    row_denom[i] = l_new;
-                    row_max[i] = m_new;
-                    // Pre-normalize P by the running denominator so mm2
-                    // accumulates O(1) magnitudes (matches the decomp kernel's
-                    // accuracy). acc then holds U/l; refresh it with old_coef =
-                    // corr*l_old/l_new.
-                    for (dim_t j = 0; j < w; ++j)
-                        srow[j] *= inv;
-                    old_coef[i] = corr * l_old * inv;
-                }
-            }
-
-            // mm2: pv[seq_q, hs_v] = P_norm_tile * V[kv0 : kv0 + w, :].
-            brgemm_batch_element_t batch2;
-            batch2.ptr.A = scores;
-            batch2.ptr.B = v_ptr + kv0 * v_row;
-            brgemm_kernel_execute(mm2, 1, &batch2, pv, nullptr);
-
-            // Renormalize the running output: acc = old_coef*acc + pv.
-            if (use_ir_epilogue_) {
-                sdp_softmax_ir::acc_renorm_args_t aargs;
-                aargs.acc = acc;
-                aargs.pv = pv;
-                aargs.old_coef = old_coef;
-                (*acc_renorm_ir_kernel_)(&aargs);
-            } else {
-                for (dim_t i = 0; i < seq_q; ++i) {
-                    float *arow = acc + i * hs_v;
-                    const float *prow = pv + i * hs_v;
-                    const float a = old_coef[i];
-                    for (dim_t d = 0; d < hs_v; ++d)
-                        arow[d] = a * arow[d] + prow[d];
-                }
-            }
-        }
-
-        // acc already holds the normalized output; scatter to user output.
-        for (dim_t i = 0; i < seq_q; ++i) {
-            const float *arow = acc + i * hs_v;
-            float *out_row = o_ptr + i * o_row;
-            for (dim_t d = 0; d < hs_v; ++d)
-                out_row[d * o_col] = arow[d];
-        }
-    });
-
-    return status::success;
+            scratchpad_buf, fused_scratch_total_, p_engine_);
+    return fused_driver_.execute(args, scratchpad->get_buffer(), nthr_);
 #endif
 }
 

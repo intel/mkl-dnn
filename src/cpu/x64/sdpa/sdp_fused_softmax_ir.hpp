@@ -14,15 +14,15 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GRAPH_BACKEND_DNNL_KERNELS_SDP_FUSED_SOFTMAX_IR_HPP
-#define GRAPH_BACKEND_DNNL_KERNELS_SDP_FUSED_SOFTMAX_IR_HPP
+#ifndef CPU_X64_SDPA_SDP_FUSED_SOFTMAX_IR_HPP
+#define CPU_X64_SDPA_SDP_FUSED_SOFTMAX_IR_HPP
 
-// IR-based online-softmax epilogue for the fused CPU SDPA kernel
-// (sdp_fused_brgemm_kernel_t). The QK^T / PV matmuls stay on BRGEMM; only the
-// scale + select-mask + streaming-softmax + accumulator renormalization is
-// JIT-built here with the x64 CPU IR framework (src/cpu/x64/ir). This is the
-// only file that knows the SDPA epilogue math and data layout; everything in
-// the IR framework is generic infrastructure.
+// IR-based online-softmax epilogue for the fused (online/flash) CPU SDPA
+// driver (sdp_fused_driver_t, sdp_fused_driver.hpp). The QK^T / PV matmuls
+// stay on BRGEMM; only the scale + select-mask + streaming-softmax + accumulator
+// renormalization is JIT-built here with the x64 CPU IR framework
+// (src/cpu/x64/ir). This is the only file that knows the SDPA epilogue math and
+// data layout; everything in the IR framework is generic infrastructure.
 
 #include "oneapi/dnnl/dnnl_config.h"
 
@@ -59,7 +59,7 @@ constexpr int simd_w = cpu_isa_traits_t<avx2>::vlen / (int)sizeof(float);
 // score rows of `w` elements each is updated in place; per row, the running
 // max/denominator and the tile's renormalization coefficient are read and
 // written through scalar pointers, matching the per-row state the fused SDPA
-// kernel carries across KV tiles. scores holds seq_q*w floats (row i at i*w);
+// driver carries across KV tiles. scores holds seq_q*w floats (row i at i*w);
 // m/l/old_coef hold seq_q floats (row i at i); scale is shared by all rows.
 // cond/fill drive the optional select mask: a masked-out lane takes fill. cond
 // points at this tile's first column; its row stride is the cond_row_stride
@@ -88,11 +88,11 @@ struct acc_renorm_args_t {
 // Builds the online-softmax epilogue for a tile of `seq_q` score rows, each of
 // width `w` (any w >= 1; the ragged tail beyond the last full simd_w block is
 // handled with masked loads/stores). Mirrors the per-row scalar epilogue in
-// sdp_fused_brgemm.cpp for a single KV tile. With `has_select`, each block also
+// sdp_fused_driver.cpp for a single KV tile. With `has_select`, each block also
 // gets the attention select mask applied right after scaling: uint8 condition
 // bytes are widened and turned into a lane mask (vload_u8 -> vcmp_ne_zero),
 // then vblend selects the broadcast `fill` scalar into the masked-out lanes.
-// Which lanes are masked out follows the fused kernel: fusiable keeps the score
+// Which lanes are masked out follows the fused driver: fusiable keeps the score
 // where cond != 0, non-fusiable where cond == 0.
 // The rows are processed by a loop over seq_q; the score and per-row state
 // pointers advance one row per iteration. Per row the op chain is: scale ->
@@ -308,7 +308,7 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
 // Builds the accumulator renormalization for a tile of `seq_q` rows, each of
 // head size `hs` (any hs >= 1; the ragged tail beyond the last full simd_w
 // block uses masked loads/stores). Mirrors the acc rescale in the fused SDPA
-// kernel that follows the softmax epilogue: acc = old_coef*acc + pv. Rows are
+// driver that follows the softmax epilogue: acc = old_coef*acc + pv. Rows are
 // processed by a loop over seq_q; the acc, pv and old_coef pointers advance one
 // row per iteration. old_coef is broadcast so the per-row scalar reuses the
 // vector ops; no reduction is needed, so the tail needs no lane neutralization
@@ -459,4 +459,4 @@ private:
 } // namespace dnnl
 
 #endif // DNNL_X64
-#endif // GRAPH_BACKEND_DNNL_KERNELS_SDP_FUSED_SOFTMAX_IR_HPP
+#endif // CPU_X64_SDPA_SDP_FUSED_SOFTMAX_IR_HPP

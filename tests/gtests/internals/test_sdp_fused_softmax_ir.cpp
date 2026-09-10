@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-// Unit tests for the IR-based online-softmax epilogue of the fused CPU SDPA
-// kernel (src/graph/backend/dnnl/kernels/sdp_fused_softmax_ir.hpp). Each test
+// Unit tests for the IR-based online-softmax epilogue of the fused (online/
+// flash) CPU SDPA driver (src/cpu/x64/sdpa/sdp_fused_softmax_ir.hpp). Each test
 // builds one epilogue IR, JITs it through the x64 CPU IR pipeline, runs it and
 // checks it against an independent scalar reference. The eltwise exp is a
 // polynomial approximation, so denominator-dependent outputs use a relative
@@ -31,7 +31,7 @@
 
 #include "oneapi/dnnl/dnnl.hpp"
 
-#include "graph/backend/dnnl/kernels/sdp_fused_softmax_ir.hpp"
+#include "cpu/x64/sdpa/sdp_fused_softmax_ir.hpp"
 
 namespace dnnl {
 

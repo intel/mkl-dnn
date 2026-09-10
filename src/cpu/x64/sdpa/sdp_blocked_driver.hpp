@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GRAPH_BACKEND_DNNL_KERNELS_SDP_BLOCKED_DRIVER_HPP
-#define GRAPH_BACKEND_DNNL_KERNELS_SDP_BLOCKED_DRIVER_HPP
+#ifndef CPU_X64_SDPA_SDP_BLOCKED_DRIVER_HPP
+#define CPU_X64_SDPA_SDP_BLOCKED_DRIVER_HPP
 
 #include <memory>
 #include <vector>
@@ -26,20 +26,16 @@
 namespace dnnl {
 namespace impl {
 
-// Forward declaration to avoid pulling the BRGEMM / softmax headers into
-// consumers.
+// Forward declaration to avoid pulling the softmax header into consumers.
 struct primitive_desc_t;
+
 namespace cpu {
 namespace x64 {
+
 struct brgemm_kernel_t;
 namespace softmax_impl {
 struct jit_softmax_kernel_base_t;
 } // namespace softmax_impl
-} // namespace x64
-} // namespace cpu
-
-namespace graph {
-namespace dnnl_impl {
 
 // -----------------------------------------------------------------------------
 // Decoupled blocked-softmax SDPA driver (x64).
@@ -166,8 +162,17 @@ public:
     // Create the BRGEMM kernels and compute the query blocking + per-thread
     // scratch size. Must be called once before execute(). The engine is used
     // to instantiate the reused jit softmax kernel; the execute path stays
-    // engine-free.
+    // engine-free. Equivalent to configure() followed by create_kernels().
     status_t init(const sdp_blocked_params_t &params, engine_t *engine);
+
+    // Two-phase split of init() for the CPU sdpa primitive: configure() does
+    // only the JIT-free arithmetic (query blocking, per-thread scratch size,
+    // AMX palette + tile-store wsp read from the finalized BRGEMM descriptors)
+    // so a primitive_desc can size its scratchpad without compiling kernels;
+    // create_kernels() then JIT-compiles the BRGEMM + softmax kernels. Call
+    // configure() first, create_kernels() before execute().
+    status_t configure(const sdp_blocked_params_t &params);
+    status_t create_kernels(engine_t *engine);
 
     // Per-thread scratch requirement in bytes (scores + pv tiles). The caller
     // books nthr() * scratch_per_thread() bytes and passes the base pointer.
@@ -272,8 +277,8 @@ private:
     bool mm1_select_postop_ = false;
 };
 
-} // namespace dnnl_impl
-} // namespace graph
+} // namespace x64
+} // namespace cpu
 } // namespace impl
 } // namespace dnnl
 

@@ -335,6 +335,7 @@ enum {
     key_sdpa_dK_reduction,
     key_sdpa_dV_reduction,
     key_sdpa_bwd_strides,
+    key_sdpa_brgemm_buffer,
     key_softmax_dst_scales,
     key_softmax_reduction,
     key_softmax_interim_store,

@@ -23,8 +23,10 @@
 
 #include "graph/backend/dnnl/platform.hpp"
 
+#include "cpu/x64/sdpa/sdp_blocked_driver.hpp"
+#include "cpu/x64/sdpa/sdp_fused_driver.hpp"
+
 #include "graph/backend/dnnl/kernels/kernel_base.hpp"
-#include "graph/backend/dnnl/kernels/sdp_blocked_driver.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp_config.hpp"
 
 #include "graph/backend/dnnl/dnnl_partition_impl.hpp"
@@ -34,21 +36,16 @@
 
 namespace dnnl {
 namespace impl {
-
-// Forward declarations to avoid including the BRGEMM / IR headers.
-namespace cpu {
-namespace x64 {
-struct brgemm_kernel_t;
-namespace sdp_softmax_ir {
-class softmax_ir_kernel_t;
-} // namespace sdp_softmax_ir
-} // namespace x64
-} // namespace cpu
-
 namespace graph {
 namespace dnnl_impl {
 
-using brgemm_kernel_t = dnnl::impl::cpu::x64::brgemm_kernel_t;
+using sdp_blocked_driver_t = dnnl::impl::cpu::x64::sdp_blocked_driver_t;
+using sdp_blocked_params_t = dnnl::impl::cpu::x64::sdp_blocked_params_t;
+using sdp_blocked_run_args_t = dnnl::impl::cpu::x64::sdp_blocked_run_args_t;
+using sdp_mm1_post_op_t = dnnl::impl::cpu::x64::sdp_mm1_post_op_t;
+using sdp_fused_driver_t = dnnl::impl::cpu::x64::sdp_fused_driver_t;
+using sdp_fused_params_t = dnnl::impl::cpu::x64::sdp_fused_params_t;
+using sdp_fused_run_args_t = dnnl::impl::cpu::x64::sdp_fused_run_args_t;
 
 // Parsed SDP problem (geometry, strides, flags, input indices), filled once by
 // sdp_fused_brgemm_base_t::parse() and read by both concrete kernels.
@@ -138,37 +135,24 @@ public:
 #endif
 };
 
-// Online-softmax (flash-attention-style) fused SDPA kernel: streams the KV
-// sequence in tiles with an online-softmax epilogue, so the full S x S score
-// matrix is never materialized. Selected by ONEDNN_GRAPH_SDPA_IMPL=fused_brgemm.
+// Online-softmax (flash-attention-style) fused SDPA kernel: delegates to the
+// decoupled fused/online driver (which owns its own BRGEMM + IR-softmax
+// kernels and scratch), so the full S x S score matrix is never materialized.
+// Selected by ONEDNN_GRAPH_SDPA_IMPL=fused_brgemm.
 struct sdp_fused_brgemm_online_kernel_t : public sdp_fused_brgemm_base_t {
 private:
 #if DNNL_X64
-    // KV tiling width for the streaming softmax: seq_kv is processed in tiles
-    // of kv_blk_.
-    dim_t kv_blk_ = 0;
-    // Internal x64 BRGEMM kernels: mm1 computes a scores tile Q*K[:, tile];
-    // mm2 computes the P_tile*V[tile, :] partial (beta=0) that the epilogue
-    // rescales into the running output. The *_tail_ variants handle the ragged
-    // last KV tile.
-    brgemm_kernel_t *mm1_kernel_ = nullptr, *mm2_kernel_ = nullptr,
-                    *mm1_tail_kernel_ = nullptr, *mm2_tail_kernel_ = nullptr;
-    // JIT online-softmax epilogue built from the x64 CPU IR (AVX2): the softmax
-    // kernels apply scale + select-mask + streaming-softmax to one KV tile
-    // (full/tail width); acc_renorm rescales the running output by old_coef and
-    // adds the tile's P*V. When use_ir_epilogue_ is false (no AVX2), execute
-    // runs a scalar epilogue instead.
-    std::unique_ptr<cpu::x64::sdp_softmax_ir::softmax_ir_kernel_t>
-            softmax_ir_kernel_, softmax_tail_ir_kernel_, acc_renorm_ir_kernel_;
-    bool use_ir_epilogue_ = false;
-    // Per-thread scratchpad for the online-softmax working buffers (one block
-    // per thread, sized in compile_impl).
-    registry_t sdp_registry_;
+    sdp_fused_driver_t fused_driver_;
+    size_t fused_scratch_total_ = 0;
 #endif
 
 public:
-    // Out-of-line ctor/dtor: unique_ptr members to a forward-declared IR type.
-    sdp_fused_brgemm_online_kernel_t();
+    sdp_fused_brgemm_online_kernel_t() = default;
+    // Declared out-of-line (defined `= default` in sdp_fused_brgemm.cpp) so
+    // std::make_shared<sdp_fused_brgemm_online_kernel_t>() does not need to
+    // instantiate an inline destructor here; fused_driver_'s own destructor
+    // (which needs the complete softmax_ir_kernel_t type) is compiled
+    // separately in sdp_fused_driver.cpp.
     ~sdp_fused_brgemm_online_kernel_t() override;
 
     status_t compile_impl(const dnnl_partition_impl_t *part, engine_t *eng,
@@ -182,7 +166,7 @@ public:
     DEF_KERNEL_METHOD_STR(sdp_fused_brgemm_online_kernel_t)
     size_t get_scratchpad_size() const override {
 #if DNNL_X64
-        return sdp_registry_.size() * nthr_;
+        return fused_scratch_total_;
 #else
         return 0;
 #endif
