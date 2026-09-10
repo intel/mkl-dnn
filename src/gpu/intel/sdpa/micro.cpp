@@ -403,8 +403,10 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     auto problem_vs = std::move(problem);
     problem_vs.Tc = problem_vs.Ts
             = (vs_acc_dt() == data_type::f16) ? Type::f16 : Type::f32;
-
-    if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
+    if (pv_fp8()) {
+        problem_vs.Ta = Type::hf8;
+        problem_vs.Tb = problem_vs.Tb_ext = Type::hf8;
+    } else if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
         problem_vs.Tb = problem_vs.Tb_ext = Type::f16;
     }
 
@@ -446,7 +448,7 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
             gemm_desc_t::get_ld(*desc()->val_md()) * val_mdw.data_type_size());
     problem_vs.A.setAlignment(alignment_for_md(val_mdw, ldv));
     problem_vs.B.setAlignment(64); // S is packed in SLM
-    if (use_systolic_ukernel()) { problem_vs.B.crosspack = 16; }
+    if (use_systolic_ukernel()) { problem_vs.B.crosspack = pv_fp8() ? 32 : 16; }
 
     ukernel_params.problem_vs = {problem_vs};
 
@@ -914,6 +916,7 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     conf.d_max_kq = d_max_kq();
     conf.d_max_v = d_max_v();
     conf.q_slm_fp8 = q_slm_fp8();
+    conf.pv_fp8 = pv_fp8();
 
     conf.require_stateless_addressing = has_large_buffers();
 
@@ -1164,6 +1167,7 @@ status_t micro_fwd_params_t::get_kernel_ctx(
             data_type::f8_e4m3, key_data_t, qry_data_t, val_data_t);
     if (any_hf8) kernel_ctx.define_int("MATH_UTILS_DECLARE_HF8", 1);
     kernel_ctx.define_int("QRY_SLM_FP8", q_slm_fp8);
+    kernel_ctx.define_int("VS_S_FP8", pv_fp8);
 
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");
     def_data_type(kernel_ctx, value_scales_data_t, "VAL_ATTR_SCALES");

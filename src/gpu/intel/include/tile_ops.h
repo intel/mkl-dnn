@@ -439,6 +439,20 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
         } \
     } while (0)
 
+#define tile_copy_to_vec4_cvt(t, t_new, type, cvt) \
+    do { \
+        _Pragma("unroll") for (int i = 0; i < sizeof(t.x) / sizeof(t.x[0]); \
+                               i++) { \
+            _Pragma("unroll") for (int s = 0; \
+                                   s < sizeof(t.x[0]) / sizeof(t.x[0][0]) / 4; \
+                                   s++) { \
+                type v = {cvt(t.x[i][4 * s]), cvt(t.x[i][4 * s + 1]), \
+                        cvt(t.x[i][4 * s + 2]), cvt(t.x[i][4 * s + 3])}; \
+                t_new.x[i][s] = as_uint(v); \
+            } \
+        } \
+    } while (0)
+
 #define tile_access(t, i0, j, sg, br, bc, nbr) \
     (t).x[(i0) / (br) + (nbr) * ((j) / (bc))] \
          [((i0) % (br)) / (sg) + ((j) % (bc)) * ((br) / (sg))]
@@ -985,8 +999,7 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
     } \
     __attribute__((overloadable)) void tile_store_t_sys_src2(tile_type t, \
             local element_type *ptr, int tile_n, int ld, int offset_r, \
-            int offset_c) { \
-        const int cp = 32 / sizeof(element_type); \
+            int offset_c, int cp) { \
         offset_c += get_sub_group_local_id(); \
         int offset_r0 = offset_r & (cp - 1); \
         int offset_r1 = offset_r & ~(cp - 1); \
@@ -1002,6 +1015,12 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
                 if ((~i & (cp - 1)) == 0) ptr_j += cp * (tile_n - 1); \
             } \
         } \
+    } \
+    __attribute__((overloadable)) void tile_store_t_sys_src2(tile_type t, \
+            local element_type *ptr, int tile_n, int ld, int offset_r, \
+            int offset_c) { \
+        tile_store_t_sys_src2(t, ptr, tile_n, ld, offset_r, offset_c, \
+                32 / sizeof(element_type)); \
     } \
     __attribute__((overloadable)) void tile_load_t_sys_src2(tile_type *t, \
             local element_type *ptr, int tile_n, int ld, int offset_r, \
