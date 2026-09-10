@@ -37,7 +37,7 @@ typedef NATIVE_LAYOUT_TYPE(DST_DATA_T) dst_tile_data_t;
 typedef NATIVE_LAYOUT_TYPE(MSK_DATA_T) msk_tile_data_t;
 typedef NATIVE_LAYOUT_TYPE(QRY_DATA_T) qry_tile_data_t;
 
-#ifdef QRY_DT_HF8
+#if defined(QRY_DT_HF8) && !QRY_SLM_FP8
 #define QRY_SLM_DATA_T half
 #define QRY_SLM_CROSSPACK 2
 #else
@@ -46,6 +46,7 @@ typedef NATIVE_LAYOUT_TYPE(QRY_DATA_T) qry_tile_data_t;
 #define QRY_SLM_CROSSPACK 4
 #else
 #define QRY_SLM_CROSSPACK 2
+#endif
 #endif
 
 #ifdef QRY_DT_HF8
@@ -146,8 +147,8 @@ inline void apply_dropout_s_tile(
 #endif
 
 #if USE_SYSTOLIC_UKERNEL
-DECLARE_2D_TILE(
-        q_tile_type, uint, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+DECLARE_2D_TILE(q_tile_type, uint, SUBGROUP_SIZE, D_MAX_KQ / QRY_SLM_CROSSPACK,
+        1, 1, q_tile_sg_n)
 #else
 DECLARE_2D_TILE(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ, 1, 1,
         q_tile_sg_n)
@@ -156,8 +157,8 @@ DECLARE_2D_TILE(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ, 1, 1,
 #if BLOCK_Q
 
 #if USE_SYSTOLIC_UKERNEL
-DECLARE_2D_TILE_BLOCK_OPS(
-        q_tile_type, uint, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, uint, SUBGROUP_SIZE,
+        D_MAX_KQ / QRY_SLM_CROSSPACK, 1, 1, q_tile_sg_n)
 #else
 DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ,
         1, 1, q_tile_sg_n)
@@ -173,8 +174,13 @@ DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, qry_tile_data_t, VEC_TYPE2,
 #endif
 
 #if defined(QRY_DT_HF8) && USE_SYSTOLIC_UKERNEL
+#if QRY_SLM_FP8
+DECLARE_2D_TILE_LOAD_PACKED_VEC4_CVT(q_tile_type, QRY_DATA_T, uchar4,
+        as_native_layout, SUBGROUP_SIZE, D_MAX_KQ / 4, 1, 1, q_tile_sg_n)
+#else
 DECLARE_2D_TILE_LOAD_PACKED_VEC_CVT(q_tile_type, QRY_DATA_T, VEC_TYPE2,
         into_half, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+#endif
 #endif
 
 #if BLOCK_A
@@ -414,7 +420,11 @@ inline void tile_load_src1(q_tile_type *Q_tile, const global QRY_DATA_T *Q,
 
 #if defined(QRY_DT_HF8)
     /* fp8: load bytes and convert to f16 (ldq is in elements). */
+#if QRY_SLM_FP8
+    tile_load_packed_vec4_cvt(Q_tile, Q, m, n, ldq, offset_r, offset_c);
+#else
     tile_load_packed_vec2_cvt(Q_tile, Q, m, n, ldq, offset_r, offset_c);
+#endif
 #elif BLOCK_Q
     tile_load_block_rem_q(
             Q_tile, (global uint *)Q, n, ldq >> 1, offset_r, offset_c);
@@ -442,8 +452,8 @@ inline void tile_store_t_slm_src1(q_tile_type *Q_tile,
         local QRY_SLM_DATA_T *Q_slm, int panel, int ld, int offset_r,
         int offset_c) {
 #if USE_SYSTOLIC_UKERNEL
-    tile_store_t_sys_src1(
-            *Q_tile, (local uint *)&Q_slm[0], ld / 2, offset_r, offset_c);
+    tile_store_t_sys_src1(*Q_tile, (local uint *)&Q_slm[0],
+            ld / QRY_SLM_CROSSPACK, offset_r, offset_c);
 #else // FMA
     tile_store_t_packed_src1(*Q_tile, (local qry_tile_data_t *)Q_slm, panel, ld,
             offset_r, offset_c);

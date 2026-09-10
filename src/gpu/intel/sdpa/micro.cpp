@@ -291,8 +291,14 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     } else if (desc()->qry_md()->data_type == data_type::f32) {
         problem.Ta = problem.Tb = Type::f32;
     } else if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
-        problem.Tb_ext = Type::f16;
-        problem.Ta = problem.Tb = Type::f16;
+        if (q_slm_fp8()) {
+            // Q stays fp8 through SLM
+            problem.Ta = problem.Tb = Type::hf8;
+        } else {
+            // Q is upconverted to f16
+            problem.Tb_ext = Type::f16;
+            problem.Ta = problem.Tb = Type::f16;
+        }
     } else {
         VCHECK_SDPA_COND(
                 utils::one_of(desc()->qry_md()->data_type, data_type::f16,
@@ -360,7 +366,7 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     problem_kq.A.setAlignment(k_align);
     problem_kq.B.setAlignment(64); // Q is packed in VNNI format in SLM
     if (use_systolic_ukernel()) {
-        problem_kq.B.crosspack = 2;
+        problem_kq.B.crosspack = q_slm_fp8() ? 4 : 2;
         problem_kq.B.tileR = into<uint16_t>(d_max());
         problem_kq.B.tileC = into<uint16_t>(sg_size());
     }
@@ -397,6 +403,10 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     auto problem_vs = std::move(problem);
     problem_vs.Tc = problem_vs.Ts
             = (vs_acc_dt() == data_type::f16) ? Type::f16 : Type::f32;
+
+    if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
+        problem_vs.Tb = problem_vs.Tb_ext = Type::f16;
+    }
 
     bool vs_common_scales = with_quantize_common(d->vs_scales);
     bool vs_common_zp = with_quantize_common(d->vs_zero_points);
@@ -903,6 +913,7 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     init_conf_common(conf, this);
     conf.d_max_kq = d_max_kq();
     conf.d_max_v = d_max_v();
+    conf.q_slm_fp8 = q_slm_fp8();
 
     conf.require_stateless_addressing = has_large_buffers();
 
@@ -1152,6 +1163,7 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     const bool any_hf8 = utils::one_of(
             data_type::f8_e4m3, key_data_t, qry_data_t, val_data_t);
     if (any_hf8) kernel_ctx.define_int("MATH_UTILS_DECLARE_HF8", 1);
+    kernel_ctx.define_int("QRY_SLM_FP8", q_slm_fp8);
 
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");
     def_data_type(kernel_ctx, value_scales_data_t, "VAL_ATTR_SCALES");

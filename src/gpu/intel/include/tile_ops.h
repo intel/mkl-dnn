@@ -1412,6 +1412,32 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
         tile_load_packed_vec2_cvt(t, ptr, m, n, m, offset_r, offset_c); \
     }
 
+#define DECLARE_2D_TILE_LOAD_PACKED_VEC4_CVT( \
+        tile_type, element_type, vec_type, cvt, sg, br, bc, nbr, nbc) \
+    __attribute__((overloadable)) void tile_load_packed_vec4_cvt(tile_type *t, \
+            const global element_type *ptr, int m, int n, int ld, \
+            int offset_r, int offset_c) { \
+        ptr += ld * offset_c + offset_r; \
+        _Pragma("unroll") for (int j = 0; j < bc * nbc; j++, ptr += ld) { \
+            if (offset_c + j < n) { \
+                _Pragma("unroll") for (int i0 = 0; i0 < br * nbr; i0 += sg) { \
+                    int i = 4 * (i0 + get_sub_group_local_id()); \
+                    vec_type loaded = 0; \
+                    if (offset_r + i < m) loaded.s0 = cvt(ptr[i]); \
+                    if (offset_r + i + 1 < m) loaded.s1 = cvt(ptr[i + 1]); \
+                    if (offset_r + i + 2 < m) loaded.s2 = cvt(ptr[i + 2]); \
+                    if (offset_r + i + 3 < m) loaded.s3 = cvt(ptr[i + 3]); \
+                    tile_access(*t, i0, j, sg, br, bc, nbr) = as_uint(loaded); \
+                } \
+            } \
+        } \
+    } \
+    __attribute__((overloadable)) void tile_load_packed_vec4_cvt(tile_type *t, \
+            const global element_type *ptr, int m, int n, int offset_r, \
+            int offset_c) { \
+        tile_load_packed_vec4_cvt(t, ptr, m, n, m, offset_r, offset_c); \
+    }
+
 #define cooperative_prefetch_2d(ptr, r, c, ld, sg_id, n_sg, sg_size, caching) \
     cooperative_prefetch_2d_internal((const global uchar *)ptr, \
             (r) * sizeof(*(ptr)), c, (ld) * sizeof(*(ptr)), sg_id, n_sg, \

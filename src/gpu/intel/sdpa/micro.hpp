@@ -99,7 +99,7 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     bool require_stateless_addressing;
     bool is_training;
     bool dropout, dropout_output_mask, dropout_offset, dropout_host_scalars;
-    uint8_t padding3[1] = {0};
+    bool q_slm_fp8;
 
     micro_fwd_ukernel_params_t ukernel_config;
 };
@@ -426,6 +426,12 @@ struct micro_fwd_t : public primitive_t {
 
         int sg_size() const { return sg_size_; }
         bool use_systolic_ukernel() const { return use_systolic_ukernel_; }
+
+        bool q_slm_fp8() const {
+            return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
+                    && desc()->qry_md()->data_type == data_type::f8_e4m3
+                    && d_max_kq() >= 4 * sg_size_;
+        }
 
         // Block size for the Q/K head dim, baked into the kernel.
         int d_max_kq() const {
