@@ -1,0 +1,61 @@
+# fp8 (f8_e4m3) SDPA, GPU.
+#
+# Q, K and V are all f8_e4m3: the KQ GEMM has a single compute type for both
+# operands, so mixing fp8 with a wider type is not supported. The destination
+# stays f16/bf16 because the SDPA descriptor has no output quantization scale
+# to pair with an fp8 output.
+#
+# --dt is Q:K:V:DST.
+
+# No mask, f16 output
+--reset
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:f16
+--batch=shapes_fp8
+
+# No mask, bf16 output (the target recipe's output type)
+--reset
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:bf16
+--batch=shapes_fp8
+
+# Causal masks
+--reset
+--mask=causal_top_left
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:f16
+--batch=shapes_fp8
+
+--reset
+--mask=causal_bottom_right
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:bf16
+--batch=shapes_fp8
+
+# Attention scale
+--reset
+--scale=mul
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:f16
+--batch=shapes_fp8
+
+--reset
+--scale=div
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:f16
+--batch=shapes_fp8
+
+# Explicit mask buffers. The mask is applied to f32 intermediates, so it
+# follows the output rather than the stored (fp8) query type.
+--reset
+--mask=buffer_2d
+--mdt=f32
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:f16
+--batch=shapes_fp8
+
+--reset
+--mask=buffer_2d
+--mdt=f16
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:f16
+--batch=shapes_fp8
+
+# Causal mask + attention scale: the combination the target recipe uses.
+--reset
+--mask=causal_top_left
+--scale=mul
+--dt=f8_e4m3:f8_e4m3:f8_e4m3:bf16
+--batch=shapes_fp8

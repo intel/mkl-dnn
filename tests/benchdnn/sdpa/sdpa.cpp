@@ -292,8 +292,17 @@ static float cmp_threshold(const prb_t *prb, data_kind_t kind) {
     const int64_t n_acc = is_bwd
             ? 1 + prb->n_values + prb->n_keys + prb->n_queries
             : 1 + prb->n_keys;
-    return n_eps * epsilon_dt(prb->dst_dt())
-            + 8.f * n_acc * epsilon_dt(dnnl_f32);
+
+    // All-fp8 problems may round P to f8_e4m3 before P*V, which the reference
+    // does not model.
+    const auto is_fp8 = [](dnnl_data_type_t dt) {
+        return dt == dnnl_f8_e4m3 || dt == dnnl_f8_e5m2;
+    };
+    const bool fp8_probs = !is_bwd && is_fp8(prb->q_dt()) && is_fp8(prb->k_dt())
+            && is_fp8(prb->v_dt());
+    const float eps
+            = fp8_probs ? epsilon_dt(dnnl_f8_e4m3) : epsilon_dt(prb->dst_dt());
+    return n_eps * eps + 8.f * n_acc * epsilon_dt(dnnl_f32);
 }
 
 void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,

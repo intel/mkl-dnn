@@ -284,6 +284,11 @@ struct micro_fwd_t : public primitive_t {
                                                       .has_default_values()),
                     "zero points are not supported with fp8");
 
+            VDISPATCH_SDPA(
+                    IMPLICATION(with_fp8,
+                            desc()->prop_kind == prop_kind::forward_inference),
+                    "fp8 is not supported for training");
+
             VDISPATCH_SDPA(set_default_formats() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);
 
