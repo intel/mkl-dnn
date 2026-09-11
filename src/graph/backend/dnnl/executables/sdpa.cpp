@@ -25,14 +25,14 @@ namespace dnnl_impl {
 
 using ltw = logical_tensor_wrapper_t;
 
-sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
-        const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout)
-    : with_scale_(op->get_attr<bool>(op_attr::with_scale))
-    , is_training_(op->get_attr<bool>(op_attr::is_training))
-    , mask_type_(static_cast<attn_mask_type_t>(
-              op->get_attr<int64_t>(op_attr::mask_type)))
-    , with_dropout_(op->get_attr<bool>(op_attr::with_dropout)) {
+status_t create_sdpa_pd(std::unique_ptr<dnnl_primitive_desc, pd_deleter_t> &pd,
+        const std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
+        const fpmath_t &fpmath) {
+    const bool with_scale = op->get_attr<bool>(op_attr::with_scale);
+    const bool is_training = op->get_attr<bool>(op_attr::is_training);
+    const auto mask_type = static_cast<attn_mask_type_t>(
+            op->get_attr<int64_t>(op_attr::mask_type));
+    const bool with_dropout = op->get_attr<bool>(op_attr::with_dropout);
 
     auto md_q = make_dnnl_memory_desc(op->get_input_logical_tensor(0));
     auto md_k = make_dnnl_memory_desc(op->get_input_logical_tensor(1));
@@ -41,18 +41,18 @@ sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
 
     auto md_scale = dnnl::memory::desc();
     size_t idx = 3;
-    if (with_scale_)
+    if (with_scale)
         md_scale = make_dnnl_memory_desc(op->get_input_logical_tensor(idx++));
 
     dnnl::memory::desc md_mask;
-    with_explicit_mask_ = mask_type_ == attn_mask_type::buffer;
-    if (with_explicit_mask_)
+    const bool with_explicit_mask = mask_type == attn_mask_type::buffer;
+    if (with_explicit_mask)
         md_mask = make_dnnl_memory_desc(op->get_input_logical_tensor(idx++));
 
     dnnl::primitive_attr attr, qk_attr, vs_attr;
     attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
     attr.set_fpmath_mode(static_cast<dnnl::fpmath_mode>(fpmath.mode_));
-    if (with_dropout_) {
+    if (with_dropout) {
         dnnl::memory::desc dropout_mask_desc;
         auto prop_type
                 = ltw(op->get_input_logical_tensor(idx++)).property_type();
@@ -61,7 +61,7 @@ sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
                 /*use_host_scalars*/ prop_type == property_type::host_scalar);
     }
 
-    is_invert_scale_ = op->has_attr(op_attr::is_invert_scale)
+    const bool is_invert_scale = op->has_attr(op_attr::is_invert_scale)
             ? op->get_attr<bool>(op_attr::is_invert_scale)
             : false;
 
@@ -89,27 +89,46 @@ sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
             : alg_kind::softmax_accurate;
 
     const auto prop
-            = is_training_ ? dnnl_forward_training : dnnl_forward_inference;
+            = is_training ? dnnl_forward_training : dnnl_forward_inference;
 
     dnnl::memory::desc md_stats;
-    if (is_training_)
+    if (is_training)
         md_stats = make_dnnl_memory_desc(op->get_output_logical_tensor(2));
 
-    dnnl_primitive_desc_t pd = nullptr;
-    auto ret = sdpa_primitive_desc_create(&pd, p_engine.get(), md_q.get(),
+    dnnl_primitive_desc_t raw_pd = nullptr;
+    auto ret = sdpa_primitive_desc_create(&raw_pd, p_engine.get(), md_q.get(),
             md_k.get(), md_v.get(), md_dst.get(), md_mask.get(), md_scale.get(),
-            is_invert_scale_, kv_head_number, mask_type_,
+            is_invert_scale, kv_head_number, mask_type,
             static_cast<dnnl_alg_kind_t>(softmax_alg), prop, attr.get(),
             qk_attr.get(), vs_attr.get(), md_stats.get());
 
-    if (pd && ret == dnnl_success) {
-        pd_.reset(pd);
-    } else {
-        return;
+    if (raw_pd && ret == dnnl_success) {
+        pd.reset(raw_pd);
+        return status::success;
     }
+    return status::unimplemented;
+}
+
+sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
+        const dnnl::engine &p_engine, pd_cache_t &pd_cache,
+        const fpmath_t &fpmath, bool use_block_layout)
+    : with_scale_(op->get_attr<bool>(op_attr::with_scale))
+    , is_training_(op->get_attr<bool>(op_attr::is_training))
+    , mask_type_(static_cast<attn_mask_type_t>(
+              op->get_attr<int64_t>(op_attr::mask_type)))
+    , with_dropout_(op->get_attr<bool>(op_attr::with_dropout)) {
+    UNUSED(pd_cache);
+    UNUSED(use_block_layout);
+
+    is_invert_scale_ = op->has_attr(op_attr::is_invert_scale)
+            ? op->get_attr<bool>(op_attr::is_invert_scale)
+            : false;
+    with_explicit_mask_ = mask_type_ == attn_mask_type::buffer;
+
+    if (create_sdpa_pd(pd_, op, p_engine, fpmath) != status::success) return;
 
     dnnl_primitive_t prim = nullptr;
-    ret = dnnl_primitive_create(&prim, pd_.get());
+    auto ret = dnnl_primitive_create(&prim, pd_.get());
     if (prim && ret == dnnl_success) { prim_.reset(prim); }
 }
 

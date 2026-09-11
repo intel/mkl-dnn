@@ -27,6 +27,13 @@ namespace impl {
 namespace graph {
 namespace dnnl_impl {
 
+// Creates the dnnl_sdpa primitive descriptor from a graph sdpa op. Shared by
+// the executable (which owns the pd to build the primitive) and the layout
+// propagator (which queries the scratchpad size before memory planning).
+status_t create_sdpa_pd(std::unique_ptr<dnnl_primitive_desc, pd_deleter_t> &pd,
+        const std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
+        const fpmath_t &fpmath);
+
 struct sdpa_executable_t : public op_executable_t {
     DECLARE_ARG_INDICES_GETTER;
 
