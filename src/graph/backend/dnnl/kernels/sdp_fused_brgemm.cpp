@@ -236,6 +236,22 @@ status_t sdp_fused_brgemm_online_kernel_t::compile_impl(
         const std::vector<logical_tensor_t> &outputs) {
     CHECK(parse(part, eng, inputs, outputs));
 #if DNNL_X64
+    // Capability gate, mirroring the CPU sdpa primitive's fused driver: this
+    // online (flash) kernel is f32-only, has no attention-mask post-op, and
+    // consumes K already transposed to [.., head_size_qk, seq_kv] (unlike the
+    // blocked driver, sdp_fused_driver_t never transposes K itself). Decline
+    // other cases cleanly so the dispatch cascade / forced-impl testing falls
+    // back to the blocked/decomp/large kernels instead of miscomputing.
+    const auto q_dt = static_cast<dnnl::impl::data_type_t>(
+            ltw(inputs[prb_.idx_q]).data_type());
+    VCHECK_SDP_FUSED_BRGEMM(q_dt == dnnl::impl::data_type::f32,
+            status::unimplemented, "online fused kernel supports f32 only");
+    VCHECK_SDP_FUSED_BRGEMM(!prb_.has_mask, status::unimplemented,
+            "online fused kernel does not support an attention mask");
+    VCHECK_SDP_FUSED_BRGEMM(!prb_.mm1_transpose_b, status::unimplemented,
+            "online fused kernel requires K pre-transposed "
+            "(transpose_b=false)");
+
     sdp_fused_params_t fp;
     fp.ndims = prb_.ndims;
     fp.batch = prb_.batch;
