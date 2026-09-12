@@ -44,6 +44,18 @@ struct ref_fwd_t : public primitive_t {
 
             VDISPATCH_SDPA(attr()->has_default_values(smask_t::scales),
                     VERBOSE_UNSUPPORTED_ATTR);
+
+            VDISPATCH_SDPA(!with_query_scales(), VERBOSE_UNSUPPORTED_ATTR);
+
+            const auto is_fp8 = [](data_type_t dt) {
+                return utils::one_of(dt, f8_e4m3, f8_e5m2);
+            };
+            VDISPATCH_SDPA(!is_fp8(desc()->qry_md()->data_type)
+                            && !is_fp8(desc()->key_md()->data_type)
+                            && !is_fp8(desc()->val_md()->data_type)
+                            && !is_fp8(dst_md()->data_type),
+                    VERBOSE_UNSUPPORTED_DT);
+
             VDISPATCH_SDPA(utils::everyone_is(4, desc()->qry_md()->ndims,
                                    desc()->key_md()->ndims,
                                    desc()->val_md()->ndims, dst_md()->ndims),

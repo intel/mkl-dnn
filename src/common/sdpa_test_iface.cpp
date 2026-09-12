@@ -38,7 +38,6 @@ status_t sdpa_primitive_desc_create(
             engine, attr, kq_attr, vs_attr));
     CHECK(sdpa_attr_check(query_desc, key_desc, value_desc, dst_desc, engine,
             attr, kq_attr, vs_attr));
-
     sdpa_desc_t sdpa_desc = create_sdpa_desc(query_desc, key_desc, value_desc,
             dst_desc, mask_desc, scale_desc, stats_desc, invert_scale,
             kv_head_number, static_cast<attn_mask_type_t>(attn_mask_type),

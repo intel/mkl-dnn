@@ -1652,9 +1652,14 @@ std::string init_info_sdpa(const engine_t *e, const pd_t *pd) {
        << ",";
 
     std::string delimiter;
-    if (pd->with_key_scales() || pd->with_value_scales()) {
+    if (pd->with_query_scales() || pd->with_key_scales()
+            || pd->with_value_scales()) {
         ss << delimiter << "attr-scales:";
         delimiter = "";
+        if (pd->with_query_scales()) {
+            ss << delimiter << "query:" << desc->q_scales;
+            delimiter = "+";
+        }
         if (pd->with_key_scales()) {
             ss << delimiter << "key:" << desc->kq_scales;
             delimiter = "+";

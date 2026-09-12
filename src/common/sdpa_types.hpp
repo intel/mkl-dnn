@@ -79,6 +79,7 @@ struct sdpa_desc_t : public op_desc_t {
 
     // primitive_attr_t can't be used because of deleted copy-ctor, but desc_t
     // must be copyable.
+    quant_entry_t q_scales;
     quant_entry_t kq_scales;
     quant_entry_t kq_zero_points;
     quant_entry_t vs_scales;

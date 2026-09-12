@@ -329,6 +329,10 @@ struct micro_fwd_t : public primitive_t {
             VDISPATCH_SDPA(utils::one_of(vs_acc_dt(), f16, f32),
                     "VS accumulation data type should be f16 or f32");
 
+            // TODO: remove once the kernel applies the Q descale
+            VDISPATCH_SDPA(!with_query_scales(),
+                    "query tensor scales are not supported yet");
+
             int kq_scales_mask = desc()->kq_scales.get_mask();
             int kq_zp_mask = desc()->kq_zero_points.get_mask();
             if (!desc()->kq_scales.has_default_values()

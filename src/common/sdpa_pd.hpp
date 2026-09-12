@@ -81,6 +81,11 @@ struct sdpa_pd_t : public primitive_desc_t {
                 || desc_.mask_type == attn_mask_type::bottom_right;
     }
 
+    /// If true, dequantize the Q tensor using scaling in the KQ matmul
+    bool with_query_scales() const {
+        return (!desc()->q_scales.has_default_values());
+    }
+
     /// If true, dequantize the K tensor using scaling in the KQ matmul
     bool with_key_scales() const {
         return (!desc()->kq_scales.has_default_values());
@@ -101,6 +106,11 @@ struct sdpa_pd_t : public primitive_desc_t {
         return (!desc()->vs_zero_points.has_default_values());
     }
 
+    /// Returns the data type of the scales tensor for the Q tensor
+    data_type_t query_scales_dt() const {
+        return desc()->q_scales.get_data_type();
+    }
+
     /// Returns the data type of the scales tensor for the KQ matmul
     data_type_t key_scales_dt() const {
         return desc()->kq_scales.get_data_type();
@@ -119,6 +129,12 @@ struct sdpa_pd_t : public primitive_desc_t {
     /// Returns the data type of the zero points tensor for the VS matmul
     data_type_t value_zp_dt() const {
         return desc()->vs_zero_points.get_data_type();
+    }
+
+    // Number of Q elements covered by one Q scale
+    int query_group_size() const {
+        if (!with_query_scales()) return 0;
+        return group_size(desc()->q_scales, *desc()->qry_md());
     }
 
     // Returns the group size for the quantization parameters for the KQ matmul
@@ -203,6 +219,7 @@ struct sdpa_fwd_pd_t : public sdpa_pd_t {
         // quantization.
         if (utils::one_of(arg, DNNL_ARG_QUERIES, DNNL_ARG_KEYS, DNNL_ARG_VALUES,
                     DNNL_ARG_ATTN_MASK, DNNL_ARG_SCALE,
+                    DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES,
                     DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS,
                     DNNL_ARG_ATTR_SCALES | DNNL_ARG_VALUES,
                     DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_KEYS,
