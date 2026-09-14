@@ -927,6 +927,24 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
 
     conf.key_scales_data_t = key_scales_dt();
     conf.value_scales_data_t = value_scales_dt();
+    conf.qry_scales_data_t = query_scales_dt();
+
+    // The Q descale is one value per (batch, head). Resolve the mask into
+    // plain element strides here so the kernel need not know the mask
+    conf.with_qry_scales = with_query_scales();
+    conf.qry_scale_per_head = false;
+    conf.qry_scale_batch_stride = 0;
+    if (with_query_scales()) {
+        const int q_scales_mask = desc()->q_scales.get_mask();
+        // Bit 1 selects a per-head scale, bit 0 a per-batch one.
+        if (q_scales_mask & 2) {
+            conf.qry_scale_per_head = true;
+            conf.qry_scale_batch_stride
+                    = static_cast<int>(desc()->num_q_heads());
+        } else if (q_scales_mask & 1) {
+            conf.qry_scale_batch_stride = 1;
+        }
+    }
 
     conf.key_zp_data_t = key_zp_dt();
     conf.value_zp_data_t = value_zp_dt();
@@ -1008,8 +1026,9 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     conf.remainder_q = d_full && q_full;
 
     conf.block_q = conf.block_a = conf.block_2d_a = false;
+    const bool fp8_qry = (desc()->qry_md()->data_type == data_type::f8_e4m3);
     if (d_full) {
-        conf.block_q = (ldq % 4 == 0);
+        conf.block_q = (ldq % 4 == 0) && !fp8_qry;
         conf.block_a = (lda % 4 == 0 && v_full);
     } else if (arch() >= compute::gpu_arch_t::xe_hpc
             && config.unroll_m_vs < 64) {
@@ -1169,6 +1188,7 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     kernel_ctx.define_int("QRY_SLM_FP8", q_slm_fp8);
     kernel_ctx.define_int("VS_S_FP8", pv_fp8);
 
+    def_data_type(kernel_ctx, qry_scales_data_t, "QRY_ATTR_SCALES");
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");
     def_data_type(kernel_ctx, value_scales_data_t, "VAL_ATTR_SCALES");
 
@@ -1184,6 +1204,9 @@ status_t micro_fwd_params_t::get_kernel_ctx(
 
     kernel_ctx.define_int("TRANSPOSE_K", transpose_k);
 
+    kernel_ctx.define_int("QRY_SCALES", with_qry_scales);
+    kernel_ctx.define_int("QRY_SCALE_BATCH_STRIDE", qry_scale_batch_stride);
+    kernel_ctx.define_int("QRY_SCALE_PER_HEAD", qry_scale_per_head);
     kernel_ctx.define_int("KEY_SCALES", kq_scale_mask);
     kernel_ctx.define_int("VAL_SCALES", vs_scale_mask);
     kernel_ctx.define_int("KEY_ZERO_POINTS", kq_zp_mask);
@@ -1654,6 +1677,8 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     const auto &scale = CTX_IN_STORAGE(DNNL_ARG_SCALE);
     const auto &attn_mask = CTX_IN_STORAGE(DNNL_ARG_ATTN_MASK);
 
+    const auto &qry_scales
+            = CTX_IN_STORAGE(DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES);
     const auto &key_scales
             = CTX_IN_STORAGE(DNNL_ARG_KEYS | DNNL_ARG_ATTR_SCALES);
     const auto &key_zp
@@ -1726,6 +1751,7 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     arg_list.append((int)D_v);
     arg_list.append((int)K);
     arg_list.append((int)Q);
+    arg_list.append(qry_scales);
     arg_list.append(key_scales);
     arg_list.append(key_zp);
     arg_list.append(value_scales);

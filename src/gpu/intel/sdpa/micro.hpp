@@ -64,6 +64,7 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     data_type_t dst_data_t, key_data_t, qry_data_t, val_data_t, msk_data_t;
     data_type_t key_scales_data_t, value_scales_data_t;
     data_type_t key_zp_data_t, value_zp_data_t;
+    data_type_t qry_scales_data_t;
     int kv_group_size;
 
     int q_align, k_align, v_align, a_align;
@@ -75,6 +76,7 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
             val_zp_elements_per_byte;
 
     int key_group_size, val_group_size;
+    int qry_scale_batch_stride;
     data_type_t scale_data_t;
 
     int attn_mask_undef, attn_mask_buffer, attn_mask_top_left,
@@ -88,7 +90,8 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     bool block_q, block_a, block_2d_a;
     bool prefetch_mask, prefetch_k0, prefetch_k, prefetch_v, prefetch_remainder;
     bool remainder_q;
-    uint8_t padding2[5] = {0};
+    bool with_qry_scales, qry_scale_per_head;
+    uint8_t padding2[3] = {0};
     int prefetch_d_max;
     int prefetch_v_max;
 
@@ -329,9 +332,21 @@ struct micro_fwd_t : public primitive_t {
             VDISPATCH_SDPA(utils::one_of(vs_acc_dt(), f16, f32),
                     "VS accumulation data type should be f16 or f32");
 
-            // TODO: remove once the kernel applies the Q descale
-            VDISPATCH_SDPA(!with_query_scales(),
-                    "query tensor scales are not supported yet");
+            if (with_query_scales()) {
+                const int q_scales_mask = desc()->q_scales.get_mask();
+                VDISPATCH_SDPA(utils::one_of(q_scales_mask, 0, 1, 3),
+                        "unsupported mask for query scales(%d). must be 0, 1, "
+                        "or 3",
+                        q_scales_mask);
+                VDISPATCH_SDPA(desc()->q_scales.has_default_groups(),
+                        "grouped query scales are not supported");
+
+                VDISPATCH_SDPA(!((q_scales_mask & 2) && desc()->queries() == 1
+                                       && desc()->num_q_heads()
+                                               != desc()->num_kv_heads()),
+                        "per-head query scales are not supported for GQA with "
+                        "a single query");
+            }
 
             int kq_scales_mask = desc()->kq_scales.get_mask();
             int kq_zp_mask = desc()->kq_zero_points.get_mask();

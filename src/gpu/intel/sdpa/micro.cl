@@ -490,6 +490,7 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
         const global SCALE_DATA_T *scale_ptr,
 #endif
         int d_qk, int d_v, int k, int q,
+        const global QRY_ATTR_SCALES_DATA_T *Q_scales,
         const global KEY_ATTR_SCALES_DATA_T *K_scales,
         const global KEY_ATTR_ZP_DATA_T *K_zp,
         const global VAL_ATTR_SCALES_DATA_T *V_scales,
@@ -619,11 +620,23 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
             && mask_aligned;
 #endif
 
+#if QRY_SCALES || (KEY_SCALES == QUANTIZE_COMMON)
+    float qk_descale = 1.f;
+#endif
+#if QRY_SCALES
+    Q_scales += QRY_SCALE_BATCH_STRIDE * b1
+#if QRY_SCALE_PER_HEAD
+            + b0
+#endif
+            ;
+    qk_descale *= into_float(*Q_scales);
+#endif
+
 #if KEY_SCALES
     K_scales += k_offset / KEY_GROUP_SIZE;
 #endif
 #if KEY_SCALES == QUANTIZE_COMMON
-    float k_scale = into_float(*K_scales);
+    qk_descale *= into_float(*K_scales);
 #endif
 #if KEY_ZERO_POINTS
     K_zp += k_offset / KEY_GROUP_SIZE / KEY_ZP_ELEMENTS_PER_BYTE;
@@ -838,9 +851,10 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
         tile_copy_reblock(S_tile_f16, &S_tile);
 #endif
 
-#if KEY_SCALES == QUANTIZE_COMMON
-#define k_scale_op(x) ((x) * k_scale)
-        tile_elementwise(S_tile, k_scale_op);
+#if QRY_SCALES || (KEY_SCALES == QUANTIZE_COMMON)
+#define qk_descale_op(x) ((x) * qk_descale)
+        tile_elementwise(S_tile, qk_descale_op);
+#undef qk_descale_op
 #endif
 
         /* Apply attention mask */

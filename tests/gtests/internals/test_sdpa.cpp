@@ -3100,6 +3100,23 @@ INSTANTIATE_TEST_SUITE_P(DataTypes_f16_s8_kf16, sdpa_test_datatypes,
                 ),
         &print_to_string2);
 
+INSTANTIATE_TEST_SUITE_P(PerHeadQuant_f16_s8, sdpa_test_datatypes,
+        testing::Combine(::testing::Values(1), // mb
+                ::testing::Values(num_heads_t {2, 2}, num_heads_t {8, 2}), // hd_num
+                ::testing::Values(seq_len_size_t {384, 384}), // seq_len
+                ::testing::Values(head_group_size_t {128, 128, 128}), // hd_size
+                ::testing::Values(tensor_type_t("Q", mdt::f16)), // dt
+                ::testing::Values(tensor_type_t("K", mdt::s8, mdt::f16, mdt::undef)), // kdt
+                ::testing::Values(tensor_type_t("V", mdt::s8, mdt::f16, mdt::undef)), // vdt
+                ::testing::Values(quantize_type::per_tensor3), // qtype
+                ::testing::Values(dnnl::memory::format_tag::abdc), // key_format_tag
+                ::testing::Values(mask_config_t {mask_type::no_mask, mdt::undef}, mask_config_t {mask_type::causal_tl, mdt::undef}), // mask_type
+                ::testing::Values(default_scale_type), // scale_type
+                ::testing::Values(accumulation_t {accumulation_mode::f32, accumulation_mode::f32}), // accumulation_mode
+                ::testing::Values(no_dropout) // dropout
+                ),
+        &print_to_string2);
+
 INSTANTIATE_TEST_SUITE_P(DataTypes_f16_s4, sdpa_test_datatypes,
         testing::Combine(::testing::Values(1), // mb
                 ::testing::Values(num_heads_t {2, 2}), // hd_num
@@ -3506,3 +3523,143 @@ INSTANTIATE_TEST_SUITE_P(bwd_smoke, sdpa_bwd_test_datatypes,
                 ),
         &print_to_string2);
 // clang-format on
+
+// An in-primitive Q descale must match folding the same scale into Q on the host
+static void test_query_descale_equivalence(
+        memory::dim mb, memory::dim H_q, memory::dim H_kv, memory::dim S_q) {
+    using namespace dnnl::impl;
+
+    SKIP_IF(engine::get_count(engine::kind::gpu) == 0,
+            "SDPA tests require gpus.");
+    dnnl::engine eng(engine::kind::gpu, 0);
+    dnnl::stream strm(eng);
+
+    const memory::dim D = 64, S_kv = 128;
+    const memory::dims q_sz = {mb, H_q, S_q, D}, k_sz = {mb, H_kv, D, S_kv},
+                       v_sz = {mb, H_kv, S_kv, D}, o_sz = {mb, H_q, S_q, D};
+
+    memory::desc q_md(q_sz, mdt::f16, memory::format_tag::abcd);
+    memory::desc k_md(k_sz, mdt::f16, memory::format_tag::abcd);
+    memory::desc v_md(v_sz, mdt::f16, memory::format_tag::abcd);
+    memory::desc o_md(o_sz, mdt::f16, memory::format_tag::abcd);
+    memory::desc scale_md({1}, mdt::f32, memory::format_tag::a);
+    memory::desc qs_md({mb, H_q, 1, 1}, mdt::f32, memory::format_tag::abcd);
+
+    std::vector<float> q_data(product(q_sz)), k_data(product(k_sz)),
+            v_data(product(v_sz));
+    fill_random(q_data, q_md);
+    fill_random(k_data, k_md);
+    fill_random(v_data, v_md);
+
+    std::vector<float> qs(mb * H_q);
+    const float pow2[] = {0.5f, 2.f, 0.25f, 4.f};
+    for (memory::dim b = 0; b < mb; b++)
+        for (memory::dim h = 0; h < H_q; h++)
+            qs[b * H_q + h] = pow2[h % 4] * (b == 0 ? 1.f : 8.f);
+
+    std::vector<float> q_folded(q_data.size());
+    for (memory::dim bh = 0; bh < mb * H_q; bh++)
+        for (memory::dim i = 0; i < S_q * D; i++)
+            q_folded[bh * S_q * D + i] = q_data[bh * S_q * D + i] * qs[bh];
+
+    bool unimplemented = false;
+    auto run = [&](const std::vector<float> &qsrc,
+                       bool with_q_scales) -> std::vector<float> {
+        memory qm(q_md, eng), km(k_md, eng), vm(v_md, eng), om(o_md, eng),
+                sm(scale_md, eng), qsm;
+        write_to_dnnl_memory(qsrc.data(), qm, eng, strm);
+        write_to_dnnl_memory(k_data.data(), km, eng, strm);
+        write_to_dnnl_memory(v_data.data(), vm, eng, strm);
+        const float one = 1.f;
+        write_to_dnnl_memory(&one, sm, eng, strm);
+
+        primitive_attr kq_attr;
+        if (with_q_scales) {
+            kq_attr.set_scales(DNNL_ARG_SRC, /* mask = per (batch, head) */ 3,
+                    {}, mdt::f32);
+            qsm = memory(qs_md, eng);
+            write_to_dnnl_memory(qs.data(), qsm, eng, strm);
+        }
+
+        sdpa::primitive_desc pd;
+        try {
+            pd = sdpa::primitive_desc(eng, q_md, k_md, v_md, nullptr, scale_md,
+                    o_md, /* invert_scale = */ false, H_kv,
+                    to_attn_mask_type(mask_type::no_mask),
+                    alg_kind::softmax_accurate, prop_kind::forward_inference,
+                    primitive_attr(), kq_attr);
+        } catch (const dnnl::error &e) {
+            if (e.status == dnnl_unimplemented) {
+                unimplemented = true;
+                return {};
+            }
+            throw;
+        }
+        sdpa prim(pd);
+
+        std::unordered_map<int, memory> args = {{DNNL_ARG_QUERIES, qm},
+                {DNNL_ARG_KEYS, km}, {DNNL_ARG_VALUES, vm},
+                {DNNL_ARG_SCALE, sm}, {DNNL_ARG_DST, om}};
+        if (with_q_scales) args[DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES] = qsm;
+        prim.execute(strm, args);
+        strm.wait();
+
+        memory of32({o_sz, mdt::f32, memory::format_tag::abcd}, eng);
+        dnnl::reorder(om, of32).execute(strm, om, of32);
+        strm.wait();
+        std::vector<float> out(product(o_sz));
+        void *p = of32.map_data();
+        std::memcpy(out.data(), p, out.size() * sizeof(float));
+        of32.unmap_data(p);
+        return out;
+    };
+
+    const auto scaled_in_primitive = run(q_data, /* with_q_scales = */ true);
+    if (unimplemented) GTEST_SKIP() << "Q descale unimplemented";
+    const auto folded_into_q = run(q_folded, /* with_q_scales = */ false);
+    if (unimplemented) GTEST_SKIP() << "baseline unimplemented";
+
+    ASSERT_EQ(scaled_in_primitive.size(), folded_into_q.size());
+    for (size_t i = 0; i < folded_into_q.size(); i++) {
+        ASSERT_NEAR(scaled_in_primitive[i], folded_into_q[i],
+                1e-3f * std::max(1.f, std::abs(folded_into_q[i])))
+                << "mismatch at " << i;
+    }
+}
+
+TEST(sdpa_query_scales, PerQueryHead) {
+    test_query_descale_equivalence(
+            /* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128);
+}
+
+TEST(sdpa_query_scales, PerQueryHeadGQA) {
+    test_query_descale_equivalence(
+            /* mb = */ 2, /* H_q = */ 8, /* H_kv = */ 2, /* S_q = */ 128);
+}
+
+TEST(sdpa_query_scales, PerQueryHeadGQASingleQueryRejected) {
+    using namespace dnnl::impl;
+    SKIP_IF(engine::get_count(engine::kind::gpu) == 0,
+            "SDPA tests require gpus.");
+    dnnl::engine eng(engine::kind::gpu, 0);
+
+    const memory::dim mb = 1, H_q = 8, H_kv = 2, D = 64, S_kv = 128;
+    memory::desc q_md({mb, H_q, 1, D}, mdt::f16, memory::format_tag::abcd);
+    memory::desc k_md({mb, H_kv, D, S_kv}, mdt::f16, memory::format_tag::abcd);
+    memory::desc v_md({mb, H_kv, S_kv, D}, mdt::f16, memory::format_tag::abcd);
+    memory::desc o_md({mb, H_q, 1, D}, mdt::f16, memory::format_tag::abcd);
+    memory::desc scale_md({1}, mdt::f32, memory::format_tag::a);
+
+    primitive_attr kq_attr;
+    kq_attr.set_scales(
+            DNNL_ARG_SRC, /* mask = per (batch, head) */ 3, {}, mdt::f32);
+
+    try {
+        sdpa::primitive_desc pd(eng, q_md, k_md, v_md, nullptr, scale_md, o_md,
+                /* invert_scale = */ false, H_kv,
+                to_attn_mask_type(mask_type::no_mask),
+                alg_kind::softmax_accurate, prop_kind::forward_inference,
+                primitive_attr(), kq_attr);
+        ADD_FAILURE() << "expected dnnl_unimplemented";
+    } catch (const dnnl::error &e) { EXPECT_EQ(e.status, dnnl_unimplemented); }
+}
