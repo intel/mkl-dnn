@@ -26,6 +26,8 @@
 #include "cpu/x64/injectors/jit_uni_binary_injector.hpp"
 #include "cpu/x64/jit_brgemm_1x1_conv.hpp"
 
+#include <memory>
+
 namespace dnnl {
 namespace impl {
 namespace cpu {
@@ -576,16 +578,17 @@ void brgemm_1x1_convolution_fwd_t<isa>::execute_os_blocking(
         char *const c_buffer_global, char *inp_buffer_base,
         uint8_t *inp_buffer_mask_base) const {
 
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     const bool is_amx = brgemm_convolution_utils::is_amx(isa);
 
-    const dim_t os_chunks = div_up(jcp.nb_os, jcp.nb_os_blocking);
-    const int work_amount
-            = static_cast<int>(jcp.mb * jcp.ngroups * jcp.nb_oc * os_chunks);
-
-    parallel(pd()->jcp_.nthr,
+    parallel(jcp_ptr->nthr,
             [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+        const dim_t os_chunks = div_up(jcp.nb_os, jcp.nb_os_blocking);
+        const int work_amount = static_cast<int>(
+                jcp.mb * jcp.ngroups * jcp.nb_oc * os_chunks);
         if (ithr >= work_amount) return;
+
         brgemm_batch_element_t *const brg_batch
                 = brg_batch_global + (size_t)ithr * jcp.adjusted_batch_size;
         char *const c_buffer = (jcp.use_buffer)
@@ -673,13 +676,16 @@ void brgemm_1x1_convolution_fwd_t<isa>::execute_full_spatial(
         const int32_t *dst_zero_points, int32_t *s8s8_compensation,
         char *const c_buffer_global) const {
 
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     const bool is_amx = brgemm_convolution_utils::is_amx(isa);
-    const int work_amount = static_cast<int>(
-            jcp.mb * jcp.ngroups * jcp.nb_oc * OD * OH * jcp.nb_ow);
-    parallel(pd()->jcp_.nthr,
+
+    parallel(jcp_ptr->nthr,
             [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+        const int work_amount = static_cast<int>(
+                jcp.mb * jcp.ngroups * jcp.nb_oc * OD * OH * jcp.nb_ow);
         if (ithr >= work_amount) return;
+
         brgemm_batch_element_t *const brg_batch
                 = brg_batch_global + (size_t)ithr * jcp.adjusted_batch_size;
         char *const c_buffer = (jcp.use_buffer)

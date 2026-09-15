@@ -42,7 +42,7 @@ using namespace nstl;
 template <cpu_isa_t isa>
 status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d(
         const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const char *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
@@ -64,10 +64,10 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d(
             = pd()->with_bias() ? types::data_type_size(bias_d.data_type()) : 0;
     const size_t dst_dt_size = types::data_type_size(dst_d.data_type());
 
-    assert(jcp.ch_block == 1);
-    assert(jcp.nb_ch_blocking == 1);
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
-    assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
+    assert(jcp_ptr->ch_block == 1);
+    assert(jcp_ptr->nb_ch_blocking == 1);
+    assert(jcp_ptr->nb_oc % jcp_ptr->nb_oc_blocking == 0);
+    assert(jcp_ptr->nb_ch % jcp_ptr->nb_ch_blocking == 0);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -78,19 +78,24 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d(
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<char *>(weights);
-    const int32_t *compensation = (jcp.signed_input)
+    const int32_t *compensation = (jcp_ptr->signed_input)
             ? reinterpret_cast<int32_t *>(&w[offset])
             : nullptr;
-    const int32_t *zp_compensation = jcp.src_zero_point
+    const int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(&w[offset])
-                    + (jcp.signed_input ? jcp.ngroups * jcp.oc : 0)
+                    + (jcp_ptr->signed_input ? jcp_ptr->ngroups * jcp_ptr->oc
+                                             : 0)
             : nullptr;
-    const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking_thr_chunk;
-    const dim_t nb_groups = jcp.nb_ch;
-    const dim_t work_amount
-            = jcp.mb * nb_groups * oc_chunks * jcp.oh * jcp.nb_ow;
 
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+
+        const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking_thr_chunk;
+        const dim_t nb_groups = jcp.nb_ch;
+        const dim_t work_amount
+                = jcp.mb * nb_groups * oc_chunks * jcp.oh * jcp.nb_ow;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
@@ -226,7 +231,7 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d(
 template <cpu_isa_t isa>
 status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_1d(
         const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const char *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
@@ -248,8 +253,8 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_1d(
             = pd()->with_bias() ? types::data_type_size(bias_d.data_type()) : 0;
     const size_t dst_dt_size = types::data_type_size(dst_d.data_type());
 
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
-    assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
+    assert(jcp_ptr->nb_oc % jcp_ptr->nb_oc_blocking == 0);
+    assert(jcp_ptr->nb_ch % jcp_ptr->nb_ch_blocking == 0);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -260,22 +265,27 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_1d(
 
     size_t extra_data_offset
             = weights_d.size() - weights_d.additional_buffer_size();
-    size_t ch_offset = jcp.is_depthwise ? jcp.nb_ch * jcp.ch_block
-                                        : jcp.ngroups * jcp.oc;
+    size_t ch_offset = jcp_ptr->is_depthwise
+            ? jcp_ptr->nb_ch * jcp_ptr->ch_block
+            : jcp_ptr->ngroups * jcp_ptr->oc;
     auto w = const_cast<char *>(weights);
-    const int32_t *compensation = (jcp.signed_input)
+    const int32_t *compensation = (jcp_ptr->signed_input)
             ? reinterpret_cast<int32_t *>(&w[extra_data_offset])
             : nullptr;
-    const int32_t *zp_compensation = jcp.src_zero_point
+    const int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(&w[extra_data_offset])
-                    + (jcp.signed_input ? ch_offset : 0)
+                    + (jcp_ptr->signed_input ? ch_offset : 0)
             : nullptr;
 
-    const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
-    const dim_t nb_groups = jcp.nb_ch / jcp.nb_ch_blocking;
-    const dim_t group_block = jcp.ch_block;
-    const dim_t work_amount = jcp.mb * nb_groups * oc_chunks * jcp.nb_ow;
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+
+        const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
+        const dim_t nb_groups = jcp.nb_ch / jcp.nb_ch_blocking;
+        const dim_t group_block = jcp.ch_block;
+        const dim_t work_amount = jcp.mb * nb_groups * oc_chunks * jcp.nb_ow;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
@@ -376,7 +386,7 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_1d(
 template <cpu_isa_t isa>
 status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d_dw(
         const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const char *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
@@ -398,12 +408,12 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d_dw(
             = pd()->with_bias() ? types::data_type_size(bias_d.data_type()) : 0;
     const size_t dst_dt_size = types::data_type_size(dst_d.data_type());
 
-    assert(jcp.ic_block == 1);
-    assert(jcp.oc_block == 1);
-    assert(jcp.nb_ic == 1);
-    assert(jcp.nb_oc == 1);
-    assert(jcp.nb_oc_blocking == 1);
-    assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
+    assert(jcp_ptr->ic_block == 1);
+    assert(jcp_ptr->oc_block == 1);
+    assert(jcp_ptr->nb_ic == 1);
+    assert(jcp_ptr->nb_oc == 1);
+    assert(jcp_ptr->nb_oc_blocking == 1);
+    assert(jcp_ptr->nb_ch % jcp_ptr->nb_ch_blocking == 0);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -414,18 +424,23 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d_dw(
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<char *>(weights);
-    const int32_t *compensation = (jcp.signed_input)
+    const int32_t *compensation = (jcp_ptr->signed_input)
             ? reinterpret_cast<int32_t *>(&w[offset])
             : nullptr;
-    const int32_t *zp_compensation = jcp.src_zero_point
+    const int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(&w[offset])
-                    + (jcp.signed_input ? jcp.nb_ch * jcp.ch_block : 0)
+                    + (jcp_ptr->signed_input
+                                    ? jcp_ptr->nb_ch * jcp_ptr->ch_block
+                                    : 0)
             : nullptr;
-    const dim_t nb_groups = jcp.nb_ch / jcp.nb_ch_blocking;
-    const dim_t group_block = jcp.ch_block;
+    const dim_t nb_groups = jcp_ptr->nb_ch / jcp_ptr->nb_ch_blocking;
 
-    parallel_nd(jcp.mb, jcp.oh, jcp.nb_ow, nb_groups,
+    parallel_nd(jcp_ptr->mb, jcp_ptr->oh, jcp_ptr->nb_ow, nb_groups,
             [= COMPAT_THIS_CAPTURE](dim_t n, dim_t oh_s, dim_t owb, dim_t gg) {
+        const auto &jcp = *jcp_ptr;
+
+        const dim_t group_block = jcp.ch_block;
+
         auto p = jit_conv_args_t();
 
         size_t src_h_stride = src_d.blk_off(0, 0, 1);
@@ -502,7 +517,7 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_2d_dw(
 template <cpu_isa_t isa>
 status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_3d(
         const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const char *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
@@ -524,10 +539,10 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_3d(
             = pd()->with_bias() ? types::data_type_size(bias_d.data_type()) : 0;
     const size_t dst_dt_size = types::data_type_size(dst_d.data_type());
 
-    assert(jcp.ch_block == 1);
-    assert(jcp.nb_ch_blocking == 1);
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
-    assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
+    assert(jcp_ptr->ch_block == 1);
+    assert(jcp_ptr->nb_ch_blocking == 1);
+    assert(jcp_ptr->nb_oc % jcp_ptr->nb_oc_blocking == 0);
+    assert(jcp_ptr->nb_ch % jcp_ptr->nb_ch_blocking == 0);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -538,19 +553,24 @@ status_t jit_uni_x8s8s32x_convolution_fwd_t<isa>::execute_forward_3d(
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<char *>(weights);
-    const int32_t *compensation = (jcp.signed_input)
+    const int32_t *compensation = (jcp_ptr->signed_input)
             ? reinterpret_cast<int32_t *>(&w[offset])
             : nullptr;
-    const int32_t *zp_compensation = jcp.src_zero_point
+    const int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(&w[offset])
-                    + (jcp.signed_input ? jcp.ngroups * jcp.oc : 0)
+                    + (jcp_ptr->signed_input ? jcp_ptr->ngroups * jcp_ptr->oc
+                                             : 0)
             : nullptr;
-    const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking_thr_chunk;
-    const dim_t nb_groups = jcp.nb_ch;
-    const dim_t work_amount
-            = jcp.mb * nb_groups * oc_chunks * jcp.od * jcp.oh * jcp.nb_ow;
 
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+
+        const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking_thr_chunk;
+        const dim_t nb_groups = jcp.nb_ch;
+        const dim_t work_amount
+                = jcp.mb * nb_groups * oc_chunks * jcp.od * jcp.oh * jcp.nb_ow;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
