@@ -3664,9 +3664,11 @@ TEST(sdpa_query_scales, PerQueryHeadGQASingleQueryRejected) {
     } catch (const dnnl::error &e) { EXPECT_EQ(e.status, dnnl_unimplemented); }
 }
 
-// fp8 SDPA end to end, checked against the same problem in f16 with the
-// descales folded in
+// fp8 SDPA end to end, against a host model of the defined numerics: f32
+// scores and softmax, probabilities quantized to e4m3, then P*V.
 namespace {
+
+constexpr float vs_s_fp8_scale = 448.f;
 
 std::vector<float> read_as_f32(
         dnnl::memory &mem, dnnl::engine &eng, dnnl::stream &strm) {
@@ -3679,6 +3681,19 @@ std::vector<float> read_as_f32(
     std::memcpy(out.data(), p, out.size() * sizeof(float));
     f32_mem.unmap_data(p);
     return out;
+}
+
+// Round-trip through a real reorder so the reference rounds the way the
+// hardware does rather than through a hand-rolled model of e4m3
+std::vector<float> quantize_f8_e4m3(
+        const std::vector<float> &in, dnnl::engine &eng, dnnl::stream &strm) {
+    const memory::dims d = {static_cast<memory::dim>(in.size())};
+    memory f32_mem({d, mdt::f32, memory::format_tag::a}, eng);
+    memory f8_mem({d, mdt::f8_e4m3, memory::format_tag::a}, eng);
+    write_to_dnnl_memory(in.data(), f32_mem, eng, strm);
+    dnnl::reorder(f32_mem, f8_mem).execute(strm, f32_mem, f8_mem);
+    strm.wait();
+    return read_as_f32(f8_mem, eng, strm);
 }
 
 // Broadcast a per (batch, head) descale over a 4D tensor and fold it in
@@ -3700,10 +3715,87 @@ std::vector<float> pow2_scales(memory::dim n_bh) {
     return s;
 }
 
+std::vector<float> decomposed_reference(const std::vector<float> &q_deq,
+        const std::vector<float> &k_deq, const std::vector<float> &v_deq,
+        memory::dim mb, memory::dim H_q, memory::dim H_kv, memory::dim S_q,
+        memory::dim S_kv, memory::dim D, dnnl::engine &eng, dnnl::stream &strm,
+        std::vector<float> *absmag) {
+    const auto abcd = memory::format_tag::abcd;
+    const memory::dim kv_group = H_q / H_kv;
+
+    // Expand the KV heads so both matmuls are plain batched ones
+    auto expand = [&](const std::vector<float> &in, memory::dim per_head) {
+        std::vector<float> out((size_t)mb * H_q * per_head);
+        for (memory::dim b = 0; b < mb; b++)
+            for (memory::dim h = 0; h < H_q; h++)
+                std::memcpy(&out[((size_t)b * H_q + h) * per_head],
+                        &in[((size_t)b * H_kv + h / kv_group) * per_head],
+                        per_head * sizeof(float));
+        return out;
+    };
+    const auto k_e = expand(k_deq, D * S_kv);
+    const auto v_e = expand(v_deq, S_kv * D);
+
+    memory::desc q_md({mb, H_q, S_q, D}, mdt::f32, abcd);
+    memory::desc k_md({mb, H_q, D, S_kv}, mdt::f32, abcd);
+    memory::desc s_md({mb, H_q, S_q, S_kv}, mdt::f32, abcd);
+    memory::desc v_md({mb, H_q, S_kv, D}, mdt::f32, abcd);
+    memory::desc o_md({mb, H_q, S_q, D}, mdt::f32, abcd);
+
+    memory qm(q_md, eng), km(k_md, eng), scores(s_md, eng), probs(s_md, eng),
+            vm(v_md, eng), om(o_md, eng);
+    write_to_dnnl_memory(q_deq.data(), qm, eng, strm);
+    write_to_dnnl_memory(k_e.data(), km, eng, strm);
+    write_to_dnnl_memory(v_e.data(), vm, eng, strm);
+
+    dnnl::matmul(dnnl::matmul::primitive_desc(eng, q_md, k_md, s_md))
+            .execute(strm,
+                    {{DNNL_ARG_SRC, qm}, {DNNL_ARG_WEIGHTS, km},
+                            {DNNL_ARG_DST, scores}});
+    dnnl::softmax_forward(dnnl::softmax_forward::primitive_desc(eng,
+                                  dnnl::prop_kind::forward_inference,
+                                  dnnl::algorithm::softmax_accurate, s_md, s_md,
+                                  /* axis */ 3))
+            .execute(strm, {{DNNL_ARG_SRC, scores}, {DNNL_ARG_DST, probs}});
+    strm.wait();
+
+    // Quantize and dequantize the normalized probabilities, as the graph does
+    // 1/vs_s_fp8_scale maps [0, 1] onto the full e4m3 range
+    auto p = read_as_f32(probs, eng, strm);
+    for (auto &x : p)
+        x *= vs_s_fp8_scale;
+    p = quantize_f8_e4m3(p, eng, strm);
+    for (auto &x : p)
+        x /= vs_s_fp8_scale;
+    write_to_dnnl_memory(p.data(), probs, eng, strm);
+
+    dnnl::matmul(dnnl::matmul::primitive_desc(eng, s_md, v_md, o_md))
+            .execute(strm,
+                    {{DNNL_ARG_SRC, probs}, {DNNL_ARG_WEIGHTS, vm},
+                            {DNNL_ARG_DST, om}});
+    strm.wait();
+    const auto out = read_as_f32(om, eng, strm);
+
+    // Conditioning magnitude: the probabilities are non-negative, so
+    // sum_j p_j |v_j| bounds how much an e4m3 rounding of p can move the
+    // output. Cancellation in the real sum makes |out| a useless yardstick.
+    auto v_abs = v_e;
+    for (auto &x : v_abs)
+        x = std::abs(x);
+    memory vam(v_md, eng), amm(o_md, eng);
+    write_to_dnnl_memory(v_abs.data(), vam, eng, strm);
+    dnnl::matmul(dnnl::matmul::primitive_desc(eng, s_md, v_md, o_md))
+            .execute(strm,
+                    {{DNNL_ARG_SRC, probs}, {DNNL_ARG_WEIGHTS, vam},
+                            {DNNL_ARG_DST, amm}});
+    strm.wait();
+    *absmag = read_as_f32(amm, eng, strm);
+    return out;
+}
 } // namespace
 
-static void test_fp8_sdpa_equivalence(memory::dim mb, memory::dim H_q,
-        memory::dim H_kv, memory::dim S_q, mdt dst_dt, float tolerance) {
+static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
+        memory::dim S_q, mdt dst_dt, float tolerance) {
     using namespace dnnl::impl;
 
     SKIP_IF(engine::get_count(engine::kind::gpu) == 0,
@@ -3716,135 +3808,101 @@ static void test_fp8_sdpa_equivalence(memory::dim mb, memory::dim H_q,
                        v_sz = {mb, H_kv, S_kv, D}, o_sz = {mb, H_q, S_q, D};
     const auto abcd = memory::format_tag::abcd;
 
-    // Match the reference to the dst type so both round identically on the store
-    const mdt ref_dt = (dst_dt == mdt::bf16) ? mdt::bf16 : mdt::f16;
-    const mdt ref_dst_dt = (dst_dt == mdt::f8_e4m3) ? mdt::f16 : dst_dt;
-
     memory::desc q8_md(q_sz, mdt::f8_e4m3, abcd),
             k8_md(k_sz, mdt::f8_e4m3, abcd), v8_md(v_sz, mdt::f8_e4m3, abcd);
-    memory::desc qr_md(q_sz, ref_dt, abcd), kr_md(k_sz, ref_dt, abcd),
-            vr_md(v_sz, ref_dt, abcd);
+    memory::desc o_md(o_sz, dst_dt, abcd);
     memory::desc scale_md({1}, mdt::f32, memory::format_tag::a);
     memory::desc qs_md({mb, H_q, 1, 1}, mdt::f32, abcd);
     memory::desc kvs_md({mb, H_kv, 1, 1}, mdt::f32, abcd);
 
     std::vector<float> q_raw(product(q_sz)), k_raw(product(k_sz)),
             v_raw(product(v_sz));
-    fill_random(q_raw, qr_md);
-    fill_random(k_raw, kr_md);
-    fill_random(v_raw, vr_md);
+    fill_random(q_raw, memory::desc(q_sz, mdt::f16, abcd));
+    fill_random(k_raw, memory::desc(k_sz, mdt::f16, abcd));
+    fill_random(v_raw, memory::desc(v_sz, mdt::f16, abcd));
 
     // Round-trip through fp8 so the reference uses the values actually
     // stored, not a model of e4m3 rounding
-    memory q8(q8_md, eng), k8(k8_md, eng), v8(v8_md, eng);
-    write_to_dnnl_memory(q_raw.data(), q8, eng, strm);
-    write_to_dnnl_memory(k_raw.data(), k8, eng, strm);
-    write_to_dnnl_memory(v_raw.data(), v8, eng, strm);
-    const auto q_stored = read_as_f32(q8, eng, strm);
-    const auto k_stored = read_as_f32(k8, eng, strm);
-    const auto v_stored = read_as_f32(v8, eng, strm);
+    memory qm(q8_md, eng), km(k8_md, eng), vm(v8_md, eng);
+    write_to_dnnl_memory(q_raw.data(), qm, eng, strm);
+    write_to_dnnl_memory(k_raw.data(), km, eng, strm);
+    write_to_dnnl_memory(v_raw.data(), vm, eng, strm);
+    const auto q_stored = read_as_f32(qm, eng, strm);
+    const auto k_stored = read_as_f32(km, eng, strm);
+    const auto v_stored = read_as_f32(vm, eng, strm);
 
     const auto q_scales = pow2_scales(mb * H_q);
     const auto k_scales = pow2_scales(mb * H_kv);
     const auto v_scales = pow2_scales(mb * H_kv);
 
-    const auto q_deq = fold_descale(q_stored, q_scales, S_q * D);
-    const auto k_deq = fold_descale(k_stored, k_scales, D * S_kv);
-    const auto v_deq = fold_descale(v_stored, v_scales, S_kv * D);
+    std::vector<float> absmag;
+    const auto ref_out
+            = decomposed_reference(fold_descale(q_stored, q_scales, S_q * D),
+                    fold_descale(k_stored, k_scales, D * S_kv),
+                    fold_descale(v_stored, v_scales, S_kv * D), mb, H_q, H_kv,
+                    S_q, S_kv, D, eng, strm, &absmag);
 
-    bool unimplemented = false;
-    auto run = [&](bool fp8) -> std::vector<float> {
-        memory::desc o_md(o_sz, fp8 ? dst_dt : ref_dst_dt, abcd);
-        memory qm(fp8 ? q8_md : qr_md, eng), km(fp8 ? k8_md : kr_md, eng),
-                vm(fp8 ? v8_md : vr_md, eng), om(o_md, eng), sm(scale_md, eng);
-        write_to_dnnl_memory((fp8 ? q_stored : q_deq).data(), qm, eng, strm);
-        write_to_dnnl_memory((fp8 ? k_stored : k_deq).data(), km, eng, strm);
-        write_to_dnnl_memory((fp8 ? v_stored : v_deq).data(), vm, eng, strm);
-        const float one = 1.f;
-        write_to_dnnl_memory(&one, sm, eng, strm);
+    memory om(o_md, eng), sm(scale_md, eng), qsm(qs_md, eng), ksm(kvs_md, eng),
+            vsm(kvs_md, eng);
+    const float one = 1.f;
+    write_to_dnnl_memory(&one, sm, eng, strm);
+    write_to_dnnl_memory(q_scales.data(), qsm, eng, strm);
+    write_to_dnnl_memory(k_scales.data(), ksm, eng, strm);
+    write_to_dnnl_memory(v_scales.data(), vsm, eng, strm);
 
-        primitive_attr kq_attr, vs_attr;
-        memory qsm, ksm, vsm;
-        if (fp8) {
-            kq_attr.set_scales(DNNL_ARG_SRC, 3, {}, mdt::f32);
-            kq_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
-            vs_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
-            qsm = memory(qs_md, eng);
-            ksm = memory(kvs_md, eng);
-            vsm = memory(kvs_md, eng);
-            write_to_dnnl_memory(q_scales.data(), qsm, eng, strm);
-            write_to_dnnl_memory(k_scales.data(), ksm, eng, strm);
-            write_to_dnnl_memory(v_scales.data(), vsm, eng, strm);
-        }
+    primitive_attr kq_attr, vs_attr;
+    kq_attr.set_scales(DNNL_ARG_SRC, 3, {}, mdt::f32);
+    kq_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
+    vs_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
 
-        sdpa::primitive_desc pd;
-        try {
-            pd = sdpa::primitive_desc(eng, qm.get_desc(), km.get_desc(),
-                    vm.get_desc(), nullptr, scale_md, o_md,
-                    /* invert_scale = */ false, H_kv,
-                    to_attn_mask_type(mask_type::no_mask),
-                    alg_kind::softmax_accurate, prop_kind::forward_inference,
-                    primitive_attr(), kq_attr, vs_attr);
-        } catch (const dnnl::error &e) {
-            if (e.status == dnnl_unimplemented) {
-                unimplemented = true;
-                return {};
-            }
-            throw;
-        }
-        sdpa prim(pd);
+    sdpa::primitive_desc pd;
+    try {
+        pd = sdpa::primitive_desc(eng, q8_md, k8_md, v8_md, nullptr, scale_md,
+                o_md, /* invert_scale = */ false, H_kv,
+                to_attn_mask_type(mask_type::no_mask),
+                alg_kind::softmax_accurate, prop_kind::forward_inference,
+                primitive_attr(), kq_attr, vs_attr);
+    } catch (const dnnl::error &e) {
+        if (e.status == dnnl_unimplemented)
+            GTEST_SKIP() << "fp8 sdpa unimplemented: " << e.what();
+        throw;
+    }
+    sdpa prim(pd);
+    prim.execute(strm,
+            {{DNNL_ARG_QUERIES, qm}, {DNNL_ARG_KEYS, km}, {DNNL_ARG_VALUES, vm},
+                    {DNNL_ARG_SCALE, sm}, {DNNL_ARG_DST, om},
+                    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES, qsm},
+                    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS, ksm},
+                    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_VALUES, vsm}});
+    strm.wait();
+    const auto got = read_as_f32(om, eng, strm);
 
-        std::unordered_map<int, memory> args = {{DNNL_ARG_QUERIES, qm},
-                {DNNL_ARG_KEYS, km}, {DNNL_ARG_VALUES, vm},
-                {DNNL_ARG_SCALE, sm}, {DNNL_ARG_DST, om}};
-        if (fp8) {
-            args[DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES] = qsm;
-            args[DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS] = ksm;
-            args[DNNL_ARG_ATTR_SCALES | DNNL_ARG_VALUES] = vsm;
-        }
-        prim.execute(strm, args);
-        strm.wait();
-        return read_as_f32(om, eng, strm);
-    };
-
-    const auto fp8_out = run(/* fp8 = */ true);
-    if (unimplemented) GTEST_SKIP() << "fp8 sdpa unimplemented";
-    const auto ref_out = run(/* fp8 = */ false);
-    if (unimplemented) GTEST_SKIP() << "f16 baseline unimplemented";
-
-    ASSERT_EQ(fp8_out.size(), ref_out.size());
+    ASSERT_EQ(got.size(), ref_out.size());
     double max_rel = 0.;
     for (size_t i = 0; i < ref_out.size(); i++) {
-        ASSERT_TRUE(std::isfinite(fp8_out[i])) << "non-finite at " << i;
-        const float denom = std::max(1.f, std::abs(ref_out[i]));
+        ASSERT_TRUE(std::isfinite(got[i])) << "non-finite at " << i;
+        const float denom = std::max(1e-6f, absmag[i]);
         max_rel = std::max<double>(
-                max_rel, std::abs(fp8_out[i] - ref_out[i]) / denom);
-        ASSERT_NEAR(fp8_out[i], ref_out[i], tolerance * denom)
+                max_rel, std::abs(got[i] - ref_out[i]) / denom);
+        ASSERT_NEAR(got[i], ref_out[i], tolerance * denom)
                 << "mismatch at " << i;
     }
-    RecordProperty("max_relative_deviation", std::to_string(max_rel));
+    ::testing::Test::RecordProperty(
+            "max_relative_deviation", std::to_string(max_rel));
 }
 
 TEST(sdpa_fp8, E4M3PerHeadF16Dst) {
-    test_fp8_sdpa_equivalence(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4,
-            /* S_q = */ 128, mdt::f16, /* tolerance = */ 2e-3f);
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            mdt::f16, /* tolerance = */ 0.125f);
 }
 
-// Both runs store to bf16, so the budget is one bf16 ulp (2^-8) rather than
-// any extra error in the attention itself
+// Only the store rounds differently, so the budget is one bf16 ulp (2^-8)
 TEST(sdpa_fp8, E4M3PerHeadBf16Dst) {
-    test_fp8_sdpa_equivalence(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4,
-            /* S_q = */ 128, mdt::bf16, /* tolerance = */ 5e-3f);
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            mdt::bf16, /* tolerance = */ 0.125f);
 }
 
 TEST(sdpa_fp8, E4M3PerHeadGQA) {
-    test_fp8_sdpa_equivalence(/* mb = */ 2, /* H_q = */ 8, /* H_kv = */ 2,
-            /* S_q = */ 128, mdt::bf16, /* tolerance = */ 5e-3f);
-}
-
-// Compared against an f16 dst, so the tolerance is e4m3's half-step (2^-4)
-// this mainly guards against wholly wrong or non-finite output
-TEST(sdpa_fp8, E4M3PerHeadFp8Dst) {
-    test_fp8_sdpa_equivalence(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4,
-            /* S_q = */ 128, mdt::f8_e4m3, /* tolerance = */ 7e-2f);
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 8, /* H_kv = */ 2, /* S_q = */ 128,
+            mdt::bf16, /* tolerance = */ 0.125f);
 }

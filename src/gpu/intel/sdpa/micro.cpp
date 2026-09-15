@@ -917,6 +917,7 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     conf.d_max_v = d_max_v();
     conf.q_slm_fp8 = q_slm_fp8();
     conf.pv_fp8 = pv_fp8();
+    conf.quantize_probs = quantize_probs();
 
     conf.require_stateless_addressing = has_large_buffers();
 
@@ -1187,6 +1188,7 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     if (any_hf8) kernel_ctx.define_int("MATH_UTILS_DECLARE_HF8", 1);
     kernel_ctx.define_int("QRY_SLM_FP8", q_slm_fp8);
     kernel_ctx.define_int("VS_S_FP8", pv_fp8);
+    kernel_ctx.define_int("VS_S_QUANT", quantize_probs);
 
     def_data_type(kernel_ctx, qry_scales_data_t, "QRY_ATTR_SCALES");
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");

@@ -65,25 +65,26 @@ typedef qry_tile_data_t fma_tile_data_t;
 #define S_ELEMS_PER_DWORD 2
 #endif
 
-#if defined(DST_DT_HF8)
-#define CONVERT_TILE_DATA_T(value) \
-    as_native_layout(into_f8_e4m3(convert_float(value)))
-#else
 #define CONVERT_TILE_DATA_T(value) as_native_layout(CONVERT_DATA_T(value))
-#endif
 
 #define CONVERT_TILE_FLOAT_MSK_T(value) \
     into_float(AS_NATIVE_LAYOUT_TYPE(MSK_DATA_T, value))
 
-#if VS_S_FP8
+#if VS_S_QUANT
 #ifndef VS_S_FP8_SCALE
 #define VS_S_FP8_SCALE 448.0f
 #endif
+#endif
+
+#if VS_S_FP8
 #define CONVERT_TILE_S_FP8_T(v) \
     as_native_layout(into_f8_e4m3(convert_float(v) * VS_S_FP8_SCALE))
 #endif
 
-#ifdef QRY_DT_HF8
+#if VS_S_QUANT && !VS_S_FP8
+#define CONVERT_TILE_FMA_T(v) \
+    as_native_layout(into_half(into_f8_e4m3(convert_float(v) * VS_S_FP8_SCALE)))
+#elif defined(QRY_DT_HF8)
 #define CONVERT_TILE_FMA_T(v) as_native_layout(into_half(convert_float(v)))
 #else
 #define CONVERT_TILE_FMA_T(v) \
@@ -1225,7 +1226,7 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
 #else
         tile_elementwise(A_scale_tile, native_vrecip);
 #endif
-#if VS_S_FP8
+#if VS_S_QUANT
 #define undo_s_fp8_scale(x) ((x) * (1.0f / VS_S_FP8_SCALE))
         tile_elementwise(A_scale_tile, undo_s_fp8_scale);
 #undef undo_s_fp8_scale
