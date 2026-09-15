@@ -185,14 +185,14 @@ void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
 template <data_type_t src_type, data_type_t wei_type, data_type_t dst_type>
 void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
         dst_type>::execute_forward_1d(const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
 
     auto src = CTX_IN_MEM(const src_data_t *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const wei_data_t *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const dst_data_t *, DNNL_ARG_BIAS);
     auto dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
     const auto post_ops_binary_rhs_arg_vec
-            = binary_injector::prepare_binary_args(jcp.post_ops, ctx);
+            = binary_injector::prepare_binary_args(jcp_ptr->post_ops, ctx);
 
     prepare_padded_bias(bias, ctx.get_scratchpad_grantor());
 
@@ -200,16 +200,16 @@ void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
     const memory_desc_wrapper dst_d(pd()->dst_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const jit_conv_ker_t jit_ker = (decltype(jit_ker))kernel_->jit_ker();
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+    parallel(jcp_ptr->aligned_threads,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
 
-    dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
-    int g_blocking = 1;
-    dim_t nb_groups = jcp.ngroups / g_blocking;
-    dim_t work_amount = jcp.mb * nb_groups * oc_chunks * jcp.nb_ow;
-    int nthr = jcp.aligned_threads;
-
-    parallel(nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const jit_conv_ker_t jit_ker = (decltype(jit_ker))kernel_->jit_ker();
+        assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+        dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
+        constexpr int g_blocking = 1;
+        dim_t nb_groups = jcp.ngroups / g_blocking;
+        dim_t work_amount = jcp.mb * nb_groups * oc_chunks * jcp.nb_ow;
         dim_t start {0}, end {0}, start_copy;
         balance211(work_amount, nthr, ithr, start, end);
         start_copy = start;
@@ -316,13 +316,13 @@ template <data_type_t src_type, data_type_t wei_type, data_type_t dst_type>
 void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
         dst_type>::execute_forward_2d(const exec_ctx_t &ctx) const {
 
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const src_data_t *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const wei_data_t *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const dst_data_t *, DNNL_ARG_BIAS);
     auto dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
     const auto post_ops_binary_rhs_arg_vec
-            = binary_injector::prepare_binary_args(jcp.post_ops, ctx);
+            = binary_injector::prepare_binary_args(jcp_ptr->post_ops, ctx);
 
     prepare_padded_bias(bias, ctx.get_scratchpad_grantor());
 
@@ -330,16 +330,16 @@ void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
     const memory_desc_wrapper dst_d(pd()->dst_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const jit_conv_ker_t jit_ker = (decltype(jit_ker))kernel_->jit_ker();
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+    parallel(jcp_ptr->aligned_threads,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
 
-    dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
-    int g_blocking = 1;
-    dim_t nb_groups = jcp.ngroups / g_blocking;
-    dim_t work_amount = jcp.mb * nb_groups * oc_chunks * jcp.oh * jcp.nb_ow;
-    int nthr = jcp.aligned_threads;
-
-    parallel(nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const jit_conv_ker_t jit_ker = (decltype(jit_ker))kernel_->jit_ker();
+        assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+        dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
+        constexpr int g_blocking = 1;
+        dim_t nb_groups = jcp.ngroups / g_blocking;
+        dim_t work_amount = jcp.mb * nb_groups * oc_chunks * jcp.oh * jcp.nb_ow;
         dim_t start {0}, end {0}, start_copy;
         balance211(work_amount, nthr, ithr, start, end);
         start_copy = start;
@@ -483,13 +483,13 @@ void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
 template <data_type_t src_type, data_type_t wei_type, data_type_t dst_type>
 void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
         dst_type>::execute_forward_3d(const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const src_data_t *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const wei_data_t *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const dst_data_t *, DNNL_ARG_BIAS);
     auto dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
     const auto post_ops_binary_rhs_arg_vec
-            = binary_injector::prepare_binary_args(pd()->jcp_.post_ops, ctx);
+            = binary_injector::prepare_binary_args(jcp_ptr->post_ops, ctx);
 
     prepare_padded_bias(bias, ctx.get_scratchpad_grantor());
 
@@ -497,17 +497,17 @@ void jit_avx512_common_convolution_fwd_t<src_type, wei_type,
     const memory_desc_wrapper dst_d(pd()->dst_md());
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    const jit_conv_ker_t jit_ker = (decltype(jit_ker))kernel_->jit_ker();
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
 
-    dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
-    int g_blocking = 1;
-    dim_t nb_groups = jcp.ngroups / g_blocking;
-    dim_t work_amount
-            = jcp.mb * nb_groups * oc_chunks * jcp.od * jcp.oh * jcp.nb_ow;
-    int nthr = jcp.nthr;
-
-    parallel(nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const jit_conv_ker_t jit_ker = (decltype(jit_ker))kernel_->jit_ker();
+        assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+        dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
+        constexpr int g_blocking = 1;
+        dim_t nb_groups = jcp.ngroups / g_blocking;
+        dim_t work_amount
+                = jcp.mb * nb_groups * oc_chunks * jcp.od * jcp.oh * jcp.nb_ow;
         dim_t start {0}, end {0}, start_copy;
         balance211(work_amount, nthr, ithr, start, end);
         start_copy = start;
