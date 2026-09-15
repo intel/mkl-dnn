@@ -68,7 +68,7 @@ void jit_avx512_core_amx_convolution_fwd_t::prepare_padded_bias(
 status_t
 jit_avx512_core_amx_convolution_fwd_t::execute_forward_reduced_lowering(
         const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     const auto src = CTX_IN_MEM(const char *, DNNL_ARG_SRC);
     const auto weights = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const char *, DNNL_ARG_BIAS);
@@ -94,8 +94,8 @@ jit_avx512_core_amx_convolution_fwd_t::execute_forward_reduced_lowering(
 
     prepare_padded_bias(bias, ctx.get_scratchpad_grantor());
 
-    assert(jcp.is_relo);
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+    assert(jcp_ptr->is_relo);
+    assert(jcp_ptr->nb_oc % jcp_ptr->nb_oc_blocking == 0);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -119,23 +119,23 @@ jit_avx512_core_amx_convolution_fwd_t::execute_forward_reduced_lowering(
 
     const size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     char *w = const_cast<char *>(weights);
-    int32_t *zp_compensation = jcp.src_zero_point
+    int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(w + offset)
             : nullptr;
 
-    const dim_t t_pad_output = jcp.t_pad_output;
-    const dim_t b_pad_output = jcp.b_pad_output;
+    const dim_t t_pad_output = jcp_ptr->t_pad_output;
+    const dim_t b_pad_output = jcp_ptr->b_pad_output;
     const int b_pad_start = static_cast<int>(
-            nstl::max<dim_t>(jcp.oh - b_pad_output, t_pad_output));
+            nstl::max<dim_t>(jcp_ptr->oh - b_pad_output, t_pad_output));
     const dim_t zp_buff_b_pad_start
-            = nstl::max<dim_t>(jcp.oh_pad - b_pad_output, t_pad_output);
+            = nstl::max<dim_t>(jcp_ptr->oh_pad - b_pad_output, t_pad_output);
 
-    const dim_t ngroups = jcp.ngroups;
-    const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
-    const dim_t oh_chunks = utils::div_up(jcp.oh, jcp.oh_blk_size);
-    const dim_t work_amount
-            = jcp.mb * jcp.ngroups * oh_chunks * jcp.nb_ow * oc_chunks;
-    const dim_t zp_pbuff_size = jcp.zp_pbuff_size;
+    const dim_t ngroups = jcp_ptr->ngroups;
+    const dim_t oc_chunks = jcp_ptr->nb_oc / jcp_ptr->nb_oc_blocking;
+    const dim_t oh_chunks = utils::div_up(jcp_ptr->oh, jcp_ptr->oh_blk_size);
+    const dim_t work_amount = jcp_ptr->mb * jcp_ptr->ngroups * oh_chunks
+            * jcp_ptr->nb_ow * oc_chunks;
+    const dim_t zp_pbuff_size = jcp_ptr->zp_pbuff_size;
 
     // reorder weights from (g)Owhi16o to (g)OR16r16o4r, where r := whi
     auto p = jit_conv_args_t();
@@ -144,25 +144,30 @@ jit_avx512_core_amx_convolution_fwd_t::execute_forward_reduced_lowering(
     kernel_->copy_to_wbuffer()(&p);
     const char *wei = wei_buffer;
 
-    const size_t oc_subblock_step
-            = jcp.kh * jcp.kw * jcp.ic_block_int_np * jcp.oc_block;
-    const size_t wei_oc_shift = (size_t)jcp.nb_oc_blocking * jcp.nb_ic_int
-            * rnd_up(oc_subblock_step, jcp.ic_block_int * jcp.oc_block);
+    const size_t oc_subblock_step = jcp_ptr->kh * jcp_ptr->kw
+            * jcp_ptr->ic_block_int_np * jcp_ptr->oc_block;
+    const size_t wei_oc_shift = (size_t)jcp_ptr->nb_oc_blocking
+            * jcp_ptr->nb_ic_int
+            * rnd_up(oc_subblock_step,
+                    jcp_ptr->ic_block_int * jcp_ptr->oc_block);
 
     // init zero_point padding buffer
-    const bool req_zero_point_buffer = jcp.req_zero_point_buffer;
-    const bool zp_pbuff_outer_compute = jcp.zp_pbuff_outer_compute;
+    const bool req_zero_point_buffer = jcp_ptr->req_zero_point_buffer;
+    const bool zp_pbuff_outer_compute = jcp_ptr->zp_pbuff_outer_compute;
     const bool zp_pbuff_parallel_block
             = req_zero_point_buffer && !zp_pbuff_outer_compute;
     if (req_zero_point_buffer && zp_pbuff_outer_compute) {
-        const size_t wei_oc_step = (size_t)jcp.kh * jcp.kw * jcp.ic_block_int_np
-                * jcp.nb_oc_blocking * jcp.oc_block;
+        const size_t wei_oc_step = (size_t)jcp_ptr->kh * jcp_ptr->kw
+                * jcp_ptr->ic_block_int_np * jcp_ptr->nb_oc_blocking
+                * jcp_ptr->oc_block;
         const size_t sp_stride = mem_blk_off(dst_d, 0, 0, 0, 0, 1);
-        const dim_t dilate_h = jcp.dilate_h + 1;
-        const dim_t gen_kh = (jcp.kh - 1) * dilate_h + 1;
-        const dim_t oh_work = jcp.oh_pad;
+        const dim_t dilate_h = jcp_ptr->dilate_h + 1;
+        const dim_t gen_kh = (jcp_ptr->kh - 1) * dilate_h + 1;
+        const dim_t oh_work = jcp_ptr->oh_pad;
         parallel_nd(ngroups, oc_chunks, oh_work,
                 [= COMPAT_THIS_CAPTURE](dim_t g, dim_t occ, dim_t oh) {
+            const auto &jcp = *jcp_ptr;
+
             auto p = jit_conv_args_t();
 
             const dim_t oh_ = oh >= zp_buff_b_pad_start
@@ -195,7 +200,10 @@ jit_avx512_core_amx_convolution_fwd_t::execute_forward_reduced_lowering(
 
     // TODO: implement 2D parallelization driver (g * spatial x oc) to increase
     // input data reuse and parallelize input data reorders
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
         int32_t *local_zp_pbuff = req_zero_point_buffer
@@ -466,8 +474,8 @@ status_t jit_avx512_core_amx_convolution_fwd_t::execute_forward(
 
     prepare_padded_bias(bias, ctx.get_scratchpad_grantor());
 
-    const auto &jcp = pd()->jcp_;
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+    const auto *jcp_ptr = &pd()->jcp_;
+    assert(jcp_ptr->nb_oc % jcp_ptr->nb_oc_blocking == 0);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -478,10 +486,11 @@ status_t jit_avx512_core_amx_convolution_fwd_t::execute_forward(
 
     // TODO: use block offset instead of hand-calculated one
     //size_t wei_oc_shift = wht_blk_off(weights_d, 0, 1);
-    const size_t wei_oc_shift = (size_t)jcp.nb_oc_blocking * jcp.nb_ic_int
-            * jcp.kd * jcp.kh * jcp.kw * jcp.ic_block_int_np * jcp.oc_block;
-    const size_t wei_d_shift
-            = (size_t)jcp.kh * jcp.kw * jcp.ic_block_int_np * jcp.oc_block;
+    const size_t wei_oc_shift = (size_t)jcp_ptr->nb_oc_blocking
+            * jcp_ptr->nb_ic_int * jcp_ptr->kd * jcp_ptr->kh * jcp_ptr->kw
+            * jcp_ptr->ic_block_int_np * jcp_ptr->oc_block;
+    const size_t wei_d_shift = (size_t)jcp_ptr->kh * jcp_ptr->kw
+            * jcp_ptr->ic_block_int_np * jcp_ptr->oc_block;
 
     auto inp_p_buffer = ctx.get_scratchpad_grantor().template get<char>(
             key_conv_amx_inp_buffer); // fix the template
@@ -496,46 +505,48 @@ status_t jit_avx512_core_amx_convolution_fwd_t::execute_forward(
 
     const size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     char *w = const_cast<char *>(weights);
-    int32_t *zp_compensation = jcp.src_zero_point
+    int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(&w[offset])
             : nullptr;
 
-    const dim_t f_pad_output = jcp.f_pad_output;
-    const dim_t back_pad_output = jcp.back_pad_output;
+    const dim_t f_pad_output = jcp_ptr->f_pad_output;
+    const dim_t back_pad_output = jcp_ptr->back_pad_output;
     const int back_pad_start = static_cast<int>(
-            nstl::max<dim_t>(jcp.od - back_pad_output, f_pad_output));
+            nstl::max<dim_t>(jcp_ptr->od - back_pad_output, f_pad_output));
     const dim_t zp_buff_back_pad_start
-            = nstl::max<dim_t>(jcp.od_pad - back_pad_output, f_pad_output);
-    const dim_t t_pad_output = jcp.t_pad_output;
-    const dim_t b_pad_output = jcp.b_pad_output;
+            = nstl::max<dim_t>(jcp_ptr->od_pad - back_pad_output, f_pad_output);
+    const dim_t t_pad_output = jcp_ptr->t_pad_output;
+    const dim_t b_pad_output = jcp_ptr->b_pad_output;
     const int b_pad_start = static_cast<int>(
-            nstl::max<dim_t>(jcp.oh - b_pad_output, t_pad_output));
+            nstl::max<dim_t>(jcp_ptr->oh - b_pad_output, t_pad_output));
     const dim_t zp_buff_b_pad_start
-            = nstl::max<dim_t>(jcp.oh_pad - b_pad_output, t_pad_output);
+            = nstl::max<dim_t>(jcp_ptr->oh_pad - b_pad_output, t_pad_output);
 
-    const dim_t ngroups = jcp.ngroups;
-    const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
-    const dim_t oh_chunks = utils::div_up(jcp.oh, jcp.oh_blk_size);
-    const dim_t work_amount
-            = jcp.mb * jcp.ngroups * jcp.od * oh_chunks * jcp.nb_ow * oc_chunks;
-    const dim_t zp_pbuff_size = jcp.zp_pbuff_size;
+    const dim_t ngroups = jcp_ptr->ngroups;
+    const dim_t oc_chunks = jcp_ptr->nb_oc / jcp_ptr->nb_oc_blocking;
+    const dim_t oh_chunks = utils::div_up(jcp_ptr->oh, jcp_ptr->oh_blk_size);
+    const dim_t work_amount = jcp_ptr->mb * jcp_ptr->ngroups * jcp_ptr->od
+            * oh_chunks * jcp_ptr->nb_ow * oc_chunks;
+    const dim_t zp_pbuff_size = jcp_ptr->zp_pbuff_size;
 
     // init zero_point padding buffer
-    const bool req_zero_point_buffer = jcp.req_zero_point_buffer;
-    const bool zp_pbuff_outer_compute = jcp.zp_pbuff_outer_compute;
+    const bool req_zero_point_buffer = jcp_ptr->req_zero_point_buffer;
+    const bool zp_pbuff_outer_compute = jcp_ptr->zp_pbuff_outer_compute;
     const bool zp_pbuff_parallel_block
             = req_zero_point_buffer && !zp_pbuff_outer_compute;
     if (req_zero_point_buffer && zp_pbuff_outer_compute) {
         const size_t sp_stride = mem_blk_off(dst_d, 0, 0, 0, 0, 1);
-        const dim_t dilate_d = jcp.dilate_d + 1;
-        const dim_t gen_kd = (jcp.kd - 1) * dilate_d + 1;
-        const dim_t dilate_h = jcp.dilate_h + 1;
-        const dim_t gen_kh = (jcp.kh - 1) * dilate_h + 1;
-        const dim_t od_work = jcp.od_pad;
-        const dim_t oh_work = jcp.oh_pad;
+        const dim_t dilate_d = jcp_ptr->dilate_d + 1;
+        const dim_t gen_kd = (jcp_ptr->kd - 1) * dilate_d + 1;
+        const dim_t dilate_h = jcp_ptr->dilate_h + 1;
+        const dim_t gen_kh = (jcp_ptr->kh - 1) * dilate_h + 1;
+        const dim_t od_work = jcp_ptr->od_pad;
+        const dim_t oh_work = jcp_ptr->oh_pad;
         parallel_nd(ngroups, oc_chunks, od_work, oh_work,
                 [= COMPAT_THIS_CAPTURE](
                         dim_t g, dim_t occ, dim_t od, dim_t oh) {
+            const auto &jcp = *jcp_ptr;
+
             auto p = jit_conv_args_t();
 
             const dim_t od_ = od >= zp_buff_back_pad_start
@@ -581,7 +592,10 @@ status_t jit_avx512_core_amx_convolution_fwd_t::execute_forward(
 
     // TODO: implement 2D parallelization driver (g * spatial x oc) to increase
     // input data reuse and parallelize input data reorders
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
         int32_t *local_zp_pbuff = req_zero_point_buffer

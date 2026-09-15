@@ -584,7 +584,7 @@ status_t brdgmm_dw_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
             = binary_injector::prepare_binary_args(
                     pd()->attr()->post_ops_, ctx);
 
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
@@ -604,63 +604,69 @@ status_t brdgmm_dw_convolution_fwd_t::execute(const exec_ctx_t &ctx) const {
     const size_t wei_size = weights_d.size();
     const auto extra_data_offset
             = wei_size - weights_d.additional_buffer_size();
-    const size_t s8_offset = jcp.s8s8_compensation_required
-            ? rnd_up(jcp.ngroups, jcp.ch_block) * sizeof(int32_t)
+    const size_t s8_offset = jcp_ptr->s8s8_compensation_required
+            ? rnd_up(jcp_ptr->ngroups, jcp_ptr->ch_block) * sizeof(int32_t)
             : 0;
-    int32_t *s8s8_comp_ptr = jcp.s8s8_compensation_required
+    int32_t *s8s8_comp_ptr = jcp_ptr->s8s8_compensation_required
             ? reinterpret_cast<int32_t *>(
                       const_cast<char *>(weights) + extra_data_offset)
             : nullptr;
-    int32_t *zp_compensation = jcp.src_zero_point
+    int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(const_cast<char *>(weights)
                       + extra_data_offset + s8_offset)
             : nullptr;
 
-    const int chb_step = static_cast<int>(jcp.nb_ch_blocking);
-    const int chb_work = div_up(static_cast<int>(jcp.ngroups), chb_step);
-    const int ow_step = static_cast<int>(jcp.ow_block);
-    const int work_amount
-            = static_cast<int>(jcp.mb * jcp.od * jcp.oh * jcp.nb_ow * chb_work);
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
 
-    const int max_bs = static_cast<int>(jcp.kd * jcp.kh * jcp.kw);
+        const int chb_step = static_cast<int>(jcp.nb_ch_blocking);
+        const int chb_work = div_up(static_cast<int>(jcp.ngroups), chb_step);
+        const int ow_step = static_cast<int>(jcp.ow_block);
+        const int work_amount = static_cast<int>(
+                jcp.mb * jcp.od * jcp.oh * jcp.nb_ow * chb_work);
 
-    const size_t src_ch_stride = jcp.src_dsz;
-    const size_t src_w_stride = jcp.ngroups * jcp.src_dsz;
-    const size_t src_h_stride = jcp.ngroups * jcp.iw * jcp.src_dsz;
-    const size_t src_d_stride = jcp.ngroups * jcp.ih * jcp.iw * jcp.src_dsz;
-    const size_t src_mb_stride
-            = jcp.ngroups * jcp.id * jcp.ih * jcp.iw * jcp.src_dsz;
+        const int max_bs = static_cast<int>(jcp.kd * jcp.kh * jcp.kw);
 
-    const size_t wei_ch_stride = jcp.wei_dsz;
+        const size_t src_ch_stride = jcp.src_dsz;
+        const size_t src_w_stride = jcp.ngroups * jcp.src_dsz;
+        const size_t src_h_stride = jcp.ngroups * jcp.iw * jcp.src_dsz;
+        const size_t src_d_stride = jcp.ngroups * jcp.ih * jcp.iw * jcp.src_dsz;
+        const size_t src_mb_stride
+                = jcp.ngroups * jcp.id * jcp.ih * jcp.iw * jcp.src_dsz;
 
-    const size_t dst_ch_stride = jcp.dst_dsz;
-    const size_t dst_w_stride = jcp.ngroups * jcp.dst_dsz;
-    const size_t dst_h_stride = jcp.ngroups * jcp.ow * jcp.dst_dsz;
-    const size_t dst_d_stride = jcp.ngroups * jcp.oh * jcp.ow * jcp.dst_dsz;
-    const size_t dst_mb_stride
-            = jcp.ngroups * jcp.od * jcp.oh * jcp.ow * jcp.dst_dsz;
+        const size_t wei_ch_stride = jcp.wei_dsz;
 
-    const auto w_blk_info = get_blocks_info(jcp.iw, jcp.ow, jcp.kw,
-            jcp.stride_w, jcp.l_pad, jcp.r_pad, jcp.ow_block);
-    const auto h_blk_info = get_blocks_info(
-            jcp.ih, jcp.oh, jcp.kh, jcp.stride_h, jcp.t_pad, jcp.b_pad, 1);
-    const auto d_blk_info = get_blocks_info(
-            jcp.id, jcp.od, jcp.kd, jcp.stride_d, jcp.f_pad, jcp.back_pad, 1);
-    const int n_w_blks = static_cast<int>(w_blk_info.n_lpad_blks);
-    const int n_h_blks = static_cast<int>(h_blk_info.n_lpad_blks)
-            + nstl::max(0,
-                    static_cast<int>(jcp.oh - h_blk_info.rpad_blk_start_idx));
+        const size_t dst_ch_stride = jcp.dst_dsz;
+        const size_t dst_w_stride = jcp.ngroups * jcp.dst_dsz;
+        const size_t dst_h_stride = jcp.ngroups * jcp.ow * jcp.dst_dsz;
+        const size_t dst_d_stride = jcp.ngroups * jcp.oh * jcp.ow * jcp.dst_dsz;
+        const size_t dst_mb_stride
+                = jcp.ngroups * jcp.od * jcp.oh * jcp.ow * jcp.dst_dsz;
 
-    const int w_shift = static_cast<int>(jcp.ow_block * jcp.stride_w);
-    const int rpad_0 = static_cast<int>(
-            (jcp.ow_block - 1) * jcp.stride_w + jcp.kw - (jcp.iw + jcp.l_pad));
-    const int rpad_1 = rpad_0 + (nstl::max(0, -rpad_0) / w_shift + 1) * w_shift;
-    const int n_rpad_blks = 1
-            + div_up(nstl::max(0,
-                             static_cast<int>(jcp.r_pad - (rpad_1 - w_shift))),
-                    w_shift);
+        const auto w_blk_info = get_blocks_info(jcp.iw, jcp.ow, jcp.kw,
+                jcp.stride_w, jcp.l_pad, jcp.r_pad, jcp.ow_block);
+        const auto h_blk_info = get_blocks_info(
+                jcp.ih, jcp.oh, jcp.kh, jcp.stride_h, jcp.t_pad, jcp.b_pad, 1);
+        const auto d_blk_info = get_blocks_info(jcp.id, jcp.od, jcp.kd,
+                jcp.stride_d, jcp.f_pad, jcp.back_pad, 1);
+        const int n_w_blks = static_cast<int>(w_blk_info.n_lpad_blks);
+        const int n_h_blks = static_cast<int>(h_blk_info.n_lpad_blks)
+                + nstl::max(0,
+                        static_cast<int>(
+                                jcp.oh - h_blk_info.rpad_blk_start_idx));
 
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const int w_shift = static_cast<int>(jcp.ow_block * jcp.stride_w);
+        const int rpad_0 = static_cast<int>((jcp.ow_block - 1) * jcp.stride_w
+                + jcp.kw - (jcp.iw + jcp.l_pad));
+        const int rpad_1
+                = rpad_0 + (nstl::max(0, -rpad_0) / w_shift + 1) * w_shift;
+        const int n_rpad_blks = 1
+                + div_up(nstl::max(0,
+                                 static_cast<int>(
+                                         jcp.r_pad - (rpad_1 - w_shift))),
+                        w_shift);
+
         int start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
         int n {0}, chb {0}, od {0}, oh {0}, owb {0};

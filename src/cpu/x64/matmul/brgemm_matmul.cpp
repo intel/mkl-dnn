@@ -31,6 +31,8 @@
 #include "cpu/x64/matmul/brgemm_matmul.hpp"
 #include "cpu/x64/matmul/jit_brgemm_matmul_reduce.hpp"
 
+#include <memory>
+
 namespace dnnl {
 namespace impl {
 namespace cpu {
@@ -660,6 +662,15 @@ status_t brgemm_matmul_t<isa>::execute_body(const exec_ctx_t &ctx) const {
     const auto dst_d = ctx.memory_mdw(DNNL_ARG_DST, pd()->dst_md());
     matmul_helper_t helper(src_d, weights_d, dst_d);
 
+    // Shared_ptr is mandatory for objects created on the stack to support
+    // asynchronous threadpool runtime: the parallel task captures-by-copy and
+    // may outlive the stack frame, so shared ownership keeps the object alive.
+    // Objects that are part of pd() must be passed inside the lambda by a plain
+    // pointer instead: pd() outlives the task as it's owned by the captured
+    // primitive, and a pointer avoids both a deep copy and a heap allocation.
+    // Note: use only `_ptr` name until the parallel call to avoid any
+    // shadowing.
+    // Anchor: CONTEXT_SHARED_PTR_ASYNC.
     auto brgmm_ctx_ptr
             = std::make_shared<brg_matmul_exec_ctx_t>(ctx, pd(), helper);
 

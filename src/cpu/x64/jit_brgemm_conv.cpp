@@ -23,6 +23,7 @@
 #include "cpu/x64/injectors/jit_uni_binary_injector.hpp"
 #include "cpu/x64/jit_brgemm_conv.hpp"
 
+#include <memory>
 #include <vector>
 
 namespace dnnl {
@@ -1346,7 +1347,7 @@ struct brgemm_convolution_fwd_t<isa>::brgemm_thread_ctx_t {
 template <cpu_isa_t isa>
 status_t brgemm_convolution_fwd_t<isa>::execute(const exec_ctx_t &ctx) const {
     const auto _pd = pd();
-    const auto &jcp = _pd->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
 
     const int32_t *src_zero_points = CTX_IN_MEM(
             const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC);
@@ -1371,44 +1372,48 @@ status_t brgemm_convolution_fwd_t<isa>::execute(const exec_ctx_t &ctx) const {
     const auto extra_data_offset
             = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<char *>(brgemm_ctx.weights);
-    const auto s8s8_comp_offset = jcp.req_cal_comp_pad
-            ? jcp.ngroups * jcp.nb_oc * jcp.kd * jcp.kh * jcp.kw * jcp.oc_block
-            : jcp.ngroups * jcp.nb_oc * jcp.oc_block;
-    int32_t *s8s8_compensation = jcp.s8s8_compensation_required
+    const auto s8s8_comp_offset = jcp_ptr->req_cal_comp_pad
+            ? jcp_ptr->ngroups * jcp_ptr->nb_oc * jcp_ptr->kd * jcp_ptr->kh
+                    * jcp_ptr->kw * jcp_ptr->oc_block
+            : jcp_ptr->ngroups * jcp_ptr->nb_oc * jcp_ptr->oc_block;
+    int32_t *s8s8_compensation = jcp_ptr->s8s8_compensation_required
             ? reinterpret_cast<int32_t *>(w + extra_data_offset)
             : nullptr;
-    int32_t *zp_compensation = jcp.src_zero_point
+    int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<int32_t *>(&w[extra_data_offset])
-                    + (jcp.s8s8_compensation_required ? s8s8_comp_offset : 0)
+                    + (jcp_ptr->s8s8_compensation_required ? s8s8_comp_offset
+                                                           : 0)
             : nullptr;
 
     brgemm_batch_element_t *const __restrict brg_batch_global
             = brgemm_convolution_utils::uses_batch_elements(
-                      jcp.brg_type, jcp.exec_type)
+                      jcp_ptr->brg_type, jcp_ptr->exec_type)
             ? scratchpad.template get<brgemm_batch_element_t>(
                       key_brgemm_primitive_batch)
             : nullptr;
-    char *const __restrict c_buffer_global = (jcp.use_buffer)
+    char *const __restrict c_buffer_global = (jcp_ptr->use_buffer)
             ? scratchpad.template get<char>(key_brgemm_primitive_buffer)
             : nullptr;
 
-    auto inp_p_buffer = (jcp.exec_type == exec_trans)
+    auto inp_p_buffer = (jcp_ptr->exec_type == exec_trans)
             ? scratchpad.template get<char>(key_conv_brgemm_inp_buffer)
             : nullptr;
-    auto inp_p_buffer_mask = (jcp.exec_type == exec_trans)
+    auto inp_p_buffer_mask = (jcp_ptr->exec_type == exec_trans)
             ? scratchpad.template get<uint8_t>(key_conv_brgemm_inp_buffer_mask)
             : nullptr;
-    int32_t *src_zp_comp_base = jcp.src_zero_point
-            ? (jcp.req_cal_comp_pad ? scratchpad.template get<int32_t>(
-                                              key_brgemm_primitive_zp_comp_a)
-                                    : zp_compensation)
+    int32_t *src_zp_comp_base = jcp_ptr->src_zero_point
+            ? (jcp_ptr->req_cal_comp_pad
+                              ? scratchpad.template get<int32_t>(
+                                        key_brgemm_primitive_zp_comp_a)
+                              : zp_compensation)
             : nullptr;
-    int32_t *s8s8_comp_base = jcp.s8s8_compensation_required
-            ? (jcp.req_cal_comp_pad ? scratchpad.template get<int32_t>(
-                                              key_brgemm_primitive_buffer_comp)
-                                    : s8s8_compensation)
+    int32_t *s8s8_comp_base = jcp_ptr->s8s8_compensation_required
+            ? (jcp_ptr->req_cal_comp_pad
+                              ? scratchpad.template get<int32_t>(
+                                        key_brgemm_primitive_buffer_comp)
+                              : s8s8_compensation)
             : nullptr;
-    auto *fp8_convert_wsp_base = jcp.req_fp8_convert_wsp
+    auto *fp8_convert_wsp_base = jcp_ptr->req_fp8_convert_wsp
             ? scratchpad.template get<char>(
                       key_brgemm_primitive_fp8_convert_wsp)
             : nullptr;
@@ -1422,14 +1427,17 @@ status_t brgemm_convolution_fwd_t<isa>::execute(const exec_ctx_t &ctx) const {
     maybe_conv_weights(ctx, wei, wei);
 
     // --------------- Parallel section ------------------------------
-    const dim_t work_amount = static_cast<dim_t>(jcp.mb) * jcp.ngroups
-            * jcp.nb_oc * jcp.nb_od * jcp.nb_oh * jcp.nb_ow;
     // TODO: consider loop by icc be innermost because for current
     // implementation if we use buffer then we accumulate in it only on row
     // or made ic_chunks = 1 if use_buffer
     // or (looks more general) increase buffer size to store several rows
 
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+        const dim_t work_amount = static_cast<dim_t>(jcp.mb) * jcp.ngroups
+                * jcp.nb_oc * jcp.nb_od * jcp.nb_oh * jcp.nb_ow;
+
         if (ithr >= work_amount) return;
 
         brgemm_batch_element_t *const __restrict brg_batch = brg_batch_global

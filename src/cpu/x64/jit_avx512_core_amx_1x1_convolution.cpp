@@ -99,15 +99,16 @@ status_t jit_avx512_core_amx_1x1_convolution_fwd_t::execute_forward(
 
     prepare_padded_bias(bias, ctx.get_scratchpad_grantor());
 
-    const auto &jcp = pd()->jcp_;
-    assert(jcp.nb_oc % jcp.nb_oc_blocking == 0);
+    const auto *jcp_ptr = &pd()->jcp_;
+    assert(jcp_ptr->nb_oc % jcp_ptr->nb_oc_blocking == 0);
 
     const size_t offset = weights_d.size() - weights_d.additional_buffer_size();
-    const int32_t *zp_compensation = jcp.src_zero_point
+    const int32_t *zp_compensation = jcp_ptr->src_zero_point
             ? reinterpret_cast<const int32_t *>(&weights[offset])
             : nullptr;
 
-    const bool is_ic_tail = jcp.ic_without_padding % jcp.ic_block_int_np;
+    const bool is_ic_tail
+            = jcp_ptr->ic_without_padding % jcp_ptr->ic_block_int_np;
     auto wsp = ctx.get_scratchpad_grantor().template get<int32_t>(
             key_conv_amx_wsp_buffer);
     int32_t *wsp_tile = (is_ic_tail)
@@ -117,19 +118,22 @@ status_t jit_avx512_core_amx_1x1_convolution_fwd_t::execute_forward(
     auto global_tcfg = ctx.get_scratchpad_grantor().template get<char>(
             key_conv_amx_tilecfg);
 
-    const size_t wei_oc_shift = static_cast<size_t>(
-            utils::rnd_up(jcp.ic_without_padding, jcp.ic_block_int)
-            * jcp.oc_block * jcp.nb_oc_blocking);
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
 
-    const dim_t nb_os = (jcp.tile_tail) ? jcp.nb_os + 1 : jcp.nb_os;
-    const dim_t os_step = jcp.nb_os2_blocking * jcp.nb_os_blocking;
-    const dim_t os_chunks = div_up(nb_os, os_step);
+        const size_t wei_oc_shift = static_cast<size_t>(
+                utils::rnd_up(jcp.ic_without_padding, jcp.ic_block_int)
+                * jcp.oc_block * jcp.nb_oc_blocking);
 
-    const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
+        const dim_t nb_os = (jcp.tile_tail) ? jcp.nb_os + 1 : jcp.nb_os;
+        const dim_t os_step = jcp.nb_os2_blocking * jcp.nb_os_blocking;
+        const dim_t os_chunks = div_up(nb_os, os_step);
 
-    const dim_t work_amount = jcp.mb * jcp.ngroups * os_chunks * oc_chunks;
+        const dim_t oc_chunks = jcp.nb_oc / jcp.nb_oc_blocking;
 
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const dim_t work_amount = jcp.mb * jcp.ngroups * os_chunks * oc_chunks;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
