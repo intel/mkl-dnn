@@ -36,12 +36,12 @@ using namespace dnnl::impl::data_type;
 template <cpu_isa_t isa, data_type_t src_type, data_type_t dst_type>
 void jit_uni_dw_convolution_fwd_t<isa, src_type, dst_type>::execute_forward(
         const exec_ctx_t &ctx) const {
-    const auto &jcp = pd()->jcp_;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const data_t *, DNNL_ARG_WEIGHTS);
     auto dst = CTX_OUT_MEM(dst_data_t *, DNNL_ARG_DST);
     const auto post_ops_binary_rhs_arg_vec
-            = binary_injector::prepare_binary_args(jcp.post_ops, ctx);
+            = binary_injector::prepare_binary_args(jcp_ptr->post_ops, ctx);
 
     const memory_desc_wrapper src_d(pd()->src_md());
     const memory_desc_wrapper dst_d(pd()->dst_md());
@@ -53,44 +53,47 @@ void jit_uni_dw_convolution_fwd_t<isa, src_type, dst_type>::execute_forward(
         auto bias_in = CTX_IN_MEM(const bf16_data_t *, DNNL_ARG_BIAS);
         bias = ctx.get_scratchpad_grantor().template get<f32_data_t>(
                 key_conv_bias_bf16_convert_wsp);
-        cvt_bfloat16_to_float(bias, bias_in, jcp.oc_without_padding);
-        utils::array_set(bias + jcp.oc_without_padding, 0.f,
-                jcp.oc - jcp.oc_without_padding);
+        cvt_bfloat16_to_float(bias, bias_in, jcp_ptr->oc_without_padding);
+        utils::array_set(bias + jcp_ptr->oc_without_padding, 0.f,
+                jcp_ptr->oc - jcp_ptr->oc_without_padding);
     } else if (pd()->desc()->bias_desc.data_type == f16) {
         auto bias_in = CTX_IN_MEM(const f16_data_t *, DNNL_ARG_BIAS);
         bias = ctx.get_scratchpad_grantor().template get<f32_data_t>(
                 key_conv_bias_f16_convert_wsp);
-        cvt_float16_to_float(bias, bias_in, jcp.oc_without_padding);
-        utils::array_set(bias + jcp.oc_without_padding, 0.f,
-                jcp.oc - jcp.oc_without_padding);
+        cvt_float16_to_float(bias, bias_in, jcp_ptr->oc_without_padding);
+        utils::array_set(bias + jcp_ptr->oc_without_padding, 0.f,
+                jcp_ptr->oc - jcp_ptr->oc_without_padding);
     } else {
         auto bias_in = CTX_IN_MEM(const f32_data_t *, DNNL_ARG_BIAS);
         if (pd()->wants_padded_bias()) {
             auto padded_bias
                     = ctx.get_scratchpad_grantor().template get<f32_data_t>(
                             key_conv_padded_bias);
-            utils::array_copy(padded_bias, bias_in, jcp.oc_without_padding);
-            utils::array_set(padded_bias + jcp.oc_without_padding, 0.f,
-                    jcp.oc - jcp.oc_without_padding);
+            utils::array_copy(
+                    padded_bias, bias_in, jcp_ptr->oc_without_padding);
+            utils::array_set(padded_bias + jcp_ptr->oc_without_padding, 0.f,
+                    jcp_ptr->oc - jcp_ptr->oc_without_padding);
             bias = padded_bias;
         } else
             bias = const_cast<float *>(bias_in);
     }
 
-    const dim_t dil_h = jcp.dilate_h + 1;
-    const dim_t str_h = jcp.stride_h;
-    const int ch_step = jcp.nb_ch_blocking;
-    const dim_t ow = 0;
-    const dim_t iw = 0;
-    const dim_t kw = 0;
-    const dim_t chb_work = utils::div_up(jcp.nb_ch, ch_step);
-    const auto is_src_layout_nxc = jcp.src_tag == format_tag::nhwc;
-    const auto is_dst_layout_nxc = jcp.dst_tag == format_tag::nhwc;
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
 
-    const dim_t work_amount = jcp.mb * chb_work * jcp.oh;
-    const auto nthr = jcp.nthr;
+        const dim_t dil_h = jcp.dilate_h + 1;
+        const dim_t str_h = jcp.stride_h;
+        const int ch_step = jcp.nb_ch_blocking;
+        const dim_t ow = 0;
+        const dim_t iw = 0;
+        const dim_t kw = 0;
+        const dim_t chb_work = utils::div_up(jcp.nb_ch, ch_step);
+        const auto is_src_layout_nxc = jcp.src_tag == format_tag::nhwc;
+        const auto is_dst_layout_nxc = jcp.dst_tag == format_tag::nhwc;
 
-    parallel(nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const dim_t work_amount = jcp.mb * chb_work * jcp.oh;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
