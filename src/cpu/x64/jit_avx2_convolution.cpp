@@ -44,7 +44,7 @@ using namespace nstl;
                                    : wht_blk_off_(f, g, oc, ic, kd, kh, kw)
 
 void jit_avx2_convolution_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
-    const auto &jcp = kernel_->jcp;
+    const auto *jcp_ptr = &pd()->jcp_;
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
     auto weights = CTX_IN_MEM(const data_t *, DNNL_ARG_WEIGHTS);
     auto bias = CTX_IN_MEM(const data_t *, DNNL_ARG_BIAS);
@@ -57,22 +57,26 @@ void jit_avx2_convolution_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
     const memory_desc_wrapper bias_d(pd()->weights_md(1));
 
-    const dim_t ocb_work = div_up(jcp.nb_oc, jcp.nb_oc_blocking);
-    const dim_t work_amount = jcp.mb * jcp.ngroups * ocb_work * jcp.od * jcp.oh;
-
     // Lambda captures by copy, the bias logic must stay afront the lambda,
     // otherwise, `bias` will be captured unmodified and lead to a crash inside
     // the kernel.
     if (pd()->wants_padded_bias()) {
         auto padded_bias = ctx.get_scratchpad_grantor().get<data_t>(
                 key_conv_padded_bias);
-        utils::array_copy(padded_bias, bias, jcp.oc_without_padding);
-        utils::array_set(padded_bias + jcp.oc_without_padding, 0.f,
-                jcp.oc - jcp.oc_without_padding);
+        utils::array_copy(padded_bias, bias, jcp_ptr->oc_without_padding);
+        utils::array_set(padded_bias + jcp_ptr->oc_without_padding, 0.f,
+                jcp_ptr->oc - jcp_ptr->oc_without_padding);
         bias = padded_bias;
     }
 
-    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+    parallel(jcp_ptr->nthr,
+            [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+        const auto &jcp = *jcp_ptr;
+
+        const dim_t ocb_work = div_up(jcp.nb_oc, jcp.nb_oc_blocking);
+        const dim_t work_amount
+                = jcp.mb * jcp.ngroups * ocb_work * jcp.od * jcp.oh;
+
         dim_t start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
