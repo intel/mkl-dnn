@@ -197,6 +197,10 @@ arg_indices_t sdpa_executable_t::get_arg_indices(const op_t *op) {
     const auto &sdpa_fusion_info = op->has_attr(op_attr::fusion_info)
             ? op->get_attr<fusion_info_t>(op_attr::fusion_info)
             : fusion_info_t();
+    if (sdpa_fusion_info.with_runtime_scales(true, DNNL_ARG_QUERIES)) {
+        args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES,
+                {indices_t::type_t::input, idx++}});
+    }
     if (sdpa_fusion_info.with_runtime_scales(true, DNNL_ARG_KEYS)) {
         args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS,
                 {indices_t::type_t::input, idx++}});

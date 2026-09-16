@@ -4754,6 +4754,12 @@ status_t fuse_sdpa(std::shared_ptr<subgraph_t> &sg) {
     if (qk->has_attr(op_attr::fusion_info)) {
         auto mm1_fusion_info
                 = qk->get_attr<fusion_info_t>(op_attr::fusion_info);
+        if (mm1_fusion_info.get_mutable_scales(true, 0)) {
+            sdpa_fusion_info.set_runtime_scales(
+                    mm1_fusion_info.get_mutable_scales(true, 0)
+                            ->shared_from_this(),
+                    true, DNNL_ARG_QUERIES);
+        }
         if (mm1_fusion_info.get_mutable_scales(true, 1)) {
             sdpa_fusion_info.set_runtime_scales(
                     mm1_fusion_info.get_mutable_scales(true, 1)
