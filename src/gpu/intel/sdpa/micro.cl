@@ -71,20 +71,22 @@ typedef qry_tile_data_t fma_tile_data_t;
     into_float(AS_NATIVE_LAYOUT_TYPE(MSK_DATA_T, value))
 
 #if VS_S_QUANT
-#ifndef VS_S_FP8_SCALE
-#define VS_S_FP8_SCALE 448.0f
-#endif
+/* The probabilities are rounded at runtime scale probs_scale (the reciprocal
+   of the user quantization scale, or 256 when none is given), saturating to
+   the e4m3 maximum. Only usable inside the kernel. */
+#define SCALE_PROBS(v) fmin(convert_float(v) * probs_scale, 448.f)
 #endif
 
 #if VS_S_FP8
-#define CONVERT_TILE_S_FP8_T(v) \
-    as_native_layout(into_f8_e4m3(convert_float(v) * VS_S_FP8_SCALE))
+#define CONVERT_TILE_S_FP8_T(v) as_native_layout(into_f8_e4m3(SCALE_PROBS(v)))
 #endif
 
 #if VS_S_QUANT && !VS_S_FP8
-#define CONVERT_TILE_FMA_T(v) \
-    as_native_layout(into_half(into_f8_e4m3(convert_float(v) * VS_S_FP8_SCALE)))
-#elif defined(QRY_DT_HF8)
+#define CONVERT_TILE_S_QUANT_T(v) \
+    as_native_layout(into_half(into_f8_e4m3(SCALE_PROBS(v))))
+#endif
+
+#if defined(QRY_DT_HF8)
 #define CONVERT_TILE_FMA_T(v) as_native_layout(into_half(convert_float(v)))
 #else
 #define CONVERT_TILE_FMA_T(v) \
@@ -495,7 +497,8 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
         const global KEY_ATTR_SCALES_DATA_T *K_scales,
         const global KEY_ATTR_ZP_DATA_T *K_zp,
         const global VAL_ATTR_SCALES_DATA_T *V_scales,
-        const global VAL_ATTR_ZP_DATA_T *V_zp, const int attn_mask_type
+        const global VAL_ATTR_ZP_DATA_T *V_zp, float probs_scale,
+        float probs_descale, const int attn_mask_type
 #if WITH_ATTN_MASK
         ,
         const global msk_tile_data_t *msk
@@ -988,8 +991,13 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
                 sg_j0_kq, 8);
 #else
         /* Convert to half or bf16, VNNI format */
+#if VS_S_QUANT
+        tile_copy_to_vec2_cvt(
+                S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_S_QUANT_T);
+#else
         tile_copy_to_vec2_cvt(
                 S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T);
+#endif
 
         /* Store to SLM, in packed format */
         tile_store_t_sys_src2(S_tile_packed, (local uint *)S_slm,
@@ -1227,9 +1235,9 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
         tile_elementwise(A_scale_tile, native_vrecip);
 #endif
 #if VS_S_QUANT
-#define undo_s_fp8_scale(x) ((x) * (1.0f / VS_S_FP8_SCALE))
-        tile_elementwise(A_scale_tile, undo_s_fp8_scale);
-#undef undo_s_fp8_scale
+#define descale_probs(x) ((x) * probs_descale)
+        tile_elementwise(A_scale_tile, descale_probs);
+#undef descale_probs
 #endif
         tile_hbroadcast_mul(&A_tile, A_scale_tile);
     }

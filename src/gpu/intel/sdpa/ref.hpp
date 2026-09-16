@@ -46,6 +46,9 @@ struct ref_fwd_t : public primitive_t {
                     VERBOSE_UNSUPPORTED_ATTR);
 
             VDISPATCH_SDPA(!with_query_scales(), VERBOSE_UNSUPPORTED_ATTR);
+            VDISPATCH_SDPA(
+                    !with_probs_quant_scales() && !with_probs_dequant_scales(),
+                    VERBOSE_UNSUPPORTED_ATTR);
 
             const auto is_fp8 = [](data_type_t dt) {
                 return utils::one_of(dt, f8_e4m3, f8_e5m2);

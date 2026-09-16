@@ -3668,7 +3668,8 @@ TEST(sdpa_query_scales, PerQueryHeadGQASingleQueryRejected) {
 // scores and softmax, probabilities quantized to e4m3, then P*V.
 namespace {
 
-constexpr float vs_s_fp8_scale = 448.f;
+// Probability scales the kernel uses when none are given
+constexpr float default_probs_scale = 1.f / 256.f;
 
 std::vector<float> read_as_f32(
         dnnl::memory &mem, dnnl::engine &eng, dnnl::stream &strm) {
@@ -3718,8 +3719,9 @@ std::vector<float> pow2_scales(memory::dim n_bh) {
 std::vector<float> decomposed_reference(const std::vector<float> &q_deq,
         const std::vector<float> &k_deq, const std::vector<float> &v_deq,
         memory::dim mb, memory::dim H_q, memory::dim H_kv, memory::dim S_q,
-        memory::dim S_kv, memory::dim D, dnnl::engine &eng, dnnl::stream &strm,
-        std::vector<float> *absmag) {
+        memory::dim S_kv, memory::dim D, float probs_quant_scale,
+        float probs_dequant_scale, dnnl::engine &eng, dnnl::stream &strm,
+        std::vector<float> *absmag, std::vector<float> *subnormal_floor) {
     const auto abcd = memory::format_tag::abcd;
     const memory::dim kv_group = H_q / H_kv;
 
@@ -3759,14 +3761,42 @@ std::vector<float> decomposed_reference(const std::vector<float> &q_deq,
             .execute(strm, {{DNNL_ARG_SRC, scores}, {DNNL_ARG_DST, probs}});
     strm.wait();
 
-    // Quantize and dequantize the normalized probabilities, as the graph does
-    // 1/vs_s_fp8_scale maps [0, 1] onto the full e4m3 range
-    auto p = read_as_f32(probs, eng, strm);
-    for (auto &x : p)
-        x *= vs_s_fp8_scale;
+    const auto logits = read_as_f32(scores, eng, strm);
+    std::vector<float> p(logits.size()), sub_step(logits.size());
+    std::vector<float> row_sums((size_t)mb * H_q * S_q);
+    const size_t row_size = static_cast<size_t>(S_kv);
+    for (size_t row = 0; row < row_sums.size(); row++) {
+        const size_t row_offset = row * row_size;
+        float row_max = -INFINITY;
+        for (size_t col = 0; col < row_size; col++)
+            row_max = std::max(row_max, logits[row_offset + col]);
+
+        // Like the kernel, round exp(s - max) / s_q, saturating to the e4m3
+        // maximum, and apply s_d with the row normalization
+        float row_sum = 0.f;
+        for (size_t col = 0; col < row_size; col++) {
+            const size_t idx = row_offset + col;
+            const float e = std::exp(logits[idx] - row_max);
+            p[idx] = std::min(e / probs_quant_scale, 448.f);
+            row_sum += e;
+        }
+        row_sums[row] = row_sum;
+        const float row_sub_step
+                = std::ldexp(1.f, -9) * probs_dequant_scale / row_sum;
+        for (size_t col = 0; col < row_size; col++) {
+            const size_t idx = row_offset + col;
+            sub_step[idx] = p[idx] < std::ldexp(1.f, -6) ? row_sub_step : 0.f;
+        }
+    }
+
     p = quantize_f8_e4m3(p, eng, strm);
-    for (auto &x : p)
-        x /= vs_s_fp8_scale;
+    for (size_t row = 0; row < row_sums.size(); row++) {
+        const size_t row_offset = row * row_size;
+        for (size_t col = 0; col < row_size; col++) {
+            const size_t idx = row_offset + col;
+            p[idx] *= probs_dequant_scale / row_sums[row];
+        }
+    }
     write_to_dnnl_memory(p.data(), probs, eng, strm);
 
     dnnl::matmul(dnnl::matmul::primitive_desc(eng, s_md, v_md, o_md))
@@ -3790,12 +3820,24 @@ std::vector<float> decomposed_reference(const std::vector<float> &q_deq,
                             {DNNL_ARG_DST, amm}});
     strm.wait();
     *absmag = read_as_f32(amm, eng, strm);
+
+    write_to_dnnl_memory(sub_step.data(), probs, eng, strm);
+    dnnl::matmul(dnnl::matmul::primitive_desc(eng, s_md, v_md, o_md))
+            .execute(strm,
+                    {{DNNL_ARG_SRC, probs}, {DNNL_ARG_WEIGHTS, vam},
+                            {DNNL_ARG_DST, amm}});
+    strm.wait();
+    *subnormal_floor = read_as_f32(amm, eng, strm);
     return out;
 }
 } // namespace
 
+// A negative tolerance only checks that the output is finite
 static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
-        memory::dim S_q, mdt dst_dt, float tolerance) {
+        memory::dim S_q, memory::dim S_kv, mdt dst_dt, float tolerance,
+        bool with_probs_scales = false,
+        float probs_quant_scale = default_probs_scale,
+        float probs_dequant_scale = default_probs_scale) {
     using namespace dnnl::impl;
 
     SKIP_IF(engine::get_count(engine::kind::gpu) == 0,
@@ -3803,7 +3845,7 @@ static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
     dnnl::engine eng(engine::kind::gpu, 0);
     dnnl::stream strm(eng);
 
-    const memory::dim D = 64, S_kv = 128;
+    const memory::dim D = 64;
     const memory::dims q_sz = {mb, H_q, S_q, D}, k_sz = {mb, H_kv, D, S_kv},
                        v_sz = {mb, H_kv, S_kv, D}, o_sz = {mb, H_q, S_q, D};
     const auto abcd = memory::format_tag::abcd;
@@ -3835,12 +3877,13 @@ static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
     const auto k_scales = pow2_scales(mb * H_kv);
     const auto v_scales = pow2_scales(mb * H_kv);
 
-    std::vector<float> absmag;
+    std::vector<float> absmag, subnormal_floor;
     const auto ref_out
             = decomposed_reference(fold_descale(q_stored, q_scales, S_q * D),
                     fold_descale(k_stored, k_scales, D * S_kv),
                     fold_descale(v_stored, v_scales, S_kv * D), mb, H_q, H_kv,
-                    S_q, S_kv, D, eng, strm, &absmag);
+                    S_q, S_kv, D, probs_quant_scale, probs_dequant_scale, eng,
+                    strm, &absmag, &subnormal_floor);
 
     memory om(o_md, eng), sm(scale_md, eng), qsm(qs_md, eng), ksm(kvs_md, eng),
             vsm(kvs_md, eng);
@@ -3855,6 +3898,17 @@ static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
     kq_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
     vs_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
 
+    // The probabilities are the VS source and its result the destination
+    memory pqm, pdm;
+    if (with_probs_scales) {
+        vs_attr.set_scales(DNNL_ARG_SRC, 0, {}, mdt::f32,
+                /* is_host_scalar = */ true);
+        vs_attr.set_scales(DNNL_ARG_DST, 0, {}, mdt::f32,
+                /* is_host_scalar = */ true);
+        pqm = memory(memory::desc::host_scalar(mdt::f32), probs_quant_scale);
+        pdm = memory(memory::desc::host_scalar(mdt::f32), probs_dequant_scale);
+    }
+
     sdpa::primitive_desc pd;
     try {
         pd = sdpa::primitive_desc(eng, q8_md, k8_md, v8_md, nullptr, scale_md,
@@ -3868,12 +3922,16 @@ static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
         throw;
     }
     sdpa prim(pd);
-    prim.execute(strm,
-            {{DNNL_ARG_QUERIES, qm}, {DNNL_ARG_KEYS, km}, {DNNL_ARG_VALUES, vm},
-                    {DNNL_ARG_SCALE, sm}, {DNNL_ARG_DST, om},
-                    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES, qsm},
-                    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS, ksm},
-                    {DNNL_ARG_ATTR_SCALES | DNNL_ARG_VALUES, vsm}});
+    std::unordered_map<int, memory> args {{DNNL_ARG_QUERIES, qm},
+            {DNNL_ARG_KEYS, km}, {DNNL_ARG_VALUES, vm}, {DNNL_ARG_SCALE, sm},
+            {DNNL_ARG_DST, om}, {DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES, qsm},
+            {DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS, ksm},
+            {DNNL_ARG_ATTR_SCALES | DNNL_ARG_VALUES, vsm}};
+    if (with_probs_scales) {
+        args[DNNL_ARG_ATTR_SCALES | DNNL_ARG_PROBABILITIES] = pqm;
+        args[DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST] = pdm;
+    }
+    prim.execute(strm, args);
     strm.wait();
     const auto got = read_as_f32(om, eng, strm);
 
@@ -3881,10 +3939,11 @@ static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
     double max_rel = 0.;
     for (size_t i = 0; i < ref_out.size(); i++) {
         ASSERT_TRUE(std::isfinite(got[i])) << "non-finite at " << i;
+        if (tolerance < 0.f) continue;
         const float denom = std::max(1e-6f, absmag[i]);
         max_rel = std::max<double>(
                 max_rel, std::abs(got[i] - ref_out[i]) / denom);
-        ASSERT_NEAR(got[i], ref_out[i], tolerance * denom)
+        ASSERT_NEAR(got[i], ref_out[i], tolerance * denom + subnormal_floor[i])
                 << "mismatch at " << i;
     }
     ::testing::Test::RecordProperty(
@@ -3893,16 +3952,112 @@ static void test_fp8_sdpa(memory::dim mb, memory::dim H_q, memory::dim H_kv,
 
 TEST(sdpa_fp8, E4M3PerHeadF16Dst) {
     test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
-            mdt::f16, /* tolerance = */ 0.125f);
+            /* S_kv = */ 128, mdt::f16, /* tolerance = */ 0.125f);
 }
 
 // Only the store rounds differently, so the budget is one bf16 ulp (2^-8)
 TEST(sdpa_fp8, E4M3PerHeadBf16Dst) {
     test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
-            mdt::bf16, /* tolerance = */ 0.125f);
+            /* S_kv = */ 128, mdt::bf16, /* tolerance = */ 0.125f);
 }
 
 TEST(sdpa_fp8, E4M3PerHeadGQA) {
     test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 8, /* H_kv = */ 2, /* S_q = */ 128,
-            mdt::bf16, /* tolerance = */ 0.125f);
+            /* S_kv = */ 128, mdt::bf16, /* tolerance = */ 0.125f);
+}
+
+// Online softmax rounds P against a running max, so allow two e4m3 roundings
+TEST(sdpa_fp8, E4M3MultiTileKeys) {
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            /* S_kv = */ 512, mdt::bf16, /* tolerance = */ 0.125f);
+}
+
+// Softmax output quantization: the kernel rounds exp(s - max) / s_q to e4m3
+// and applies s_d with the normalization. The key tile can be smaller than
+// S_kv, so all cases use the multi-tile bound.
+TEST(sdpa_probs_scales, PyTorchScales) {
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            /* S_kv = */ 128, mdt::bf16, /* tolerance = */ 0.125f,
+            /* with_probs_scales = */ true, 1.f / 256.f, 1.f / 256.f);
+}
+
+TEST(sdpa_probs_scales, E4M3MaxScales) {
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            /* S_kv = */ 512, mdt::bf16, /* tolerance = */ 0.125f,
+            /* with_probs_scales = */ true, 1.f / 448.f, 1.f / 448.f);
+}
+
+TEST(sdpa_probs_scales, UnequalScales) {
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            /* S_kv = */ 512, mdt::bf16, /* tolerance = */ 0.125f,
+            /* with_probs_scales = */ true, 1.f / 256.f, 1.f / 128.f);
+}
+
+// Scaled probabilities above the e4m3 maximum saturate instead of turning
+// into NaN. Which ones saturate depends on the key tiling, so only check the
+// output is finite.
+TEST(sdpa_probs_scales, SaturatingScales) {
+    test_fp8_sdpa(/* mb = */ 2, /* H_q = */ 4, /* H_kv = */ 4, /* S_q = */ 128,
+            /* S_kv = */ 512, mdt::bf16, /* tolerance = */ -1.f,
+            /* with_probs_scales = */ true, 1.f / 1024.f, 1.f / 1024.f);
+}
+
+// The primitive takes the probability scales as a per-tensor f32 host scalar
+// pair on the VS source and destination
+namespace {
+dnnl_status_t try_probs_scales_pd(dnnl::engine &eng, bool src, bool dst,
+        int mask, mdt dt, bool host_scalar) {
+    using namespace dnnl::impl;
+
+    const memory::dim mb = 2, H = 4, D = 64, S = 128;
+    const auto abcd = memory::format_tag::abcd;
+    memory::desc q_md({mb, H, S, D}, mdt::f8_e4m3, abcd);
+    memory::desc k_md({mb, H, D, S}, mdt::f8_e4m3, abcd);
+    memory::desc v_md({mb, H, S, D}, mdt::f8_e4m3, abcd);
+    memory::desc o_md({mb, H, S, D}, mdt::f16, abcd);
+    memory::desc scale_md({1}, mdt::f32, memory::format_tag::a);
+
+    try {
+        primitive_attr kq_attr, vs_attr;
+        kq_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
+        vs_attr.set_scales(DNNL_ARG_WEIGHTS, 3, {}, mdt::f32);
+        if (src) vs_attr.set_scales(DNNL_ARG_SRC, mask, {}, dt, host_scalar);
+        if (dst) vs_attr.set_scales(DNNL_ARG_DST, mask, {}, dt, host_scalar);
+
+        sdpa::primitive_desc pd(eng, q_md, k_md, v_md, nullptr, scale_md, o_md,
+                /* invert_scale = */ false, H,
+                to_attn_mask_type(mask_type::no_mask),
+                alg_kind::softmax_accurate, prop_kind::forward_inference,
+                primitive_attr(), kq_attr, vs_attr);
+    } catch (const dnnl::error &e) { return e.status; }
+    return dnnl_success;
+}
+} // namespace
+
+TEST(sdpa_probs_scales, Validation) {
+    using namespace dnnl::impl;
+    SKIP_IF(engine::get_count(engine::kind::gpu) == 0,
+            "SDPA tests require gpus.");
+    dnnl::engine eng(engine::kind::gpu, 0);
+
+    // Without any probability scales the same problem is supported
+    const auto base_status
+            = try_probs_scales_pd(eng, false, false, 0, mdt::f32, false);
+    if (base_status == dnnl_unimplemented)
+        GTEST_SKIP() << "fp8 sdpa unimplemented";
+    ASSERT_EQ(base_status, dnnl_success);
+
+    // The PyTorch form: a per-tensor f32 host scalar pair
+    EXPECT_EQ(try_probs_scales_pd(eng, true, true, 0, mdt::f32, true),
+            dnnl_success);
+    EXPECT_EQ(try_probs_scales_pd(eng, true, true, 0, mdt::f32, false),
+            dnnl_unimplemented);
+    EXPECT_EQ(try_probs_scales_pd(eng, true, true, 3, mdt::f32, false),
+            dnnl_unimplemented);
+    EXPECT_EQ(try_probs_scales_pd(eng, true, true, 0, mdt::f16, false),
+            dnnl_invalid_arguments);
+    EXPECT_EQ(try_probs_scales_pd(eng, true, false, 0, mdt::f32, true),
+            dnnl_unimplemented);
+    EXPECT_EQ(try_probs_scales_pd(eng, false, true, 0, mdt::f32, true),
+            dnnl_unimplemented);
 }

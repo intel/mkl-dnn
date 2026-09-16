@@ -96,6 +96,16 @@ struct sdpa_pd_t : public primitive_desc_t {
         return (!desc()->vs_scales.has_default_values());
     }
 
+    /// If true, quantize the softmax output before the VS matmul
+    bool with_probs_quant_scales() const {
+        return (!desc()->probs_quant_scales.has_default_values());
+    }
+
+    /// If true, scale the VS matmul result by the probs dequantization scale
+    bool with_probs_dequant_scales() const {
+        return (!desc()->probs_dequant_scales.has_default_values());
+    }
+
     /// If true, dequantize the K tensor with zero points in the KQ matmul
     bool with_key_zp() const {
         return (!desc()->kq_zero_points.has_default_values());
@@ -124,6 +134,16 @@ struct sdpa_pd_t : public primitive_desc_t {
     /// Returns the data type of the scales tensor for the VS matmul
     data_type_t value_scales_dt() const {
         return desc()->vs_scales.get_data_type();
+    }
+
+    /// Returns the data type of the softmax output quantization scale
+    data_type_t probs_quant_scales_dt() const {
+        return desc()->probs_quant_scales.get_data_type();
+    }
+
+    /// Returns the data type of the softmax output dequantization scale
+    data_type_t probs_dequant_scales_dt() const {
+        return desc()->probs_dequant_scales.get_data_type();
     }
 
     /// Returns the data type of the zero points tensor for the VS matmul
@@ -222,6 +242,8 @@ struct sdpa_fwd_pd_t : public sdpa_pd_t {
                     DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES,
                     DNNL_ARG_ATTR_SCALES | DNNL_ARG_KEYS,
                     DNNL_ARG_ATTR_SCALES | DNNL_ARG_VALUES,
+                    DNNL_ARG_ATTR_SCALES | DNNL_ARG_PROBABILITIES,
+                    DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST,
                     DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_KEYS,
                     DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_VALUES))
             return arg_usage_t::input;

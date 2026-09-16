@@ -282,6 +282,22 @@ struct micro_fwd_t : public primitive_t {
             VDISPATCH_SDPA(IMPLICATION(with_fp8, use_systolic_ukernel_),
                     "fp8 requires the systolic microkernel path");
 
+            const bool with_probs_quant
+                    = with_probs_quant_scales() || with_probs_dequant_scales();
+
+            VDISPATCH_SDPA(IMPLICATION(with_probs_quant,
+                                   with_probs_quant_scales()
+                                           && with_probs_dequant_scales()),
+                    "softmax output quantization needs both scales");
+
+            VDISPATCH_SDPA(IMPLICATION(with_probs_quant, quantize_probs()),
+                    "softmax output quantization requires fp8 Q and V");
+            VDISPATCH_SDPA(IMPLICATION(with_probs_quant,
+                                   desc()->probs_quant_scales.is_host_scalar()
+                                           && desc()->probs_dequant_scales
+                                                      .is_host_scalar()),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             VDISPATCH_SDPA(IMPLICATION(with_fp8,
                                    desc()->kq_zero_points.has_default_values()
                                            && desc()->vs_zero_points

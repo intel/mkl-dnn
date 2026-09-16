@@ -772,6 +772,8 @@ size_t get_desc_hash(const sdpa_desc_t &desc) {
     seed = hash_combine(seed, desc.kq_zero_points.get_hash());
     seed = hash_combine(seed, desc.vs_scales.get_hash());
     seed = hash_combine(seed, desc.vs_zero_points.get_hash());
+    seed = hash_combine(seed, desc.probs_quant_scales.get_hash());
+    seed = hash_combine(seed, desc.probs_dequant_scales.get_hash());
     seed = hash_combine(seed, get_md_hash(desc.dS_desc));
     seed = hash_combine(seed, get_md_hash(desc.dst_desc));
     seed = hash_combine(seed, get_md_hash(desc.stats_desc));

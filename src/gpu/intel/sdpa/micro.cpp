@@ -83,7 +83,7 @@ int alignment_for_md(const memory_desc_wrapper &mdw, dim_t ld_bytes) {
 }
 
 // micro_sdpa/micro_sdpa_bwd cross-thread argument bytes, plus headroom.
-constexpr int host_argument_bytes_fwd = 328;
+constexpr int host_argument_bytes_fwd = 336;
 constexpr int host_argument_bytes_bwd = 256;
 
 compute::gpu_arch_t gpu_arch(const micro::HWInformation &hw_info) {
@@ -1690,6 +1690,25 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     const auto &value_zp
             = CTX_IN_STORAGE(DNNL_ARG_VALUES | DNNL_ARG_ATTR_ZERO_POINTS);
 
+    // The probabilities are rounded to e4m3 as e / s_q and rescaled by s_d.
+    // Without user scales, a power-of-two 256 rounds values >= 2^-6 like an
+    // unscaled cast while keeping small ones out of the subnormal range.
+    float probs_scale = 256.f, probs_descale = 1.f / 256.f;
+    if (pd()->with_probs_quant_scales()) {
+        const auto read_scalar = [&](int arg, float &value) {
+            const auto *storage = utils::downcast<
+                    const dnnl::impl::host_scalar_memory_storage_t *>(
+                    &CTX_IN_STORAGE(arg));
+            return storage->get_scalar_value(&value, sizeof(value));
+        };
+        float quant_scale, dequant_scale;
+        CHECK(read_scalar(
+                DNNL_ARG_ATTR_SCALES | DNNL_ARG_PROBABILITIES, quant_scale));
+        CHECK(read_scalar(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dequant_scale));
+        probs_scale = 1.f / quant_scale;
+        probs_descale = dequant_scale;
+    }
+
     const int kv_group_size = pd()->conf.kv_group_size;
     const dim_t Q = pd()->desc()->queries();
     const dim_t K = pd()->desc()->keys();
@@ -1758,6 +1777,8 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     arg_list.append(key_zp);
     arg_list.append(value_scales);
     arg_list.append(value_zp);
+    arg_list.append(probs_scale);
+    arg_list.append(probs_descale);
     arg_list.append(mask_type);
     if (pd()->with_attn_mask()) arg_list.append(attn_mask);
 
