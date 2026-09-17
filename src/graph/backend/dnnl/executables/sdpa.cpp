@@ -217,6 +217,14 @@ arg_indices_t sdpa_executable_t::get_arg_indices(const op_t *op) {
         args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_VALUES,
                 {indices_t::type_t::input, idx++}});
     }
+    if (sdpa_fusion_info.with_runtime_scales(true, DNNL_ARG_PROBABILITIES)) {
+        args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_PROBABILITIES,
+                {indices_t::type_t::input, idx++}});
+    }
+    if (sdpa_fusion_info.with_runtime_scales(false, 0)) {
+        args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST,
+                {indices_t::type_t::input, idx++}});
+    }
 
     // outputs
     args.insert({DNNL_ARG_DST, {indices_t::type_t::output, 0}});
