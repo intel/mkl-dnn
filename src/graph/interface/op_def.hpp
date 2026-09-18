@@ -2358,6 +2358,8 @@ DNNL_GRAPH_OP_SCHEMA(_sdpa, 1,
                 .set_attr(op_attr::with_scale, true, attribute_kind::b)
                 .set_attr(op_attr::is_invert_scale, false, attribute_kind::b,
                         false)
+                .set_attr(op_attr::is_invert_select, false, attribute_kind::b,
+                        false)
                 .set_attr(op_attr::is_training, false, attribute_kind::b)
                 .set_attr(op_attr::with_dropout, false, attribute_kind::b)
                 // mask_type attribute indicates existence of explicit mask,

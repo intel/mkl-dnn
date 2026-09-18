@@ -74,8 +74,8 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     VDISPATCH_SDPA(!with_causal_mask(),
             "an implicit causal mask is not yet supported");
     VDISPATCH_SDPA(IMPLICATION(with_attn_mask(),
-                           desc()->mask_type == attn_mask_type::buffer),
-            "only an explicit buffer attention mask is supported");
+                           with_buffer_mask() || with_select_mask()),
+            "only explicit buffer or select attention masks are supported");
     VDISPATCH_SDPA(
             utils::one_of(desc()->softmax_alg, alg_kind::softmax_accurate,
                     alg_kind::softmax_accurate_inf_as_zero),
@@ -96,9 +96,19 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
                 VERBOSE_INVALID_BROADCAST, "attn_mask", mask_q_index);
         VDISPATCH_SDPA(mask_mdw.dims()[mask_k_index] == desc()->keys(),
                 VERBOSE_INVALID_BROADCAST, "attn_mask", mask_k_index);
-        VDISPATCH_SDPA(
-                mask_mdw.data_type() == dt || mask_mdw.data_type() == f32,
-                "the attention mask data type must match qry/dst or be f32");
+        if (with_select_mask()) {
+            VDISPATCH_SDPA(utils::one_of(mask_mdw.data_type(), s8, u8),
+                    "the select condition data type must be s8 or u8");
+
+            const memory_desc_wrapper fill_mdw(desc()->fill_md());
+            VDISPATCH_SDPA(fill_mdw.ndims() == 1 && fill_mdw.dims()[0] == 1
+                            && fill_mdw.data_type() == f32,
+                    "the select attention mask fill must be a scalar f32");
+        } else
+            VDISPATCH_SDPA(
+                    mask_mdw.data_type() == dt || mask_mdw.data_type() == f32,
+                    "the attention mask data type must match qry/dst or be "
+                    "f32");
     }
 
     if (with_attn_scale()) {
@@ -116,7 +126,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // whenever the shapes/dtypes allow it, unless overridden for
     // debugging/perf comparisons via ONEDNN_SDPA_IMPL={blocked,fused,auto}
     // (auto, the default, is the capability-based choice above).
-    const bool fused_capable = dt == f32 && !with_attn_mask();
+    const bool fused_capable = dt == f32 && !with_buffer_mask();
     const std::string forced = getenv_string_user("SDPA_IMPL");
     VDISPATCH_SDPA(utils::one_of(forced, std::string(), std::string("auto"),
                            std::string("blocked"), std::string("fused")),
@@ -153,8 +163,15 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
                 val_mdw.strides(), val_mdw.strides() + sdpa_pd_t::ndims);
         fp_.o_strides.assign(
                 dst_mdw.strides(), dst_mdw.strides() + sdpa_pd_t::ndims);
-        fp_.has_select = false;
-        fp_.select_fusiable = false;
+        fp_.has_select = with_select_mask();
+        fp_.select_fusiable = !desc()->invert_select;
+        if (with_select_mask()) {
+            const memory_desc_wrapper cond_mdw(desc()->attn_mask_md());
+            fp_.cond_strides.assign(
+                    cond_mdw.strides(), cond_mdw.strides() + sdpa_pd_t::ndims);
+            fp_.cond_dims.assign(
+                    cond_mdw.dims(), cond_mdw.dims() + sdpa_pd_t::ndims);
+        }
 
         // Size the scratchpad from a throwaway driver: configure() runs only
         // the JIT-free arithmetic (KV tiling, per-thread scratch), so the pd
@@ -191,8 +208,15 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // head_size is already the row axis and keys the inner axis -- the
     // "non-transposed" orientation the driver expects.
     bp_.mm1_transpose_b = false;
-    bp_.has_select = false;
-    bp_.select_fusiable = false;
+    bp_.has_select = with_select_mask();
+    bp_.select_fusiable = !desc()->invert_select;
+    if (with_select_mask()) {
+        const memory_desc_wrapper cond_mdw(desc()->attn_mask_md());
+        bp_.cond_strides.assign(
+                cond_mdw.strides(), cond_mdw.strides() + sdpa_pd_t::ndims);
+        bp_.cond_dims.assign(
+                cond_mdw.dims(), cond_mdw.dims() + sdpa_pd_t::ndims);
+    }
     bp_.softmax_inf_as_zero
             = desc()->softmax_alg == alg_kind::softmax_accurate_inf_as_zero;
 
@@ -207,7 +231,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         sc.rhs_dt = f32;
         bp_.mm1_post_ops.push_back(sc);
     }
-    if (with_attn_mask()) {
+    if (with_buffer_mask()) {
         const memory_desc_wrapper mask_mdw(desc()->attn_mask_md());
         sdp_mm1_post_op_t mk;
         mk.alg = alg_kind::binary_add;
@@ -270,15 +294,33 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
         if (pd()->desc()->invert_scale) scale_val = 1.0f / scale_val;
     }
 
+    // For a select mask the condition tensor is delivered through the attn-mask
+    // arg and the scalar fill through its own arg. The fill can arrive either as
+    // a host scalar or as a runtime f32 buffer, mirroring the scale handling.
+    const void *cond = nullptr;
+    float fill_val = 0.0f;
+    if (pd()->with_select_mask()) {
+        cond = CTX_IN_MEM(const void *, DNNL_ARG_ATTN_MASK);
+        const auto &fill_storage = CTX_IN_STORAGE(DNNL_ARG_ATTN_MASK_FILL);
+        if (fill_storage.is_host_scalar()) {
+            const auto *host_storage
+                    = utils::downcast<const host_scalar_memory_storage_t *>(
+                            &fill_storage);
+            CHECK(host_storage->get_scalar_value(&fill_val, sizeof(fill_val)));
+        } else {
+            fill_val = *CTX_IN_MEM(const float *, DNNL_ARG_ATTN_MASK_FILL);
+        }
+    }
+
     if (pd()->driver_kind() == sdpa_driver_kind_t::fused) {
         sdp_fused_run_args_t args;
         args.q = q;
         args.k = k;
         args.v = v;
-        args.cond = nullptr;
+        args.cond = cond;
         args.out = out;
         args.scale = scale_val;
-        args.fill = 0.0f;
+        args.fill = fill_val;
         return fused_driver_->execute(args, scratch, pd()->nthr());
     }
 
@@ -286,13 +328,13 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     args.q = q;
     args.k = k;
     args.v = v;
-    args.cond = nullptr;
+    args.cond = cond;
     args.out = out;
-    args.fill = 0.0f;
+    args.fill = fill_val;
     // rhs base pointers for the mm1 binary post-ops, in the same order they
     // were appended to bp_.mm1_post_ops: scale (scalar) then attention mask.
     if (pd()->with_attn_scale()) args.mm1_post_op_rhs.push_back(&scale_val);
-    if (pd()->with_attn_mask())
+    if (pd()->with_buffer_mask())
         args.mm1_post_op_rhs.push_back(
                 CTX_IN_MEM(const void *, DNNL_ARG_ATTN_MASK));
     return blocked_driver_->execute(args, scratch, pd()->nthr());

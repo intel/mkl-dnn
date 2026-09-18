@@ -201,6 +201,8 @@ struct micro_fwd_t : public primitive_t {
                     VERBOSE_UNSUPPORTED_TAG);
             VDISPATCH_SDPA(attr()->has_default_values(smask_t::dropout),
                     VERBOSE_UNSUPPORTED_DROPOUT);
+            VDISPATCH_SDPA(!with_select_mask(),
+                    "Select attention mask is not supported");
             if (with_attn_mask()) {
                 VDISPATCH_SDPA(desc()->attn_mask_md()->ndims == 4,
                         VERBOSE_SHAPE_RESTRICTION ": attn_mask(%d) must be 4d",
@@ -491,6 +493,8 @@ struct micro_bwd_t : public primitive_t {
                     "must be 4d",
                     desc()->diff_qry_md()->ndims, desc()->diff_key_md()->ndims,
                     desc()->diff_val_md()->ndims, diff_dst_md()->ndims);
+            VDISPATCH_SDPA(!with_select_mask(),
+                    "Select attention mask is not supported");
             if (with_attn_mask()) {
                 VDISPATCH_SDPA(desc()->attn_mask_md()->ndims == 4,
                         VERBOSE_SHAPE_RESTRICTION ": attn_mask(%d) must be 4d",

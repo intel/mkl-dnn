@@ -352,6 +352,7 @@ const op_attr_t with_scale = 0x10010;
 const op_attr_t is_invert_scale = 0x10011;
 const op_attr_t mask_type = 0x10012;
 const op_attr_t is_rms = 0x10013;
+const op_attr_t is_invert_select = 0x10014;
 
 // int64_t
 const op_attr_t partition_id = 0x10100;

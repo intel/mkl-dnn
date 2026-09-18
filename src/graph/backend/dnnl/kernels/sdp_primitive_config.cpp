@@ -64,6 +64,9 @@ status_t sdp_primitive_config_t::initial_check(
     op_ptr mm1 = nullptr, mm2 = nullptr, scale = nullptr;
     bool f32_inter = true;
 
+    const bool is_cpu = sg->p_engine_
+            && sg->p_engine_->get_kind() == dnnl::engine::kind::cpu;
+
     for (const auto &cur_op : sg->get_ops()) {
         const auto &op_kind = cur_op->get_kind();
         if (op_kind == graph::op_kind::DynamicDequantize
@@ -97,6 +100,11 @@ status_t sdp_primitive_config_t::initial_check(
             VCHECK_SDP_PRIMITIVE(post_op->get_kind() != graph::op_kind::Select,
                     status::unimplemented,
                     "Not support select between mm1 and scale(optional)");
+
+            // Track the value produced by the score-processing chain so the
+            // Select inputs can be identified as score versus scalar fill.
+            auto score_val = mm1->get_output_value(0);
+
             // scale
             if (post_op->get_kind() == graph::op_kind::Divide
                     || post_op->get_kind() == graph::op_kind::Multiply) {
@@ -106,6 +114,7 @@ status_t sdp_primitive_config_t::initial_check(
                 const auto &lt_ss = scale->get_output_logical_tensor(0);
                 f32_inter = f32_inter
                         && (ltw(lt_ss).data_type() == data_type::f32);
+                score_val = scale->get_output_value(0);
             }
             // mask
             if (post_op) {
@@ -115,16 +124,41 @@ status_t sdp_primitive_config_t::initial_check(
                     const auto &lt_ms = mask->get_output_logical_tensor(0);
                     f32_inter = f32_inter
                             && (ltw(lt_ms).data_type() == data_type::f32);
+                    score_val = mask->get_output_value(0);
+                    post_op = get_post_op(post_op);
+
+                    VCHECK_SDP_PRIMITIVE(
+                            !(post_op
+                                    && post_op->get_kind()
+                                            == graph::op_kind::Select),
+                            status::unimplemented,
+                            "Select after additive mask is not supported");
+                }
+                // A select mask between the scale/mask and softmax
+                // ([mm1] -> [scale]* -> [mask]* -> [select] -> [softmax])
+                // is supported on CPU only. The GPU ukernel has no such path;
+                // select between mm1 and scale is rejected above.
+                // Distill-Bert:[mm1] --> [scale]* --> [mask]* --> [select] --> ...
+                if (post_op && post_op->get_kind() == graph::op_kind::Select) {
+                    VCHECK_SDP_PRIMITIVE(is_cpu, status::unimplemented,
+                            "Not support select after scale(optional) and "
+                            "mask(optional)");
+
+                    // The score enters the select as one branch (then/else);
+                    // the other branch is the fill and must be a scalar.
+                    const bool then_is_score
+                            = post_op->get_input_value(1) == score_val;
+
+                    const auto &fill_lt = then_is_score
+                            ? post_op->get_input_logical_tensor(2)
+                            : post_op->get_input_logical_tensor(1);
+
+                    VCHECK_SDP_PRIMITIVE(ltw(fill_lt).nelems() == 1,
+                            status::unimplemented,
+                            "Select mask requires a scalar fill value");
+
                     post_op = get_post_op(post_op);
                 }
-                // Not support select after scale(optional) and mask(optional)
-                // Distill-Bert:[mm1] --> [scale]* --> [mask]* --> [select] --> ...
-                VCHECK_SDP_PRIMITIVE(post_op
-                                && post_op->get_kind()
-                                        != graph::op_kind::Select,
-                        status::unimplemented,
-                        "Not support select after scale(optional) and "
-                        "mask(optional)");
             }
 
             if (post_op) {

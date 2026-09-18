@@ -1895,11 +1895,15 @@ status_t layout_propagator_for_sdpa_bwd(std::shared_ptr<op_t> &op,
     VCHECK_LAYOUT_PROPAGATOR(status == status::success, status,
             "failed to fill layout info for sdpa_bwd diff_value");
 
+    const auto mask_type = static_cast<attn_mask_type_t>(
+            op->get_attr<int64_t>(op_attr::mask_type));
+
+    VCHECK_LAYOUT_PROPAGATOR(mask_type != attn_mask_type::select,
+            status::unimplemented, "sdpa_bwd does not support select masks");
+
     // scratchpad (output 3): create the pd to get the real scratchpad size
     {
         const bool with_scale = op->get_attr<bool>(op_attr::with_scale);
-        const auto mask_type = static_cast<attn_mask_type_t>(
-                op->get_attr<int64_t>(op_attr::mask_type));
         const bool is_invert_scale = op->has_attr(op_attr::is_invert_scale)
                 ? op->get_attr<bool>(op_attr::is_invert_scale)
                 : false;
@@ -1950,7 +1954,8 @@ status_t layout_propagator_for_sdpa_bwd(std::shared_ptr<op_t> &op,
         std::shared_ptr<primitive_desc_t> hint_fwd_pd;
         status = create_sdpa_pd(hint_fwd_pd, p_engine.get(), md_q.get(),
                 md_k.get(), md_v.get(), md_dst.get(), md_attn_mask.get(),
-                md_scale.get(), is_invert_scale, kv_head_number, mask_type,
+                md_scale.get(), is_invert_scale, /* fill_md = */ nullptr,
+                /* invert_select = */ false, kv_head_number, mask_type,
                 softmax_alg, impl::prop_kind::forward_training, attr.get(),
                 qk_attr.get(), vs_attr.get());
         VCHECK_LAYOUT_PROPAGATOR(status == status::success, status,
