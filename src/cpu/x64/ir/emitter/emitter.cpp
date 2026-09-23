@@ -319,8 +319,8 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
                 if (spilled(op.dst)) spill_reload(op.dst, d);
                 int s = vec_use(op.s0, vec_scratch1);
-                int m = vec_use(op.s1, vec_scratch2);
-                be.vblend(d, s, m, dt_of(op.dst));
+                assert(!spilled(op.s1) && "vblend: mask spilled");
+                be.vblend(d, s, phys(op.s1), dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
@@ -332,11 +332,9 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 break;
             }
             case op_kind_t::vcmp_ne_zero: { // overwrites dst, reads s0
-                int s = vec_use(op.s0, vec_scratch1);
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                // vec_scratch2 supplies the zero compare operand.
-                be.vcmp_ne_zero(d, s, vec_scratch2, dt_of(op.dst));
-                if (spilled(op.dst)) spill_store(op.dst, d);
+                int s = vec_use(op.s0, vec_scratch0);
+                assert(!spilled(op.dst) && "vcmp_ne_zero: mask spilled");
+                be.vcmp_ne_zero(phys(op.dst), s, vec_scratch1, dt_of(op.s0));
                 break;
             }
             case op_kind_t::vhreduce: { // reads and writes dst, overwrites ws

@@ -69,7 +69,8 @@ struct avx2_backend_t {
     void vload(int d, int base, dim_t disp, data_type_t mem_dt,
             data_type_t reg_dt) {
         const auto addr = gen().ptr[Xbyak::Reg64(base) + (int)disp];
-        if (mem_dt == data_type::f32 && reg_dt == data_type::f32)
+        if (mem_dt == reg_dt
+                && utils::one_of(reg_dt, data_type::f32, data_type::s32))
             gen().vmovups(Xbyak::Ymm(d), addr);
         else { JIT_ASSERT(!"vload: dtype not implemented"); }
     }

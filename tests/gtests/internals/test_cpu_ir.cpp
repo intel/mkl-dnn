@@ -340,7 +340,7 @@ protected:
             if (eltwise_injectors.count(alg)) continue;
             eltwise_injectors.emplace(alg,
                     std::unique_ptr<eltwise_injector_t>(
-                            new eltwise_injector_t(*this, avx2, alg,
+                            new eltwise_injector_t(*this, max_cpu_isa(), alg,
                                     /* alpha = */ 0.f, /* beta = */ 0.f,
                                     /* scale = */ 1.f)));
         }
@@ -1700,12 +1700,12 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     const vreg_t ptr = ir.new_gpr();
     ir.load_param(ptr, 0);
     const vreg_t x = ir.new_vec(data_type::f32);
-    ir.vload(x, ptr, 0);
+    ir.vload(x, ptr, 0, data_type::f32);
     const vreg_t y = ir.new_vec(data_type::f32);
-    ir.vload(y, ptr, simd_w * (dim_t)sizeof(float));
+    ir.vload(y, ptr, simd_w() * (dim_t)sizeof(float), data_type::f32);
     const vreg_t u8 = ir.new_vec(data_type::s32);
     const int i_u8 = ir.n_ops();
-    ir.vload_u8(u8, ptr, 0, simd_w);
+    ir.vload_u8(u8, ptr, 0, simd_w());
 
     const int i_sub = ir.n_ops();
     ir.vsub(x, y);
@@ -1714,7 +1714,7 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     const int i_max = ir.n_ops();
     ir.vmax(x, y);
     const vreg_t mask = ir.new_mask();
-    ir.set_mask_imm(mask, simd_w - 1);
+    ir.set_mask_imm(mask, simd_w() - 1);
     const int i_blend = ir.n_ops();
     ir.vblend(x, y, mask);
     const vreg_t bc = ir.new_vec(data_type::f32);
@@ -1785,9 +1785,9 @@ ir_t build_elementwise_ir(op_kind_t kind) {
     ir.load_param(c_ptr, offsetof(dot_args_t, c));
 
     const vreg_t acc = ir.new_vec(data_type::f32);
-    ir.vload(acc, a_ptr, 0);
+    ir.vload(acc, a_ptr, 0, data_type::f32);
     const vreg_t b = ir.new_vec(data_type::f32);
-    ir.vload(b, b_ptr, 0);
+    ir.vload(b, b_ptr, 0, data_type::f32);
 
     switch (kind) {
         case op_kind_t::vsub: ir.vsub(acc, b); break;
@@ -1797,7 +1797,7 @@ ir_t build_elementwise_ir(op_kind_t kind) {
         default: break;
     }
 
-    ir.vstore_masked(c_ptr, 0, acc, vreg_t::none, simd_w);
+    ir.vstore(c_ptr, 0, acc, data_type::f32);
     return ir;
 }
 
@@ -1805,8 +1805,8 @@ ir_t build_elementwise_ir(op_kind_t kind) {
 TEST(IntegrationTests, ElementwiseVectorOps) {
     SKIP_IF_NO_AVX2();
 
-    std::vector<float> a(simd_w), b(simd_w);
-    for (int i = 0; i < simd_w; i++) {
+    std::vector<float> a(simd_w()), b(simd_w());
+    for (int i = 0; i < simd_w(); i++) {
         a[i] = (float)(i - 3) * 1.5f + 0.5f;
         b[i] = (float)(i % 4) + 1.f; // nonzero for division
     }
@@ -1814,7 +1814,7 @@ TEST(IntegrationTests, ElementwiseVectorOps) {
     auto run = [&](op_kind_t kind) {
         ir_kernel_t k(build_elementwise_ir(kind));
         EXPECT_TRUE(k.run_ir_pipeline());
-        std::vector<float> c(simd_w, -12345.f);
+        std::vector<float> c(simd_w(), -12345.f);
         dot_args_t args {a.data(), b.data(), c.data()};
         k.run(&args);
         return c;
@@ -1822,17 +1822,17 @@ TEST(IntegrationTests, ElementwiseVectorOps) {
 
     {
         const auto c = run(op_kind_t::vsub);
-        for (int i = 0; i < simd_w; i++)
+        for (int i = 0; i < simd_w(); i++)
             EXPECT_FLOAT_EQ(c[i], a[i] - b[i]) << "lane " << i;
     }
     {
         const auto c = run(op_kind_t::vmax);
-        for (int i = 0; i < simd_w; i++)
+        for (int i = 0; i < simd_w(); i++)
             EXPECT_FLOAT_EQ(c[i], std::max(a[i], b[i])) << "lane " << i;
     }
     {
         const auto c = run(op_kind_t::vdiv);
-        for (int i = 0; i < simd_w; i++)
+        for (int i = 0; i < simd_w(); i++)
             EXPECT_FLOAT_EQ(c[i], a[i] / b[i]) << "lane " << i;
     }
 }
@@ -1848,7 +1848,7 @@ ir_t build_hmax_bcast_ir() {
     ir.load_param(c_ptr, offsetof(dot_args_t, c));
 
     const vreg_t acc = ir.new_vec(data_type::f32);
-    ir.vload(acc, a_ptr, 0);
+    ir.vload(acc, a_ptr, 0, data_type::f32);
 
     const vreg_t ws = ir.new_vec(data_type::f32);
     ir.vhreduce_max(acc, ws);
@@ -1856,7 +1856,7 @@ ir_t build_hmax_bcast_ir() {
     const vreg_t out = ir.new_vec(data_type::f32);
     ir.vbcast(out, acc);
 
-    ir.vstore_masked(c_ptr, 0, out, vreg_t::none, simd_w);
+    ir.vstore(c_ptr, 0, out, data_type::f32);
     return ir;
 }
 
@@ -1868,15 +1868,15 @@ TEST(IntegrationTests, HorizontalMaxBroadcast) {
     ir_kernel_t kernel(build_hmax_bcast_ir());
     ASSERT_TRUE(kernel.run_ir_pipeline());
 
-    std::vector<float> a(simd_w), c(simd_w, -12345.f);
-    for (int i = 0; i < simd_w; i++)
+    std::vector<float> a(simd_w()), c(simd_w(), -12345.f);
+    for (int i = 0; i < simd_w(); i++)
         a[i] = (float)((i * 3) % 7) - 2.f;
 
     dot_args_t args {a.data(), nullptr, c.data()};
     kernel.run(&args);
 
     const float m = *std::max_element(a.begin(), a.end());
-    for (int i = 0; i < simd_w; i++)
+    for (int i = 0; i < simd_w(); i++)
         EXPECT_FLOAT_EQ(c[i], m) << "lane " << i;
 }
 
@@ -1891,9 +1891,9 @@ ir_t build_exp_ir() {
     ir.load_param(c_ptr, offsetof(dot_args_t, c));
 
     const vreg_t acc = ir.new_vec(data_type::f32);
-    ir.vload(acc, a_ptr, 0);
+    ir.vload(acc, a_ptr, 0, data_type::f32);
     ir.vexp(acc);
-    ir.vstore_masked(c_ptr, 0, acc, vreg_t::none, simd_w);
+    ir.vstore(c_ptr, 0, acc, data_type::f32);
     return ir;
 }
 
@@ -1906,14 +1906,14 @@ TEST(IntegrationTests, ExpVector) {
     ir_kernel_t kernel(build_exp_ir());
     ASSERT_TRUE(kernel.run_ir_pipeline());
 
-    std::vector<float> a(simd_w), c(simd_w, -12345.f);
-    for (int i = 0; i < simd_w; i++)
+    std::vector<float> a(simd_w()), c(simd_w(), -12345.f);
+    for (int i = 0; i < simd_w(); i++)
         a[i] = (float)(i - 4) * 0.75f; // spans negative and positive
 
     dot_args_t args {a.data(), nullptr, c.data()};
     kernel.run(&args);
 
-    for (int i = 0; i < simd_w; i++) {
+    for (int i = 0; i < simd_w(); i++) {
         const float expected = std::exp(a[i]);
         EXPECT_NEAR(c[i], expected, 1e-5f * std::abs(expected) + 1e-6f)
                 << "lane " << i;
@@ -1935,15 +1935,14 @@ ir_t build_two_eltwise_ir() {
     ir.load_param(c_ptr, offsetof(dot_args_t, c));
 
     const vreg_t x = ir.new_vec(data_type::f32);
-    ir.vload(x, a_ptr, 0);
+    ir.vload(x, a_ptr, 0, data_type::f32);
     ir.veltwise(alg_kind::eltwise_exp, x);
-    ir.vstore_masked(c_ptr, 0, x, vreg_t::none, simd_w);
+    ir.vstore(c_ptr, 0, x, data_type::f32);
 
     const vreg_t y = ir.new_vec(data_type::f32);
-    ir.vload(y, b_ptr, 0);
+    ir.vload(y, b_ptr, 0, data_type::f32);
     ir.veltwise(alg_kind::eltwise_tanh, y);
-    ir.vstore_masked(
-            c_ptr, simd_w * (dim_t)sizeof(float), y, vreg_t::none, simd_w);
+    ir.vstore(c_ptr, simd_w() * (dim_t)sizeof(float), y, data_type::f32);
     return ir;
 }
 
@@ -1956,8 +1955,8 @@ TEST(IntegrationTests, TwoEltwiseAlgorithms) {
     ir_kernel_t kernel(build_two_eltwise_ir());
     ASSERT_TRUE(kernel.run_ir_pipeline());
 
-    std::vector<float> a(simd_w), b(simd_w), c(2 * simd_w, -12345.f);
-    for (int i = 0; i < simd_w; i++) {
+    std::vector<float> a(simd_w()), b(simd_w()), c(2 * simd_w(), -12345.f);
+    for (int i = 0; i < simd_w(); i++) {
         a[i] = (float)(i - 4) * 0.75f;
         b[i] = (float)(i - 4) * 0.5f;
     }
@@ -1965,12 +1964,13 @@ TEST(IntegrationTests, TwoEltwiseAlgorithms) {
     dot_args_t args {a.data(), b.data(), c.data()};
     kernel.run(&args);
 
-    for (int i = 0; i < simd_w; i++) {
+    for (int i = 0; i < simd_w(); i++) {
         const float exp_ref = std::exp(a[i]);
         EXPECT_NEAR(c[i], exp_ref, 1e-5f * std::abs(exp_ref) + 1e-6f)
                 << "exp lane " << i;
         const float tanh_ref = std::tanh(b[i]);
-        EXPECT_NEAR(c[simd_w + i], tanh_ref, 1e-5f * std::abs(tanh_ref) + 1e-6f)
+        EXPECT_NEAR(
+                c[simd_w() + i], tanh_ref, 1e-5f * std::abs(tanh_ref) + 1e-6f)
                 << "tanh lane " << i;
     }
 }
@@ -2004,24 +2004,25 @@ TEST(IntegrationTests, SelectMaskFromCondition) {
     ir.load_param(c_ptr, offsetof(select_mask_args_t, c));
 
     const vreg_t a = ir.new_vec(data_type::f32);
-    ir.vload(a, a_ptr, 0);
+    ir.vload(a, a_ptr, 0, data_type::f32);
     const vreg_t b = ir.new_vec(data_type::f32);
-    ir.vload(b, b_ptr, 0);
+    ir.vload(b, b_ptr, 0, data_type::f32);
     const vreg_t cond = ir.new_vec(data_type::s32);
-    ir.vload(cond, cond_ptr, 0);
+    ir.vload(cond, cond_ptr, 0, data_type::s32);
 
     // mask lanes = (cond != 0); a = mask ? b : a  ->  lane = cond ? b : a.
     const vreg_t mask = ir.new_vec(data_type::s32);
     ir.vcmp_ne_zero(mask, cond);
     ir.vblend(a, b, mask);
-    ir.vstore_masked(c_ptr, 0, a, vreg_t::none, simd_w);
+    ir.vstore(c_ptr, 0, a, data_type::f32);
 
     ir_kernel_t kernel(ir);
     ASSERT_TRUE(kernel.run_ir_pipeline());
 
-    std::vector<float> a_data(simd_w), b_data(simd_w), c(simd_w, -12345.f);
-    std::vector<int32_t> cond_data(simd_w);
-    for (int i = 0; i < simd_w; i++) {
+    std::vector<float> a_data(simd_w()), b_data(simd_w()),
+            c(simd_w(), -12345.f);
+    std::vector<int32_t> cond_data(simd_w());
+    for (int i = 0; i < simd_w(); i++) {
         a_data[i] = (float)(10 + i);
         b_data[i] = (float)(100 + i);
         // Mix zero and nonzero (including a negative) condition lanes.
@@ -2032,7 +2033,7 @@ TEST(IntegrationTests, SelectMaskFromCondition) {
             a_data.data(), b_data.data(), cond_data.data(), c.data()};
     kernel.run(&args);
 
-    for (int i = 0; i < simd_w; i++) {
+    for (int i = 0; i < simd_w(); i++) {
         const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
         EXPECT_FLOAT_EQ(c[i], expected) << "lane " << i;
     }
@@ -2055,7 +2056,7 @@ struct load_u8_args_t {
 TEST(IntegrationTests, LoadU8SelectMask) {
     SKIP_IF_NO_AVX2();
 
-    const int tail = simd_w - 3;
+    const int tail = simd_w() - 3;
 
     ir_t ir;
     const vreg_t cond_ptr = ir.new_gpr();
@@ -2069,15 +2070,15 @@ TEST(IntegrationTests, LoadU8SelectMask) {
 
     // Full block: widen bytes -> integer lanes -> mask -> select.
     const vreg_t cond = ir.new_vec(data_type::s32);
-    ir.vload_u8(cond, cond_ptr, 0, simd_w);
+    ir.vload_u8(cond, cond_ptr, 0, simd_w());
     const vreg_t mask = ir.new_vec(data_type::s32);
     ir.vcmp_ne_zero(mask, cond);
     const vreg_t a = ir.new_vec(data_type::f32);
-    ir.vload(a, a_ptr, 0);
+    ir.vload(a, a_ptr, 0, data_type::f32);
     const vreg_t b = ir.new_vec(data_type::f32);
-    ir.vload(b, b_ptr, 0);
+    ir.vload(b, b_ptr, 0, data_type::f32);
     ir.vblend(a, b, mask); // a = cond ? b : a
-    ir.vstore_masked(dst_ptr, 0, a, vreg_t::none, simd_w);
+    ir.vstore(dst_ptr, 0, a, data_type::f32);
 
     // Tail block: the tail bytes are packed one at a time by the load; lanes
     // past the tail widen to zero and are dropped by the masked store.
@@ -2086,43 +2087,43 @@ TEST(IntegrationTests, LoadU8SelectMask) {
     const vreg_t maskt = ir.new_vec(data_type::s32);
     ir.vcmp_ne_zero(maskt, condt);
     const vreg_t at = ir.new_vec(data_type::f32);
-    ir.vload(at, a_ptr, 0);
+    ir.vload(at, a_ptr, 0, data_type::f32);
     const vreg_t bt = ir.new_vec(data_type::f32);
-    ir.vload(bt, b_ptr, 0);
+    ir.vload(bt, b_ptr, 0, data_type::f32);
     ir.vblend(at, bt, maskt);
     const vreg_t tail_mask = ir.new_mask();
     ir.set_mask_imm(tail_mask, tail);
-    ir.vstore_masked(
-            dst_ptr, simd_w * (dim_t)sizeof(float), at, tail_mask, tail);
+    ir.vstore_masked(dst_ptr, simd_w() * (dim_t)sizeof(float), at, tail_mask,
+            data_type::f32);
 
     ir_kernel_t kernel(ir);
     ASSERT_TRUE(kernel.run_ir_pipeline());
 
-    std::vector<uint8_t> cond_data(simd_w);
-    std::vector<float> a_data(simd_w), b_data(simd_w);
-    for (int i = 0; i < simd_w; i++) {
+    std::vector<uint8_t> cond_data(simd_w());
+    std::vector<float> a_data(simd_w()), b_data(simd_w());
+    for (int i = 0; i < simd_w(); i++) {
         // Mix zero and nonzero bytes, including values > 127.
         cond_data[i] = (i % 3 == 0) ? 0 : (uint8_t)(30 + i * 25);
         a_data[i] = (float)(10 + i);
         b_data[i] = (float)(100 + i);
     }
-    std::vector<float> dst(2 * simd_w, -12345.f);
+    std::vector<float> dst(2 * simd_w(), -12345.f);
 
     load_u8_args_t args {
             cond_data.data(), a_data.data(), b_data.data(), dst.data()};
     kernel.run(&args);
 
-    for (int i = 0; i < simd_w; i++) {
+    for (int i = 0; i < simd_w(); i++) {
         const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
         EXPECT_FLOAT_EQ(dst[i], expected) << "full lane " << i;
     }
     for (int i = 0; i < tail; i++) {
         const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
-        EXPECT_FLOAT_EQ(dst[simd_w + i], expected) << "tail lane " << i;
+        EXPECT_FLOAT_EQ(dst[simd_w() + i], expected) << "tail lane " << i;
     }
     // Lanes past the tail must be left untouched by the masked store.
-    for (int i = tail; i < simd_w; i++)
-        EXPECT_FLOAT_EQ(dst[simd_w + i], -12345.f) << "tail pad lane " << i;
+    for (int i = tail; i < simd_w(); i++)
+        EXPECT_FLOAT_EQ(dst[simd_w() + i], -12345.f) << "tail pad lane " << i;
 }
 
 } // namespace dnnl

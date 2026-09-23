@@ -157,14 +157,12 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
 
         // Broadcast the scalar inputs so scalar arithmetic reuses vector ops.
         const vreg_t scale_bc = ir.new_vec(data_type::f32);
-        ir.vload_masked(scale_bc, scale_ptr, 0, vreg_t::none, 1);
-        ir.vbcast(scale_bc, scale_bc);
+        ir.vload_bcast(scale_bc, scale_ptr, 0, data_type::f32);
 
         vreg_t fill_bc = vreg_t::none;
         if (has_select) {
             fill_bc = ir.new_vec(data_type::f32);
-            ir.vload_masked(fill_bc, fill_ptr, 0, vreg_t::none, 1);
-            ir.vbcast(fill_bc, fill_bc);
+            ir.vload_bcast(fill_bc, fill_ptr, 0, data_type::f32);
         }
 
         // Apply the select mask to one scaled block of `n` elements at byte
@@ -174,7 +172,7 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
             if (!has_select) return blk;
             const vreg_t cond = ir.new_vec(data_type::s32);
             ir.vload_u8(cond, cond_ptr, cond_off, n);
-            const vreg_t cmask = ir.new_vec(data_type::s32);
+            const vreg_t cmask = ir.new_mask();
             ir.vcmp_ne_zero(cmask, cond);
             if (fusiable) {
                 // Keep the score where cond != 0: cmask ? score : fill.
@@ -189,12 +187,10 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         };
 
         const vreg_t m_old = ir.new_vec(data_type::f32);
-        ir.vload_masked(m_old, m_ptr, 0, vreg_t::none, 1);
-        ir.vbcast(m_old, m_old);
+        ir.vload_bcast(m_old, m_ptr, 0, data_type::f32);
 
         const vreg_t l_old = ir.new_vec(data_type::f32);
-        ir.vload_masked(l_old, l_ptr, 0, vreg_t::none, 1);
-        ir.vbcast(l_old, l_old);
+        ir.vload_bcast(l_old, l_ptr, 0, data_type::f32);
 
         // Pass 1: scale each block, store it back, and fold it into the running
         // max (seeded with m_old so the reduction yields m_new directly).
@@ -202,18 +198,18 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         ir.vbcast(rmax, m_old);
         for (int b = 0; b < n_blk; b++) {
             vreg_t blk = ir.new_vec(data_type::f32);
-            ir.vload(blk, sc_ptr, b * vbytes);
+            ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
             ir.vmul(blk, scale_bc);
             blk = apply_select(blk, (dim_t)b * simd_w, simd_w);
-            ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
+            ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
             ir.vmax(rmax, blk);
         }
         if (tail) {
             vreg_t blk = ir.new_vec(data_type::f32);
-            ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
+            ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
             ir.vmul(blk, scale_bc);
             blk = apply_select(blk, (dim_t)n_blk * simd_w, tail);
-            ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
+            ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
             // Unused lanes take m_old so they never win the max.
             const vreg_t tmax = ir.new_vec(data_type::f32);
             ir.vbcast(tmax, m_old);
@@ -235,18 +231,18 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         ir.vzero(rsum);
         for (int b = 0; b < n_blk; b++) {
             const vreg_t blk = ir.new_vec(data_type::f32);
-            ir.vload(blk, sc_ptr, b * vbytes);
+            ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
             ir.vsub(blk, m_new);
             ir.vexp(blk);
-            ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
+            ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
             ir.vadd(rsum, blk);
         }
         if (tail) {
             const vreg_t blk = ir.new_vec(data_type::f32);
-            ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
+            ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
             ir.vsub(blk, m_new);
             ir.vexp(blk);
-            ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
+            ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
             // Unused lanes take 0 so they add nothing to the denominator.
             const vreg_t tsum = ir.new_vec(data_type::f32);
             ir.vzero(tsum);
@@ -273,21 +269,21 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         // Pass 3: normalize P by the running denominator.
         for (int b = 0; b < n_blk; b++) {
             const vreg_t blk = ir.new_vec(data_type::f32);
-            ir.vload(blk, sc_ptr, b * vbytes);
+            ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
             ir.vdiv(blk, l_new);
-            ir.vstore_masked(sc_ptr, b * vbytes, blk, vreg_t::none, simd_w);
+            ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
         }
         if (tail) {
             const vreg_t blk = ir.new_vec(data_type::f32);
-            ir.vload_masked(blk, sc_ptr, tail_off, mask, tail);
+            ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
             ir.vdiv(blk, l_new);
-            ir.vstore_masked(sc_ptr, tail_off, blk, mask, tail);
+            ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
         }
 
         // Write back this row's scalar running state (lane 0).
-        ir.vstore_masked(m_ptr, 0, m_new, vreg_t::none, 1);
-        ir.vstore_masked(l_ptr, 0, l_new, vreg_t::none, 1);
-        ir.vstore_masked(oc_ptr, 0, old_coef, vreg_t::none, 1);
+        ir.vstore_scalar(m_ptr, 0, m_new, data_type::f32);
+        ir.vstore_scalar(l_ptr, 0, l_new, data_type::f32);
+        ir.vstore_scalar(oc_ptr, 0, old_coef, data_type::f32);
     };
 
     // Advance every row pointer to the next row.
@@ -340,26 +336,26 @@ inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
     // acc = old_coef*acc + pv for the single row at the current pointers.
     auto row_body = [&]() {
         const vreg_t oc_bc = ir.new_vec(data_type::f32);
-        ir.vload_masked(oc_bc, oc_ptr, 0, vreg_t::none, 1);
-        ir.vbcast(oc_bc, oc_bc);
+        ir.vload_bcast(oc_bc, oc_ptr, 0, data_type::f32);
+        //ir.vbcast(oc_bc, oc_bc);
 
         for (int b = 0; b < n_blk; b++) {
             const vreg_t acc = ir.new_vec(data_type::f32);
-            ir.vload(acc, acc_ptr, b * vbytes);
+            ir.vload(acc, acc_ptr, b * vbytes, data_type::f32);
             ir.vmul(acc, oc_bc);
             const vreg_t pv = ir.new_vec(data_type::f32);
-            ir.vload(pv, pv_ptr, b * vbytes);
+            ir.vload(pv, pv_ptr, b * vbytes, data_type::f32);
             ir.vadd(acc, pv);
-            ir.vstore_masked(acc_ptr, b * vbytes, acc, vreg_t::none, simd_w);
+            ir.vstore(acc_ptr, b * vbytes, acc, data_type::f32);
         }
         if (tail) {
             const vreg_t acc = ir.new_vec(data_type::f32);
-            ir.vload_masked(acc, acc_ptr, tail_off, mask, tail);
+            ir.vload_masked(acc, acc_ptr, tail_off, mask, data_type::f32);
             ir.vmul(acc, oc_bc);
             const vreg_t pv = ir.new_vec(data_type::f32);
-            ir.vload_masked(pv, pv_ptr, tail_off, mask, tail);
+            ir.vload_masked(pv, pv_ptr, tail_off, mask, data_type::f32);
             ir.vadd(acc, pv);
-            ir.vstore_masked(acc_ptr, tail_off, acc, mask, tail);
+            ir.vstore_masked(acc_ptr, tail_off, acc, mask, data_type::f32);
         }
     };
 
@@ -379,7 +375,6 @@ inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
 // registers, wire an eltwise injector per algorithm the IR uses (softmax needs
 // exp), emit code, and finalize. Construct with an IR from one of the builders
 // above, call create_kernel(), then invoke via operator()(const args_t *).
-// Only AVX2 is supported today; the emitter picks the lowering by that ISA.
 class softmax_ir_kernel_t : public jit_generator_t {
 public:
     softmax_ir_kernel_t(ir_t ir)
@@ -397,10 +392,11 @@ protected:
         // not part of the register pool.
         const int gpr_scratch0 = 10, gpr_scratch1 = 11;
         const int vec_scratch0 = 13, vec_scratch1 = 14, vec_scratch2 = 15;
+        const int exp_opmask = 1;
 
         const reg_config_t reg_cfg = make_reg_config(avx2, param_idx, rsp_idx,
                 {gpr_scratch0, gpr_scratch1},
-                {vec_scratch0, vec_scratch1, vec_scratch2});
+                {vec_scratch0, vec_scratch1, vec_scratch2}, {exp_opmask});
 
         const reg_alloc_result_t alloc = allocate_registers(ir_, reg_cfg.pools);
 
@@ -433,7 +429,7 @@ protected:
         if (frame > 0) sub(rsp, frame);
 
         // This epilogue has no attribute post-ops, so no post-ops injector.
-        inject_postops_fn_t emit_injector;
+        postops_injector_t *emit_injector = nullptr;
         data_section_t data;
         emit(*this, ir_, alloc, reg_cfg, data, emit_injector, emit_eltwise);
 
