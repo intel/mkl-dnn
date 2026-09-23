@@ -1039,9 +1039,8 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     conf.remainder_q = d_full && q_full;
 
     conf.block_q = conf.block_a = conf.block_2d_a = false;
-    const bool fp8_qry = (desc()->qry_md()->data_type == data_type::f8_e4m3);
     if (d_full) {
-        conf.block_q = (ldq % 4 == 0) && !fp8_qry;
+        conf.block_q = (ldq % 4 == 0);
         conf.block_a = (lda % 4 == 0 && v_full);
     } else if (arch() >= compute::gpu_arch_t::xe_hpc
             && config.unroll_m_vs < 64) {

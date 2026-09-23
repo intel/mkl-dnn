@@ -1369,9 +1369,8 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
         tile_store_block2d(t, ptr, m, n, m, offset_r, offset_c); \
     }
 
-/* Packs vlen elements per dword; cvt = as_native_layout for a plain load */
-#define DECLARE_2D_TILE_LOAD_PACKED_VEC( \
-        tile_type, element_type, vec_type, cvt, vlen, sg, br, bc, nbr, nbc) \
+#define DECLARE_2D_TILE_LOAD_PACKED_VEC(tile_type, element_type, vec_type, \
+        pack_as, vlen, sg, br, bc, nbr, nbc) \
     __attribute__((overloadable)) void tile_load_packed_vec(tile_type *t, \
             const global element_type *ptr, int m, int n, int ld, \
             int offset_r, int offset_c) { \
@@ -1384,8 +1383,8 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
                     _Pragma("unroll") for (int e = 0; e < (vlen); \
                                            e++) if (offset_r + i + e < m) \
                             loaded[e] \
-                            = cvt(ptr[i + e]); \
-                    tile_access(*t, i0, j, sg, br, bc, nbr) = as_uint(loaded); \
+                            = ptr[i + e]; \
+                    tile_access(*t, i0, j, sg, br, bc, nbr) = pack_as(loaded); \
                 } \
             } \
         } \

@@ -184,31 +184,54 @@ DECLARE_2D_TILE(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ, 1, 1,
 
 #if BLOCK_Q
 
-#if USE_SYSTOLIC_UKERNEL
-DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, uint, SUBGROUP_SIZE,
-        D_MAX_KQ / QRY_SLM_CROSSPACK, 1, 1, q_tile_sg_n)
-#else
+#if !USE_SYSTOLIC_UKERNEL
 DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ,
         1, 1, q_tile_sg_n)
+#elif !defined(QRY_DT_HF8) || QRY_SLM_FP8
+DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, uint, SUBGROUP_SIZE,
+        D_MAX_KQ / QRY_SLM_CROSSPACK, 1, 1, q_tile_sg_n)
 #endif
 
 #elif Q_ALIGN < 4
 
 #if USE_SYSTOLIC_UKERNEL && !defined(QRY_DT_HF8)
 DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, qry_tile_data_t, VEC_TYPE2,
-        as_native_layout, 2, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+        as_uint, 2, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
 #endif
 
 #endif
 
 #if defined(QRY_DT_HF8) && USE_SYSTOLIC_UKERNEL
+
 #if QRY_SLM_FP8
-DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, QRY_DATA_T, uchar4,
-        as_native_layout, 4, SUBGROUP_SIZE, D_MAX_KQ / 4, 1, 1, q_tile_sg_n)
-#else
-DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, QRY_DATA_T, VEC_TYPE2, into_half,
-        2, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+
+#if !BLOCK_Q
+DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, uchar, uchar4, as_uint, 4,
+        SUBGROUP_SIZE, D_MAX_KQ / 4, 1, 1, q_tile_sg_n)
 #endif
+
+#else
+
+/* Staged as f16: load the bytes into the layout q_tile_type wants, then widen */
+DECLARE_2D_TILE(
+        q_raw_tile_type, ushort, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+#if BLOCK_Q
+DECLARE_2D_TILE_BLOCK_OPS(
+        q_raw_tile_type, ushort, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+#else
+DECLARE_2D_TILE_LOAD_PACKED_VEC(q_raw_tile_type, uchar, uchar2, as_ushort, 2,
+        SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+#endif
+
+inline uint cvt_2f8_e4m3_to_2half(ushort packed) {
+    uchar2 raw = as_uchar2(packed);
+    half2 wide = (half2)(into_half(as_f8_e4m3(raw.s0)),
+            into_half(as_f8_e4m3(raw.s1)));
+    return as_uint(wide);
+}
+
+#endif
+
 #endif
 
 #if BLOCK_A
@@ -446,17 +469,30 @@ inline void tile_load_src1(q_tile_type *Q_tile, const global QRY_DATA_T *Q,
 
 #if USE_SYSTOLIC_UKERNEL
 
-#if defined(QRY_DT_HF8)
-    /* fp8: load bytes and convert (ldq is in elements). */
-    tile_load_packed_vec(Q_tile, Q, m, n, ldq, offset_r, offset_c);
+#if defined(QRY_DT_HF8) && !QRY_SLM_FP8
+    q_raw_tile_type Q_raw;
+    tile_fill(Q_raw, 0);
+#if BLOCK_Q
+    tile_load_block_rem_q(&Q_raw, (global ushort *)Q, n,
+            ldq / QRY_SLM_CROSSPACK, offset_r, offset_c);
+#else
+    tile_load_packed_vec(
+            &Q_raw, (const global uchar *)Q, m, n, ldq, offset_r, offset_c);
+#endif
+    tile_convert(Q_raw, (*Q_tile), cvt_2f8_e4m3_to_2half);
 #elif BLOCK_Q
-    tile_load_block_rem_q(
-            Q_tile, (global uint *)Q, n, ldq >> 1, offset_r, offset_c);
+    /* ldq is in elements and QRY_SLM_CROSSPACK of them fit one dword. */
+    tile_load_block_rem_q(Q_tile, (global uint *)Q, n, ldq / QRY_SLM_CROSSPACK,
+            offset_r, offset_c);
+#elif defined(QRY_DT_HF8)
+    tile_load_packed_vec(
+            Q_tile, (const global uchar *)Q, m, n, ldq, offset_r, offset_c);
 #elif Q_ALIGN >= 4
     tile_load(Q_tile, (global uint *)Q, (m + 1) >> 1, n, ldq >> 1, offset_r,
             offset_c);
 #else
-    tile_load_packed_vec(Q_tile, Q, m, n, ldq, offset_r, offset_c);
+    tile_load_packed_vec(Q_tile, (const global qry_tile_data_t *)Q, m, n, ldq,
+            offset_r, offset_c);
 #endif
 
 #else // FMA
