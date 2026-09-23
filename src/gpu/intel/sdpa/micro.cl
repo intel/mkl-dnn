@@ -82,8 +82,12 @@ typedef qry_tile_data_t fma_tile_data_t;
 #endif
 
 #if VS_S_QUANT && !VS_S_FP8
+#if VS_S_UKERNEL_CVT
+#define CONVERT_TILE_S_QUANT_T(v) as_native_layout(into_half(SCALE_PROBS(v)))
+#else
 #define CONVERT_TILE_S_QUANT_T(v) \
     as_native_layout(into_half(into_f8_e4m3(SCALE_PROBS(v))))
+#endif
 #endif
 
 #if defined(QRY_DT_HF8)

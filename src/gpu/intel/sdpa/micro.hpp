@@ -105,7 +105,8 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     bool q_slm_fp8;
     bool pv_fp8;
     bool quantize_probs;
-    uint8_t padding3[6] = {0};
+    bool pv_ukernel_cvt;
+    uint8_t padding3[5] = {0};
 
     micro_fwd_ukernel_params_t ukernel_config;
 };
@@ -476,6 +477,14 @@ struct micro_fwd_t : public primitive_t {
                     && d_max_kq() >= 4 * sg_size_;
         }
 
+        bool pv_fp8_capable() const {
+            return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
+                    && desc()->qry_md()->data_type == data_type::f8_e4m3
+                    && desc()->val_md()->data_type == data_type::f8_e4m3;
+        }
+
+        bool pv_ukernel_rounding() const { return pv_ukernel_rounding_; }
+
         bool quantize_probs() const {
             return use_systolic_ukernel_
                     && desc()->qry_md()->data_type == data_type::f8_e4m3
@@ -483,9 +492,7 @@ struct micro_fwd_t : public primitive_t {
         }
 
         bool pv_fp8() const {
-            return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
-                    && desc()->qry_md()->data_type == data_type::f8_e4m3
-                    && desc()->val_md()->data_type == data_type::f8_e4m3;
+            return pv_fp8_capable() && !pv_ukernel_rounding_;
         }
 
         // Block size for the Q/K head dim, baked into the kernel.
@@ -511,6 +518,7 @@ struct micro_fwd_t : public primitive_t {
     private:
         int sg_size_ = 0;
         bool use_systolic_ukernel_ = true;
+        bool pv_ukernel_rounding_ = false;
         compute::gpu_arch_t arch_ = compute::gpu_arch_t::unknown;
 
         status_t init_conf_microkernels(const impl::engine_t *engine);

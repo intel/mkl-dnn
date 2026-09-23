@@ -271,6 +271,7 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
             hw_info.gmdid != 0, "gmdid is 0, microkernels not supported.");
 
     ukernel_params.hwinfo = {hw_info};
+    pv_ukernel_rounding_ = pv_fp8_capable();
 
     auto convert_dnnl_to_kernel_layout = [](const memory_desc_t *md) {
         return (gemm_desc_t::get_trans(*md) == dnnl_trans) ? MatrixLayout::T
@@ -403,7 +404,12 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     auto problem_vs = std::move(problem);
     problem_vs.Tc = problem_vs.Ts
             = (vs_acc_dt() == data_type::f16) ? Type::f16 : Type::f32;
-    if (pv_fp8()) {
+    if (pv_ukernel_rounding()) {
+        // let ukernel round f16 -> hf8 natively
+        problem_vs.Ta = Type::hf8;
+        problem_vs.Tb = Type::hf8;
+        problem_vs.Tb_ext = Type::f16;
+    } else if (pv_fp8()) {
         problem_vs.Ta = Type::hf8;
         problem_vs.Tb = problem_vs.Tb_ext = Type::hf8;
     } else if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
@@ -917,6 +923,7 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     conf.d_max_v = d_max_v();
     conf.q_slm_fp8 = q_slm_fp8();
     conf.pv_fp8 = pv_fp8();
+    conf.pv_ukernel_cvt = pv_ukernel_rounding();
     conf.quantize_probs = quantize_probs();
 
     conf.require_stateless_addressing = has_large_buffers();
@@ -1189,6 +1196,7 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     kernel_ctx.define_int("QRY_SLM_FP8", q_slm_fp8);
     kernel_ctx.define_int("VS_S_FP8", pv_fp8);
     kernel_ctx.define_int("VS_S_QUANT", quantize_probs);
+    kernel_ctx.define_int("VS_S_UKERNEL_CVT", pv_ukernel_cvt);
 
     def_data_type(kernel_ctx, qry_scales_data_t, "QRY_ATTR_SCALES");
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");
