@@ -123,51 +123,25 @@ uchar __attribute__((overloadable)) cvt_f32_to_e8m0(float f) {
 #if MATH_UTILS_DECLARE_HF8
 // Emulation functions for f8_e4m3 <-> f16 conversion.
 uchar __attribute__((overloadable)) cvt_hf_to_f8_e4m3(half f) {
-    // Here the idea is to add a large constant to the float16_t to force the
-    // proper rounding to f8_e4m3 accuracy.
-    uchar raw_bits = 0;
-    ushort fraw = as_ushort(f);
+    const ushort xraw = as_ushort(f);
+    const ushort a = xraw & 0x7fff; // |f|
 
-    // first we extract the sign and make the input positive
-    uint s8 = (fraw & 0x8000) >> 8;
-    fraw = fraw & 0x7fff;
+    // 2^-8 aligns the f16 and f8_e4m3 exponent fields
+    const ushort t = as_ushort(as_half(a) * as_half((ushort)0x1c00));
+    // round to nearest even; the code ends up in the top byte
+    ushort u = (ushort)(t - 0x40);
+    u = (ushort)((u << 1) + (((u & 0xff) != 0) ? 0x100 : 0));
+    ushort raw_bits = (ushort)((u >> 8) & 0x7f);
 
-    // we filter out overlow, nan
-    if (fraw > 0x5f40) {
-        raw_bits = s8 | 0x7f;
-        return raw_bits;
-    }
-    // we filter out underflow when f <= 2^-10
-    if (fraw <= 0x1400) {
-        raw_bits = s8;
-        return raw_bits;
-    }
+    // adding 2.0 rounds to a multiple of 2^-9 and leaves the code in the
+    // mantissa; masking 4 bits keeps a carry into the smallest normal
+    const ushort denorm = as_ushort(as_half(a) + as_half((ushort)0x4000)) & 0xf;
 
-    // compute the rounding shifter by taking its exponent + 0x1p7
-    // Lucky us, it does not overflow as fraw <= 448.
-    ushort a = 0x7c00, b = 0x1c00;
-    ushort shifter = (fraw & a) + b;
-    // e8 = e16 - e16_bias + e8_bias = e16 - 15 + 7
-    // e8 will be denorm if e8 <= 0 or e16 + 7 < 16
-    const int exp_threshold = 0x4000; // raw bits of exponent = 16
-    bool is_denorm = shifter < exp_threshold;
-    if (is_denorm) shifter = exp_threshold;
+    raw_bits = (a < 0x2400) ? denorm : raw_bits; // denorm, f < 2^-6
+    raw_bits = (a > 0x5f40) ? (ushort)0x7f : raw_bits; // overflow, nan
+    raw_bits = (a <= 0x1400) ? (ushort)0 : raw_bits; // underflow, f <= 2^-10
 
-    ushort rounded
-            = as_ushort((as_half(fraw) + as_half(shifter)) - as_half(shifter));
-
-    int e8 = ((rounded & 0x7c00) >> 10) - 8;
-    uchar m8 = (rounded & 0x03ff) >> 7;
-
-    // we need to make the implicit f32 mantissa bit explicit for
-    // denorm f8_e4m3
-    if (is_denorm) {
-        m8 = (m8 | 0x08) >> (-e8 + 1);
-        e8 = 0;
-    }
-
-    raw_bits = s8 | (e8 << 3) | m8;
-    return raw_bits;
+    return (uchar)(((xraw >> 8) & 0x80) | raw_bits);
 }
 
 uchar2 __attribute__((overloadable)) cvt_hf_to_f8_e4m3(half2 f) {
@@ -203,33 +177,19 @@ uchar16 __attribute__((overloadable)) cvt_hf_to_f8_e4m3(half16 f) {
 }
 
 half __attribute__((overloadable)) cvt_f8_e4m3_to_hf(uchar b) {
-    uchar raw_bits_ = b;
-    ushort s8 = (raw_bits_ & 0x80) >> 7;
-    ushort e8 = (raw_bits_ & 0x78) >> 3;
-    ushort m8 = (raw_bits_ & 0x7);
-    ushort s16 = s8;
-    ushort e16 = e8 + 8; /* 15 - 7 = e16_bias - e8_bias */
-    ushort m16 = m8;
+    const ushort c = (ushort)(b & 0x7f);
+    const ushort s16 = (ushort)((b & 0x80) << 8);
 
-    // Need to convert f8_e4m3 denormal into f16 normal.
-    if (e8 == 0 && m8 != 0) {
-        ushort count = 2;
-        count = m8 > 0x1 ? 1 : count;
-        count = m8 > 0x3 ? 0 : count;
-        e16 -= count;
-        m16 = (m16 << (count + 1)) & 0x7;
-    } else if (e8 == 0 && m8 == 0) {
-        e16 = 0;
-    } else if (e8 == 0xf && m8 == 0x7) {
-        e16 = 0x1f;
-        m16 = 0x4; // Real Indefinite (a qNaN)
-    }
-    s16 <<= 15;
-    e16 <<= 10;
-    m16 <<= 7;
+    // shift both fields into place and add the bias difference, 15 - 7 = 8
+    const ushort normal = (ushort)((c << 7) + 0x2000);
+    // code < 8 is the denormal c * 2^-9; via 2.0 so operands stay normal
+    const ushort denorm = as_ushort(
+            as_half((ushort)(0x4000 | c)) - as_half((ushort)0x4000));
 
-    ushort u16 = s16 | e16 | m16;
-    return as_half(u16);
+    ushort u16 = (c < 8) ? denorm : normal;
+    u16 = (c == 0x7f) ? (ushort)0x7e00 : u16; // Real Indefinite (a qNaN)
+
+    return as_half((ushort)(s16 | u16));
 }
 
 half2 __attribute__((overloadable)) cvt_f8_e4m3_to_hf(uchar2 b) {
