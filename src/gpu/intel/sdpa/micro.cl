@@ -196,18 +196,18 @@ DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ,
 
 #if USE_SYSTOLIC_UKERNEL && !defined(QRY_DT_HF8)
 DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, qry_tile_data_t, VEC_TYPE2,
-        SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+        as_native_layout, 2, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
 #endif
 
 #endif
 
 #if defined(QRY_DT_HF8) && USE_SYSTOLIC_UKERNEL
 #if QRY_SLM_FP8
-DECLARE_2D_TILE_LOAD_PACKED_VEC4_CVT(q_tile_type, QRY_DATA_T, uchar4,
-        as_native_layout, SUBGROUP_SIZE, D_MAX_KQ / 4, 1, 1, q_tile_sg_n)
+DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, QRY_DATA_T, uchar4,
+        as_native_layout, 4, SUBGROUP_SIZE, D_MAX_KQ / 4, 1, 1, q_tile_sg_n)
 #else
-DECLARE_2D_TILE_LOAD_PACKED_VEC_CVT(q_tile_type, QRY_DATA_T, VEC_TYPE2,
-        into_half, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
+DECLARE_2D_TILE_LOAD_PACKED_VEC(q_tile_type, QRY_DATA_T, VEC_TYPE2, into_half,
+        2, SUBGROUP_SIZE, D_MAX_KQ / 2, 1, 1, q_tile_sg_n)
 #endif
 #endif
 
@@ -447,12 +447,8 @@ inline void tile_load_src1(q_tile_type *Q_tile, const global QRY_DATA_T *Q,
 #if USE_SYSTOLIC_UKERNEL
 
 #if defined(QRY_DT_HF8)
-    /* fp8: load bytes and convert to f16 (ldq is in elements). */
-#if QRY_SLM_FP8
-    tile_load_packed_vec4_cvt(Q_tile, Q, m, n, ldq, offset_r, offset_c);
-#else
-    tile_load_packed_vec2_cvt(Q_tile, Q, m, n, ldq, offset_r, offset_c);
-#endif
+    /* fp8: load bytes and convert (ldq is in elements). */
+    tile_load_packed_vec(Q_tile, Q, m, n, ldq, offset_r, offset_c);
 #elif BLOCK_Q
     tile_load_block_rem_q(
             Q_tile, (global uint *)Q, n, ldq >> 1, offset_r, offset_c);
@@ -460,7 +456,7 @@ inline void tile_load_src1(q_tile_type *Q_tile, const global QRY_DATA_T *Q,
     tile_load(Q_tile, (global uint *)Q, (m + 1) >> 1, n, ldq >> 1, offset_r,
             offset_c);
 #else
-    tile_load_packed_vec2(Q_tile, Q, m, n, ldq, offset_r, offset_c);
+    tile_load_packed_vec(Q_tile, Q, m, n, ldq, offset_r, offset_c);
 #endif
 
 #else // FMA
@@ -988,19 +984,19 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
 #if USE_SYSTOLIC_UKERNEL
         s_tile_type_packed S_tile_packed;
 #if VS_S_FP8
-        tile_copy_to_vec4_cvt(
-                S_tile, S_tile_packed, uchar4, CONVERT_TILE_S_FP8_T);
+        tile_copy_to_vec_cvt(
+                S_tile, S_tile_packed, uchar4, CONVERT_TILE_S_FP8_T, 4);
         tile_store_t_sys_src2(S_tile_packed, (local uint *)S_slm,
                 ugemm_vs_sg_tile_n, ugemm_kq_wg_tile_m / 4, sg_i0_kq / 4,
                 sg_j0_kq, 8);
 #else
         /* Convert to half or bf16, VNNI format */
 #if VS_S_QUANT
-        tile_copy_to_vec2_cvt(
-                S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_S_QUANT_T);
+        tile_copy_to_vec_cvt(
+                S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_S_QUANT_T, 2);
 #else
-        tile_copy_to_vec2_cvt(
-                S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T);
+        tile_copy_to_vec_cvt(
+                S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T, 2);
 #endif
 
         /* Store to SLM, in packed format */

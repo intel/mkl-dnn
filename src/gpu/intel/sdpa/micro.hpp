@@ -220,14 +220,9 @@ struct micro_fwd_t : public primitive_t {
                 VDISPATCH_SDPA(desc()->attn_mask_md()->dims[mask_k_index]
                                 == desc()->keys(),
                         VERBOSE_INVALID_BROADCAST, "attn_mask", mask_k_index);
-                if (desc()->qry_md()->data_type == data_type::f32) {
-                    VDISPATCH_SDPA(desc()->attn_mask_md()->data_type
-                                    == desc()->qry_md()->data_type,
-                            "Mask data type(%s) should match Qry/Dst data "
-                            "type(%s).",
-                            dnnl_dt2str(desc()->attn_mask_md()->data_type),
-                            dnnl_dt2str(desc()->qry_md()->data_type));
-                } else if (desc()->qry_md()->data_type == f8_e4m3) {
+                if (desc()->qry_md()->data_type == f8_e4m3) {
+                    // an fp8 query still takes an xf16 mask, so the mask is
+                    // not required to match it
                     VDISPATCH_SDPA(
                             utils::one_of(desc()->attn_mask_md()->data_type,
                                     data_type::f16, data_type::bf16,
@@ -240,8 +235,8 @@ struct micro_fwd_t : public primitive_t {
                                            == desc()->qry_md()->data_type)
                                     || (desc()->attn_mask_md()->data_type
                                             == data_type::f32),
-                            "Mask data type(%s) should be xf16 or f32 when "
-                            "Qry/Dst(%s) is xf16.",
+                            "Mask data type(%s) should be f32 or match "
+                            "Qry/Dst data type(%s).",
                             dnnl_dt2str(desc()->attn_mask_md()->data_type),
                             dnnl_dt2str(desc()->qry_md()->data_type));
                 }
@@ -472,6 +467,9 @@ struct micro_fwd_t : public primitive_t {
         bool use_systolic_ukernel() const { return use_systolic_ukernel_; }
 
         bool q_slm_fp8() const {
+            // The fp8 Q tile is declared with br = D_MAX_KQ / 4, and
+            // DECLARE_2D_TILE asserts br * bc / sg is a power of two, so the
+            // head dim block has to cover at least 4 subgroups' worth.
             return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
                     && desc()->qry_md()->data_type == data_type::f8_e4m3
                     && d_max_kq() >= 4 * sg_size_;

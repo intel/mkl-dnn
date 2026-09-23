@@ -367,7 +367,8 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     problem_kq.A.setAlignment(k_align);
     problem_kq.B.setAlignment(64); // Q is packed in VNNI format in SLM
     if (use_systolic_ukernel()) {
-        problem_kq.B.crosspack = q_slm_fp8() ? 4 : 2;
+        // VNNI: 4 bytes of Q per channel
+        problem_kq.B.crosspack = into<uint8_t>(4 / problem_kq.Tb);
         problem_kq.B.tileR = into<uint16_t>(d_max());
         problem_kq.B.tileC = into<uint16_t>(sg_size());
     }
@@ -454,7 +455,11 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
             gemm_desc_t::get_ld(*desc()->val_md()) * val_mdw.data_type_size());
     problem_vs.A.setAlignment(alignment_for_md(val_mdw, ldv));
     problem_vs.B.setAlignment(64); // S is packed in SLM
-    if (use_systolic_ukernel()) { problem_vs.B.crosspack = pv_fp8() ? 32 : 16; }
+    // S is staged as Tb_ext, and the systolic op consumes ksys = 32 / Tb_ext
+    // elements of it per channel
+    if (use_systolic_ukernel()) {
+        problem_vs.B.crosspack = into<uint8_t>(32 / problem_vs.Tb_ext);
+    }
 
     ukernel_params.problem_vs = {problem_vs};
 
