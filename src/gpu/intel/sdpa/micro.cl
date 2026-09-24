@@ -49,6 +49,8 @@ typedef NATIVE_LAYOUT_TYPE(QRY_DATA_T) qry_tile_data_t;
 #endif
 #endif
 
+#define D_MAX_KQ_PADDED MAX(D_MAX_KQ, QRY_SLM_CROSSPACK *SUBGROUP_SIZE)
+
 #ifdef QRY_DT_HF8
 #define FMA_DATA_T half
 typedef half fma_tile_data_t;
@@ -175,8 +177,8 @@ inline void apply_dropout_s_tile(
 #endif
 
 #if USE_SYSTOLIC_UKERNEL
-DECLARE_2D_TILE(q_tile_type, uint, SUBGROUP_SIZE, D_MAX_KQ / QRY_SLM_CROSSPACK,
-        1, 1, q_tile_sg_n)
+DECLARE_2D_TILE(q_tile_type, uint, SUBGROUP_SIZE,
+        D_MAX_KQ_PADDED / QRY_SLM_CROSSPACK, 1, 1, q_tile_sg_n)
 #else
 DECLARE_2D_TILE(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ, 1, 1,
         q_tile_sg_n)
@@ -189,7 +191,7 @@ DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, qry_tile_data_t, SUBGROUP_SIZE, D_MAX_KQ,
         1, 1, q_tile_sg_n)
 #elif !defined(QRY_DT_HF8) || QRY_SLM_FP8
 DECLARE_2D_TILE_BLOCK_OPS(q_tile_type, uint, SUBGROUP_SIZE,
-        D_MAX_KQ / QRY_SLM_CROSSPACK, 1, 1, q_tile_sg_n)
+        D_MAX_KQ_PADDED / QRY_SLM_CROSSPACK, 1, 1, q_tile_sg_n)
 #endif
 
 #elif Q_ALIGN < 4
@@ -624,7 +626,8 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
     /* SLM allocations -- place in one array to work around compiler bug */
     /* Q is staged as QRY_SLM_DATA_T (the f16 an fp8 query is upconverted to).
      * The softmax probabilities are staged separately, as FMA_DATA_T. */
-#define Q_slm_size (D_MAX_KQ * ugemm_kq_wg_tile_n * sizeof(QRY_SLM_DATA_T))
+#define Q_slm_size \
+    (D_MAX_KQ_PADDED * ugemm_kq_wg_tile_n * sizeof(QRY_SLM_DATA_T))
 #define S_slm_size \
     (ugemm_kq_wg_tile_m * ugemm_kq_wg_tile_n * sizeof(S_SLM_DATA_T))
 #define S_sum_slm_size \
@@ -699,8 +702,8 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
         tile_load_src1(&Q_tile, Q, d_qk, q_group_size, ldq, 0, wg_j0 + q0_copy);
 
         /* Store Q tile to SLM */
-        tile_store_t_slm_src1(
-                &Q_tile, Q_slm, ugemm_kq_sg_tile_n, D_MAX_KQ, q0_copy, 0);
+        tile_store_t_slm_src1(&Q_tile, Q_slm, ugemm_kq_sg_tile_n,
+                D_MAX_KQ_PADDED, q0_copy, 0);
 
         /* Initialize S column maxima in SLM to -inf */
         for (uint c0 = sg_ij * SUBGROUP_SIZE; c0 < ugemm_kq_wg_tile_n;
@@ -870,8 +873,9 @@ micro_sdpa(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
 #else
         s_tile_type S_tile
 #endif
-                = ugemm_kq(K, ldk, Q_slm, D_MAX_KQ, k0end, ugemm_kq_wg_tile_n,
-                        d_qk, k0, 0, 0, sg_i_kq, sg_j_kq, ugemm_slm
+                = ugemm_kq(K, ldk, Q_slm, D_MAX_KQ_PADDED, k0end,
+                        ugemm_kq_wg_tile_n, d_qk, k0, 0, 0, sg_i_kq, sg_j_kq,
+                        ugemm_slm
 #if KEY_SCALES == QUANTIZE_2D
                         ,
                         K_scales

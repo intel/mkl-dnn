@@ -369,7 +369,7 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     if (use_systolic_ukernel()) {
         // VNNI: 4 bytes of Q per channel
         problem_kq.B.crosspack = into<uint8_t>(4 / problem_kq.Tb);
-        problem_kq.B.tileR = into<uint16_t>(d_max());
+        problem_kq.B.tileR = into<uint16_t>(d_max_kq_padded());
         problem_kq.B.tileC = into<uint16_t>(sg_size());
     }
 
@@ -1040,7 +1040,7 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
 
     conf.block_q = conf.block_a = conf.block_2d_a = false;
     if (d_full) {
-        conf.block_q = (ldq % 4 == 0);
+        conf.block_q = (ldq % 4 == 0) && (d_max_kq_padded() == d_max_kq());
         conf.block_a = (lda % 4 == 0 && v_full);
     } else if (arch() >= compute::gpu_arch_t::xe_hpc
             && config.unroll_m_vs < 64) {

@@ -467,12 +467,8 @@ struct micro_fwd_t : public primitive_t {
         bool use_systolic_ukernel() const { return use_systolic_ukernel_; }
 
         bool q_slm_fp8() const {
-            // The fp8 Q tile is declared with br = D_MAX_KQ / 4, and
-            // DECLARE_2D_TILE asserts br * bc / sg is a power of two, so the
-            // head dim block has to cover at least 4 subgroups' worth.
             return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
-                    && desc()->qry_md()->data_type == data_type::f8_e4m3
-                    && d_max_kq() >= 4 * sg_size_;
+                    && desc()->qry_md()->data_type == data_type::f8_e4m3;
         }
 
         bool pv_fp8_capable() const {
@@ -491,6 +487,11 @@ struct micro_fwd_t : public primitive_t {
 
         bool pv_fp8() const {
             return pv_fp8_capable() && !pv_ukernel_rounding_;
+        }
+
+        int d_max_kq_padded() const {
+            const int crosspack = q_slm_fp8() ? 4 : 2;
+            return std::max(d_max_kq(), crosspack * sg_size_);
         }
 
         // Block size for the Q/K head dim, baked into the kernel.
