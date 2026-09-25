@@ -647,9 +647,17 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     // Try exact-size LUT catalog first, then fall back to kernel catalog.
     int npat = static_cast<int>(match_params.size());
     std::vector<const kcatalog::Entry *> entries;
-    if (gpu_utils::dev_getenv("GEMM_LUT", true))
-        entries = select(lut_catalog(), npat, match_params.data(), eval_params_,
+    if (gpu_utils::dev_getenv("GEMM_LUT", true)) {
+        // LUT entries require a direct precision match: f32 -> SSS, tf32 -> TTS.
+        MatchParams lut_match = base;
+        if (fpmath_tf32 && problem.Ta_ext == Type::f32
+                && problem.Tb_ext == Type::f32) {
+            lut_match.selector.precisions[0] = "T";
+            lut_match.selector.precisions[1] = "T";
+        }
+        entries = select(lut_catalog(), 1, &lut_match, eval_params_,
                 aux_params_, &observer);
+    }
     if (entries.empty())
         entries = select(catalog(), npat, match_params.data(), eval_params_,
                 aux_params_, &observer);
