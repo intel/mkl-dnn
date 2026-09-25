@@ -50,10 +50,13 @@ namespace sdp_softmax_ir {
 
 using namespace dnnl::impl::cpu::x64::ir;
 
-// The IR framework has only an AVX2 backend today, so the builders block at
-// that ISA's vector width; a wider backend would take the isa (or its vlen) as
-// an arg.
-constexpr int simd_w = cpu_isa_traits_t<avx2>::vlen / (int)sizeof(float);
+inline cpu_isa_t isa() {
+    return mayiuse(avx512_core) ? avx512_core : avx2;
+}
+
+inline int simd_w() {
+    return isa_max_vlen(isa()) / (int)sizeof(float);
+}
 
 // Arguments for the online-softmax tile epilogue kernel. A tile of `seq_q`
 // score rows of `w` elements each is updated in place; per row, the running
@@ -110,9 +113,9 @@ struct acc_renorm_args_t {
 // < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
 inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         bool fusiable = true, int cond_row_stride = -1) {
-    const int n_blk = w / simd_w;
-    const int tail = w % simd_w;
-    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
+    const int n_blk = w / simd_w();
+    const int tail = w % simd_w();
+    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
     const dim_t tail_off = n_blk * vbytes;
     const dim_t fsz = (dim_t)sizeof(float);
     const dim_t cond_stride = cond_row_stride < 0 ? w : cond_row_stride;
@@ -200,7 +203,7 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
             vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
             ir.vmul(blk, scale_bc);
-            blk = apply_select(blk, (dim_t)b * simd_w, simd_w);
+            blk = apply_select(blk, (dim_t)b * simd_w(), simd_w());
             ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
             ir.vmax(rmax, blk);
         }
@@ -208,7 +211,7 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
             vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
             ir.vmul(blk, scale_bc);
-            blk = apply_select(blk, (dim_t)n_blk * simd_w, tail);
+            blk = apply_select(blk, (dim_t)n_blk * simd_w(), tail);
             ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
             // Unused lanes take m_old so they never win the max.
             const vreg_t tmax = ir.new_vec(data_type::f32);
@@ -310,9 +313,9 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
 // vector ops; no reduction is needed, so the tail needs no lane neutralization
 // (masked ld/st touch only the active columns).
 inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
-    const int n_blk = hs / simd_w;
-    const int tail = hs % simd_w;
-    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
+    const int n_blk = hs / simd_w();
+    const int tail = hs % simd_w();
+    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
     const dim_t tail_off = n_blk * vbytes;
     const dim_t fsz = (dim_t)sizeof(float);
 
@@ -378,7 +381,7 @@ inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
 class softmax_ir_kernel_t : public jit_generator_t {
 public:
     softmax_ir_kernel_t(ir_t ir)
-        : jit_generator_t("sdp_softmax_ir", avx2), ir_(std::move(ir)) {}
+        : jit_generator_t("sdp_softmax_ir", isa()), ir_(std::move(ir)) {}
 
     const char *name() const override { return "sdp_softmax_ir_kernel"; }
     const char *source_file() const override { return __FILE__; }
@@ -394,7 +397,7 @@ protected:
         const int vec_scratch0 = 13, vec_scratch1 = 14, vec_scratch2 = 15;
         const int exp_opmask = 1;
 
-        const reg_config_t reg_cfg = make_reg_config(avx2, param_idx, rsp_idx,
+        const reg_config_t reg_cfg = make_reg_config(isa(), param_idx, rsp_idx,
                 {gpr_scratch0, gpr_scratch1},
                 {vec_scratch0, vec_scratch1, vec_scratch2}, {exp_opmask});
 
@@ -412,7 +415,7 @@ protected:
             if (eltwise_injectors.count(alg)) continue;
             eltwise_injectors.emplace(alg,
                     std::unique_ptr<eltwise_injector_t>(
-                            new eltwise_injector_t(*this, avx2, alg,
+                            new eltwise_injector_t(*this, isa(), alg,
                                     /* alpha = */ 0.f, /* beta = */ 0.f,
                                     /* scale = */ 1.f)));
         }
