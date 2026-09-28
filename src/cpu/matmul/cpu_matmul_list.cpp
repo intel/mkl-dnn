@@ -1,6 +1,6 @@
 /*******************************************************************************
 * Copyright 2019 Intel Corporation
-* Copyright 2024-2025 FUJITSU LIMITED
+* Copyright 2024-2026 FUJITSU LIMITED
 * Copyright 2021-2026 Arm Ltd. and affiliates
 * Copyright 2026 Advanced Micro Devices, Inc.
 *
@@ -77,12 +77,12 @@ using namespace dnnl::impl::cpu::matmul;
 constexpr impl_list_item_t impl_list[] = REG_MATMUL_P({
         CPU_INSTANCE_AARCH64(brgemm_matmul_t<sme>)
         CPU_INSTANCE_AARCH64(brgemm_matmul_t<sve_512>)
+        CPU_INSTANCE_AARCH64(jit_int8_matmul_t<sve>)
         CPU_INSTANCE_AARCH64_KAI(kai_matmul_t)
         CPU_INSTANCE_AARCH64_ACL(acl_lowp_matmul_sq_t)
         CPU_INSTANCE_AARCH64_ACL(acl_lowp_matmul_t)
         CPU_INSTANCE_AARCH64_ACL(acl_matmul_t)
         CPU_INSTANCE_AARCH64(jit_bf16_matmul_t)
-        CPU_INSTANCE_AARCH64(jit_int8_matmul_t<sve>)
         CPU_INSTANCE_AARCH64(brgemm_matmul_t<sve_256>)
         CPU_INSTANCE_AARCH64(brgemm_matmul_t<sve_128>)
         CPU_INSTANCE_X64_ZEN(zen_lowp_matmul_t)
