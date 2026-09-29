@@ -484,16 +484,20 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     auto *o_base = static_cast<char *>(args.out);
     auto *cond_base = static_cast<const char *>(args.cond);
 
-    // Query-side offset (Q / out / select-cond carry the group axis); KV-side
-    // offset (K / V; the group axis has extent 1). Mirrors the online kernel.
-    const auto q_side_off = [&](const std::vector<dim_t> &s, dim_t bo, dim_t bi,
-                                    dim_t kvh, dim_t gid) -> dim_t {
-        return ndims == 4 ? bo * s[0] + bi * s[1]
-                          : bo * s[0] + kvh * s[1] + gid * s[2];
+    // Q, output, and select-condition tensors use query-head/group coordinates;
+    // K and V use batch/KV-head coordinates shared by each GQA group.
+    const auto query_tensor_base_offset
+            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
+                      dim_t query_head_idx, dim_t kv_head_idx,
+                      dim_t group_idx) -> dim_t {
+        return ndims == 4 ? batch_idx * strides[0] + query_head_idx * strides[1]
+                          : batch_idx * strides[0] + kv_head_idx * strides[1]
+                        + group_idx * strides[2];
     };
-    const auto kv_side_off
-            = [&](const std::vector<dim_t> &s, dim_t bo, dim_t kvh) -> dim_t {
-        return bo * s[0] + kvh * s[1];
+    const auto kv_tensor_base_offset
+            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
+                      dim_t kv_head_idx) -> dim_t {
+        return batch_idx * strides[0] + kv_head_idx * strides[1];
     };
 
     const dim_t q_row = p_.q_strides[row_dim];
@@ -561,11 +565,15 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                            : nullptr;
     char *vt_all = pack_b ? kt_all + kt_global_bytes_ : nullptr;
     if (need_kt) {
-        parallel_nd(p_.batch, num_head_kv, [&](dim_t bo, dim_t kvh) {
-            const char *kp
-                    = k_base + kv_side_off(p_.k_strides, bo, kvh) * qk_dt_sz;
+        parallel_nd(
+                p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
+            const char *kp = k_base
+                    + kv_tensor_base_offset(
+                              p_.k_strides, batch_idx, kv_head_idx)
+                            * qk_dt_sz;
             char *kt = kt_all
-                    + (static_cast<size_t>(bo) * num_head_kv + kvh)
+                    + (static_cast<size_t>(batch_idx) * num_head_kv
+                              + kv_head_idx)
                             * kt_head_elems * qk_dt_sz;
             // Zero the VNNI tail pair when hs_qk is not a multiple of k_pack.
             if (pack_b && hs_qk % k_pack != 0)
@@ -583,11 +591,15 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     if (pack_b) {
         const dim_t v_row = p_.v_strides[row_dim];
         const dim_t v_col = p_.v_strides[ndims - 1];
-        parallel_nd(p_.batch, num_head_kv, [&](dim_t bo, dim_t kvh) {
-            const char *vp
-                    = v_base + kv_side_off(p_.v_strides, bo, kvh) * qk_dt_sz;
+        parallel_nd(
+                p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
+            const char *vp = v_base
+                    + kv_tensor_base_offset(
+                              p_.v_strides, batch_idx, kv_head_idx)
+                            * qk_dt_sz;
             char *vt = vt_all
-                    + (static_cast<size_t>(bo) * num_head_kv + kvh)
+                    + (static_cast<size_t>(batch_idx) * num_head_kv
+                              + kv_head_idx)
                             * vt_head_elems * qk_dt_sz;
             if (seq_kv % k_pack != 0)
                 std::memset(vt, 0, vt_head_elems * qk_dt_sz);
@@ -602,26 +614,35 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     }
 
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
-            [&](int tid, int, dim_t bo, dim_t bi, dim_t qb) {
-        const dim_t kvh = bi / group;
-        const dim_t gid = bi % group;
-        const dim_t q0 = qb * q_block;
+            [&](int tid, int, dim_t batch_idx, dim_t query_head_idx,
+                    dim_t query_block_idx) {
+        const dim_t kv_head_idx = query_head_idx / group;
+        const dim_t group_idx = query_head_idx % group;
+        const dim_t q0 = query_block_idx * q_block;
         const dim_t m = nstl::min(q_block, seq_q - q0);
         const bool is_tail = m != q_block;
 
         const char *q_ptr = q_base
-                + (q_side_off(p_.q_strides, bo, bi, kvh, gid) + q0 * q_row)
+                + (query_tensor_base_offset(p_.q_strides, batch_idx,
+                           query_head_idx, kv_head_idx, group_idx)
+                          + q0 * q_row)
                         * qk_dt_sz;
-        const char *k_ptr
-                = k_base + kv_side_off(p_.k_strides, bo, kvh) * qk_dt_sz;
-        const char *v_ptr
-                = v_base + kv_side_off(p_.v_strides, bo, kvh) * qk_dt_sz;
+        const char *k_ptr = k_base
+                + kv_tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
+                        * qk_dt_sz;
+        const char *v_ptr = v_base
+                + kv_tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
+                        * qk_dt_sz;
         char *o_ptr = o_base
-                + (q_side_off(p_.o_strides, bo, bi, kvh, gid) + q0 * o_row)
+                + (query_tensor_base_offset(p_.o_strides, batch_idx,
+                           query_head_idx, kv_head_idx, group_idx)
+                          + q0 * o_row)
                         * o_dt_sz;
         const uint8_t *c_ptr = has_select
                 ? reinterpret_cast<const uint8_t *>(cond_base
-                          + (q_side_off(eff_cond_strides, bo, bi, kvh, gid)
+                          + (query_tensor_base_offset(eff_cond_strides,
+                                     batch_idx, query_head_idx, kv_head_idx,
+                                     group_idx)
                                     + q0 * cond_row)
                                   * sizeof(uint8_t))
                 : nullptr;
@@ -653,11 +674,13 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
         const void *b_ptr = k_ptr;
         if (need_kt)
             b_ptr = kt_all
-                    + (static_cast<size_t>(bo) * num_head_kv + kvh)
+                    + (static_cast<size_t>(batch_idx) * num_head_kv
+                              + kv_head_idx)
                             * kt_head_elems * qk_dt_sz;
         // mm2 B: VNNI-packed V tile for bf16/f16, else the user V in place.
         const void *v_b_ptr = pack_b ? vt_all
-                        + (static_cast<size_t>(bo) * num_head_kv + kvh)
+                        + (static_cast<size_t>(batch_idx) * num_head_kv
+                                  + kv_head_idx)
                                 * vt_head_elems * qk_dt_sz
                                      : static_cast<const void *>(v_ptr);
 
@@ -671,8 +694,8 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
             // entry per binary in mm1_post_ops (a scalar rhs is used as
             // is; a tensor rhs is offset per batch/head/query-tile),
             // then the fill scalar + dense condition for a fused select.
-            const void *rhs[8];
-            int n = 0;
+            std::vector<const void *> rhs;
+            rhs.reserve(p_.mm1_post_ops.size() + (select_in_mm1 ? 2 : 0));
             for (size_t pi = 0; pi < p_.mm1_post_ops.size(); ++pi) {
                 const auto &pop = p_.mm1_post_ops[pi];
                 if (!pop.is_binary) continue; // eltwise: no rhs
@@ -680,30 +703,31 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                         = static_cast<const char *>(args.mm1_post_op_rhs[pi]);
                 if (!pop.rhs_is_scalar) {
                     // Offset the rhs base by (batch, head, query-tile) using
-                    // its OWN rank: a 4D rhs indexes the flat head bi, a 5D rhs
-                    // splits it into (kv_head, group); broadcast axes (dim==1)
+                    // its OWN rank: a 4D rhs indexes the flat query head, a 5D
+                    // rhs splits it into (kv_head, group); broadcast axes (dim==1)
                     // contribute nothing. The query row is offset by q0.
                     const auto &d = pop.rhs_dims;
                     const auto &s = pop.rhs_strides;
                     const int rn = static_cast<int>(d.size());
                     dim_t off = 0;
                     if (rn == 4) {
-                        if (d[0] != 1) off += bo * s[0];
-                        if (d[1] != 1) off += bi * s[1];
+                        if (d[0] != 1) off += batch_idx * s[0];
+                        if (d[1] != 1) off += query_head_idx * s[1];
                     } else {
-                        if (d[0] != 1) off += bo * s[0];
-                        if (d[1] != 1) off += kvh * s[1];
-                        if (d[2] != 1) off += gid * s[2];
+                        if (d[0] != 1) off += batch_idx * s[0];
+                        if (d[1] != 1) off += kv_head_idx * s[1];
+                        if (d[2] != 1) off += group_idx * s[2];
                     }
                     if (d[rn - 2] != 1) off += q0 * s[rn - 2];
                     base += off * types::data_type_size(pop.rhs_dt);
                 }
-                rhs[n++] = base;
+                rhs.push_back(base);
             }
             if (select_in_mm1) {
-                rhs[n++] = &fill;
-                rhs[n++] = c_ptr;
+                rhs.push_back(&fill);
+                rhs.push_back(c_ptr);
             }
+
             // Position-dependent binary broadcasts (e.g. a per-key attention
             // mask, or the dense select condition) address their rhs from the
             // output element's logical offset, computed by the injector as
@@ -711,7 +735,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
             // [M, seq_kv] and starts at logical (0, 0), so data_C_ptr_ is the
             // tile base and the remaining logical offsets are zero.
             brgemm_post_ops_data_t pod(
-                    /*bias=*/nullptr, /*binary_post_ops_rhs=*/rhs,
+                    /*bias=*/nullptr, /*binary_post_ops_rhs=*/rhs.data(),
                     /*oc_logical_off=*/0, /*dst_row_logical_off=*/0,
                     /*data_C_ptr_=*/reinterpret_cast<const char *>(scores),
                     /*first_mb_matrix_addr_off=*/0);

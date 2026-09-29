@@ -214,16 +214,21 @@ status_t sdp_fused_driver_t::execute(
     const dim_t cond_col = p_.has_select ? eff_cond_strides[ndims - 1] : 0;
     constexpr float neg_inf = -std::numeric_limits<float>::infinity();
 
-    // Query-side offset (Q / out / select-cond carry the group axis).
-    const auto q_side_off = [&](const std::vector<dim_t> &s, dim_t bo, dim_t bi,
-                                    dim_t kvh, dim_t gid) -> dim_t {
-        return ndims == 4 ? bo * s[0] + bi * s[1]
-                          : bo * s[0] + kvh * s[1] + gid * s[2];
+    // Q, output, and select-condition tensors use query-head/group coordinates;
+    // K and V use batch/KV-head coordinates shared by each GQA group.
+    const auto query_tensor_base_offset
+            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
+                      dim_t query_head_idx, dim_t kv_head_idx,
+                      dim_t group_idx) -> dim_t {
+        return ndims == 4 ? batch_idx * strides[0] + query_head_idx * strides[1]
+                          : batch_idx * strides[0] + kv_head_idx * strides[1]
+                        + group_idx * strides[2];
     };
-    // KV-side offset (K / V; the group axis has extent 1).
-    const auto kv_side_off
-            = [&](const std::vector<dim_t> &s, dim_t bo, dim_t kvh) -> dim_t {
-        return bo * s[0] + kvh * s[1];
+    // K and V are shared by the query heads in each GQA group.
+    const auto kv_tensor_base_offset
+            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
+                      dim_t kv_head_idx) -> dim_t {
+        return batch_idx * strides[0] + kv_head_idx * strides[1];
     };
 
     const size_t block_size = scratch_per_thread_;
@@ -235,16 +240,19 @@ status_t sdp_fused_driver_t::execute(
         const dim_t gid = bi % group;
 
         const float *q_ptr = reinterpret_cast<const float *>(q_base
-                + q_side_off(p_.q_strides, bo, bi, kvh, gid) * sizeof(float));
-        const float *k_ptr = reinterpret_cast<const float *>(
-                k_base + kv_side_off(p_.k_strides, bo, kvh) * sizeof(float));
-        const float *v_ptr = reinterpret_cast<const float *>(
-                v_base + kv_side_off(p_.v_strides, bo, kvh) * sizeof(float));
+                + query_tensor_base_offset(p_.q_strides, bo, bi, kvh, gid)
+                        * sizeof(float));
+        const float *k_ptr = reinterpret_cast<const float *>(k_base
+                + kv_tensor_base_offset(p_.k_strides, bo, kvh) * sizeof(float));
+        const float *v_ptr = reinterpret_cast<const float *>(v_base
+                + kv_tensor_base_offset(p_.v_strides, bo, kvh) * sizeof(float));
         float *o_ptr = reinterpret_cast<float *>(o_base
-                + q_side_off(p_.o_strides, bo, bi, kvh, gid) * sizeof(float));
+                + query_tensor_base_offset(p_.o_strides, bo, bi, kvh, gid)
+                        * sizeof(float));
         const uint8_t *c_ptr = p_.has_select
                 ? reinterpret_cast<const uint8_t *>(cond_base
-                          + q_side_off(eff_cond_strides, bo, bi, kvh, gid)
+                          + query_tensor_base_offset(
+                                    eff_cond_strides, bo, bi, kvh, gid)
                                   * sizeof(uint8_t))
                 : nullptr;
 
