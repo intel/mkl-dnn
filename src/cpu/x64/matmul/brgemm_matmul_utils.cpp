@@ -1664,6 +1664,63 @@ status_t compute_blocking_heuristic(brgemm_matmul_conf_t &bgmmc,
     return status::success;
 }
 
+// Returns true when a single thread is faster for small f32 problems on avx2,
+// where the threading overhead exceeds the compute time. The rule follows
+// gemm:jit:
+// - Only f32 on avx2 with batch == 1 and dimensions known at creation time.
+// - The output size is limited to max_dst_size because the cost per output
+//   dominates for small K.
+// - GEMV (M == 1 or N == 1) follows thread_checker() of gemv. The
+//   gemv_outer_loop_overhead term is added to K or to the output size
+//   depending on the loop order of the kernel.
+// - GEMM compares gemm_cycles = 2 * M * N * K / (4 * simd_w) with the
+//   threading overhead. N is rounded up to simd_w to account for inactive
+//   SIMD lanes.
+// Unlike adjust_thread_count() of gemm:jit, the thread count is not reduced
+// step by step: the caller uses either 1 thread or the unchanged count.
+bool prefer_single_thread_avx2_f32(const brgemm_matmul_conf_t &bgmmc,
+        const brgemm_matmul_conf_utils_t &bm_conf_utils) {
+    if (!bm_conf_utils.is_f32() || bgmmc.isa != avx2 || bgmmc.batch != 1
+            || bgmmc.is_runtime_M || bgmmc.is_runtime_N || bgmmc.is_runtime_K
+            || bgmmc.M <= 0 || bgmmc.N <= 0)
+        return false;
+
+    constexpr dim_t max_dst_size = 1024;
+    if (bgmmc.M > max_dst_size / bgmmc.N) return false;
+    const dim_t dst_size = bgmmc.M * bgmmc.N;
+
+    if (bgmmc.M == 1 || bgmmc.N == 1) {
+        constexpr dim_t gemv_outer_loop_overhead = 288;
+        constexpr dim_t gemv_seq_work_threshold = 41700;
+        const bool is_trans_a_kernel = bgmmc.is_gemv
+                && utils::one_of(bgmmc.gemv_strategy,
+                        gemv_strategy_t::n1_A_trans,
+                        gemv_strategy_t::m1_B_plain);
+        const double gemv_work = is_trans_a_kernel
+                ? static_cast<double>(bgmmc.K)
+                        * (dst_size + gemv_outer_loop_overhead)
+                : static_cast<double>(dst_size)
+                        * (static_cast<double>(bgmmc.K)
+                                + gemv_outer_loop_overhead);
+        return gemv_work < gemv_seq_work_threshold;
+    }
+
+    constexpr int avx2_f32_simd_w = 8;
+    constexpr int fma_units = 2;
+    constexpr int flops_per_fma = 2;
+    constexpr int small_nthr_max = 4;
+    constexpr double overhead_small_nthr = 3.0e3;
+    constexpr double overhead_large_nthr = 5.0e3;
+    constexpr double avx2_f32_fp_per_cycle
+            = fma_units * flops_per_fma * avx2_f32_simd_w;
+    const double gemm_cycles = 2.0 * bgmmc.M * rnd_up(bgmmc.N, avx2_f32_simd_w)
+            * bgmmc.K / avx2_f32_fp_per_cycle;
+    const double threading_overhead = bgmmc.nthr <= small_nthr_max
+            ? overhead_small_nthr
+            : overhead_large_nthr;
+    return gemm_cycles < threading_overhead;
+}
+
 status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
         const matmul_desc_t &mmd, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
@@ -2298,6 +2355,10 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             // gemm execution.
             bgmmc.postops_inst_count = 0;
         }
+
+    // Set the thread count before the blocking heuristic so blocking is tuned
+    // for sequential execution when a single thread is selected.
+    if (prefer_single_thread_avx2_f32(bgmmc, bm_conf_utils)) bgmmc.nthr = 1;
 
     // Heuristic tries to optimize the following parameters:
     // - M_blk, M_Chunk
