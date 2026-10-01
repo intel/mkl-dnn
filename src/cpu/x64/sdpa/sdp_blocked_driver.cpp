@@ -83,10 +83,18 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         const std::vector<sdp_mm1_post_op_t> *post_ops = nullptr,
         bool select_postop = false, bool transB = false,
         bool *amx_need_config = nullptr, char *amx_palette = nullptr,
-        size_t *amx_wsp = nullptr) {
+        size_t *amx_wsp = nullptr, dim_t po_width = 0) {
     CHECK(brgemm_desc_init(&brg, isa_undef, brgemm_addr, dt, dt,
             /*transA=*/false, transB, brgemm_row_major,
             /*alpha=*/1.0f, beta, lda, ldb, ldc, M, N, K, /*strides=*/nullptr));
+    // When seq_kv is tiled, each mm1 brgemm computes an N = kv-block-wide column
+    // slice of a wider [M, po_width (= seq_kv)] score tile (LDC/LDD = seq_kv).
+    // The post-op descriptors (dst + binary rhs) describe that FULL logical
+    // tile, not the N-block, so the binary injector addresses a per-key mask /
+    // select condition by the element's global column (ptr_D offset by the
+    // block's kv0 and oc_logical_off = kv0 at runtime) -- mirroring how
+    // brgemm_matmul tiles N. po_width defaults to N (untiled / mm2).
+    const dim_t pw = po_width > 0 ? po_width : N;
     // Fold the mm1 post-op chain (scale / soft-cap / attention-mask) and the
     // select-mask into the GEMM store as binary/eltwise post-ops, mirroring the
     // decomp path. A scalar binary rhs is a [1 x 1] broadcast; a tensor rhs is
@@ -114,7 +122,7 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
                     // and carry the real row/column strides.
                     const int rn = static_cast<int>(pop.rhs_dims.size());
                     const dim_t rows = pop.rhs_dims[rn - 2] == 1 ? 1 : M;
-                    const dim_t cols = pop.rhs_dims[rn - 1] == 1 ? 1 : N;
+                    const dim_t cols = pop.rhs_dims[rn - 1] == 1 ? 1 : pw;
                     dims_t rhs_dims = {rows, cols};
                     dims_t rhs_str = {
                             pop.rhs_strides[rn - 2], pop.rhs_strides[rn - 1]};
@@ -129,7 +137,7 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
             dims_t fl_dims = {1, 1};
             CHECK(memory_desc_init_by_tag(
                     fill_md, 2, fl_dims, data_type::f32, format_tag::ab));
-            dims_t cd_dims = {M, N};
+            dims_t cd_dims = {M, pw};
             CHECK(memory_desc_init_by_tag(
                     cond_md, 2, cd_dims, data_type::u8, format_tag::ab));
             CHECK(po.append_binary(
@@ -137,7 +145,7 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         }
         CHECK(attr.set_post_ops(po));
         memory_desc_t dst_md;
-        dims_t d_dims = {M, N};
+        dims_t d_dims = {M, pw};
         CHECK(memory_desc_init_by_tag(
                 dst_md, 2, d_dims, data_type::f32, format_tag::ab));
         CHECK(brgemm_desc_set_postops(&brg, &attr, &dst_md, /*LDD=*/ldc));
@@ -157,10 +165,13 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
 } // namespace
 
 sdp_blocked_driver_t::~sdp_blocked_driver_t() {
-    for (auto *k :
-            {mm1_kernel_, mm2_kernel_, mm1_tail_kernel_, mm2_tail_kernel_}) {
-        if (k) brgemm_kernel_destroy(k);
-    }
+    for (int qi = 0; qi < 2; ++qi)
+        for (int ki = 0; ki < 2; ++ki) {
+            if (mm1_kernels_[qi][ki])
+                brgemm_kernel_destroy(mm1_kernels_[qi][ki]);
+            if (mm2_kernels_[qi][ki])
+                brgemm_kernel_destroy(mm2_kernels_[qi][ki]);
+        }
 }
 
 status_t sdp_blocked_driver_t::init(
@@ -201,19 +212,41 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     const int row_dim = p_.ndims - 2;
 
     // Choose the query block so the [q_block x seq_kv] fp32 score tile stays
-    // L2-resident. GNR has ~2MB L2/core; budget ~half of it for the scores
-    // tile (the rest holds Q/K/V/pv working set and other live data).
-    // TODO: query the real cache size from the platform instead of a literal.
-    constexpr size_t l2_budget_bytes = 1024 * 1024;
+    // L2-resident across mm1 -> softmax -> mm2. Budget half of L2 for it; the
+    // other half leaves room for each matmul's weight panel (sized below) to
+    // stay resident alongside it.
+    const size_t l2_budget_bytes = 3 * platform::get_per_core_cache_size(2) / 4;
+    const size_t score_tile_budget_bytes = l2_budget_bytes / 2;
     const size_t row_bytes
             = static_cast<size_t>(seq_kv) * sizeof(float); // one score row
-    dim_t q_block = row_bytes > 0
-            ? static_cast<dim_t>(l2_budget_bytes / row_bytes)
-            : seq_q;
+    dim_t q_block = static_cast<dim_t>(score_tile_budget_bytes / row_bytes);
     q_block = nstl::max<dim_t>(q_block, 1);
     q_block = nstl::min<dim_t>(q_block, seq_q);
     q_block_ = q_block;
     q_tail_ = seq_q % q_block;
+
+    // Tile the seq_kv axis of both matmuls so each brgemm call's weight panel
+    // (mm1's K slice [hs_qk x kv_block], mm2's V slice [kv_block x hs_v]) stays
+    // L2-resident; an untiled matmul re-streams its whole panel per M-chunk and
+    // turns memory-bound once that panel exceeds ~L2. Size kv_block so the wider
+    // panel fits an L2/8 budget, then round DOWN to a multiple of 64 (clean VNNI
+    // sub-panels, AMX-K-friendly). If that covers the whole axis (short context)
+    // kv_block_ == seq_kv: one untiled block, no kv tail, and mm2 keeps beta = 0.
+    const size_t b_panel_budget_bytes = l2_budget_bytes / 8;
+    const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
+    dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
+                                                / (b_panel_rows * qk_dt_sz))
+                                      : seq_kv;
+    kv_block = utils::rnd_dn(kv_block, static_cast<dim_t>(64));
+    // Too small to tile usefully (or hs so large a block barely fits): fall back
+    // to a single untiled block over the whole axis.
+    if (kv_block < 64) kv_block = seq_kv;
+    kv_block = nstl::min<dim_t>(kv_block, seq_kv);
+    kv_block_ = nstl::max<dim_t>(kv_block, 1);
+    kv_tail_ = kv_block_ < seq_kv ? seq_kv % kv_block_ : 0;
+    // >1 block -> mm2 accumulates across blocks (beta = 1 onto a zeroed pv);
+    // single block keeps the original fresh-C (beta = 0) path.
+    mm2_beta_ = kv_block_ < seq_kv ? 1.0f : 0.0f;
 
     // BRGEMM leading dims mirror the online kernel: A/B leading dims come from
     // the user strides (row_dim = the M/K row axis), scores/pv are dense.
@@ -244,20 +277,24 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // Build the mm1/mm2 BRGEMM descriptors (no JIT) purely to read each
     // kernel's AMX palette + tile-store wsp, which the per-thread scratch size
     // depends on. create_kernels() rebuilds the identical descriptors (same
-    // arithmetic from the members set above) right before compiling them.
-    auto build_tile_descs
-            = [&](dim_t m, bool select_postop, brgemm_amx_cfg_t &mm1_amx,
-                      brgemm_amx_cfg_t &mm2_amx) -> status_t {
+    // arithmetic from the members set above) right before compiling them. kv is
+    // the seq_kv sub-block width for this (mm1 N / mm2 K); the mm1 post-op
+    // descriptors keep the full seq_kv width (po_width) so the fused mask/select
+    // is addressed by global column at runtime.
+    auto build_tile_descs = [&](dim_t m, dim_t kv, bool select_postop,
+                                    brgemm_amx_cfg_t &mm1_amx,
+                                    brgemm_amx_cfg_t &mm2_amx) -> status_t {
         brgemm_desc_t mm1_brg, mm2_brg;
-        CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f, m, seq_kv,
-                hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
+        CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f, m, kv, hs_qk,
+                /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop,
                 /*transB=*/false, &mm1_amx.need_config, mm1_amx.palette,
-                &mm1_amx.wsp_size));
+                &mm1_amx.wsp_size, /*po_width=*/seq_kv));
         // mm2 B is the user V in place for f32 (ldb = its row stride), or a
         // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
-        CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, /*beta=*/0.0f, m, hs_v,
-                seq_kv, /*lda=*/seq_kv,
+        // K = kv (one kv-block of the reduction); beta accumulates across them.
+        CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, mm2_beta_, m, hs_v, kv,
+                /*lda=*/seq_kv,
                 /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/hs_v,
                 /*post_ops=*/nullptr, /*select_postop=*/false,
                 /*transB=*/false, &mm2_amx.need_config, mm2_amx.palette,
@@ -286,11 +323,20 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
 
     mm1_select_postop_ = want_select_postop;
 
+    // Descriptor grid: [is_q_tail][is_kv_tail]. The query dimension splits into
+    // q_block_ (+ q_tail_); the key dimension into kv_block_ (+ kv_tail_). Tail
+    // slots are only built when the corresponding remainder is non-zero.
     auto build_all_descs = [&](bool select_postop) -> status_t {
-        CHECK(build_tile_descs(q_block_, select_postop, mm1_amx_, mm2_amx_));
-        if (q_tail_ != 0)
-            CHECK(build_tile_descs(
-                    q_tail_, select_postop, mm1_tail_amx_, mm2_tail_amx_));
+        const dim_t ms[2] = {q_block_, q_tail_};
+        const dim_t kvs[2] = {kv_block_, kv_tail_};
+        for (int qi = 0; qi < 2; ++qi) {
+            if (qi == 1 && q_tail_ == 0) continue;
+            for (int ki = 0; ki < 2; ++ki) {
+                if (ki == 1 && kv_tail_ == 0) continue;
+                CHECK(build_tile_descs(ms[qi], kvs[ki], select_postop,
+                        mm1_amx_[qi][ki], mm2_amx_[qi][ki]));
+            }
+        }
         return status::success;
     };
 
@@ -307,9 +353,11 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // selected AMX tiles while pack_b was not set (e.g. an unforeseen ISA/shape
     // combination), the B layout would be wrong -- bail out to a safe fallback
     // rather than compute silently incorrect results.
-    for (const auto *amx :
-            {&mm1_amx_, &mm2_amx_, &mm1_tail_amx_, &mm2_tail_amx_})
-        if (amx->need_config && !pack_b) return status::unimplemented;
+    for (int qi = 0; qi < 2; ++qi)
+        for (int ki = 0; ki < 2; ++ki)
+            if ((mm1_amx_[qi][ki].need_config || mm2_amx_[qi][ki].need_config)
+                    && !pack_b)
+                return status::unimplemented;
 
     // Per-thread scratch: one score tile [q_block x seq_kv] and one pv tile
     // [q_block x hs_v], both f32 (BRGEMM accumulates in f32). For a non-f32
@@ -327,8 +375,11 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // AMX (bf16/f16) kernels need a per-thread tile-store scratch; size it to
     // the largest wsp over all kernels (they run sequentially per work-item).
     size_t max_wsp = 0;
-    for (const auto *c : {&mm1_amx_, &mm2_amx_, &mm1_tail_amx_, &mm2_tail_amx_})
-        max_wsp = nstl::max(max_wsp, c->wsp_size);
+    for (int qi = 0; qi < 2; ++qi)
+        for (int ki = 0; ki < 2; ++ki)
+            max_wsp = nstl::max(max_wsp,
+                    nstl::max(mm1_amx_[qi][ki].wsp_size,
+                            mm2_amx_[qi][ki].wsp_size));
     amx_wsp_bytes_ = max_wsp > 0 ? align64(max_wsp) : 0;
     scratch_per_thread_ = scores_bytes + pv_bytes + prob_bytes + amx_wsp_bytes_;
 
@@ -370,37 +421,49 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
 
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t m,
-                      bool select_postop) -> status_t {
+                      dim_t kv, bool select_postop) -> status_t {
         brgemm_desc_t mm1_brg, mm2_brg;
-        CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f, m, seq_kv,
-                hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
-                /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop));
+        CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f, m, kv, hs_qk,
+                /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb, /*ldc=*/seq_kv,
+                &p_.mm1_post_ops, select_postop, /*transB=*/false,
+                /*amx_need_config=*/nullptr, /*amx_palette=*/nullptr,
+                /*amx_wsp=*/nullptr, /*po_width=*/seq_kv));
         CHECK(brgemm_kernel_create(mm1, mm1_brg));
         // mm2 B is the user V in place for f32 (ldb = its row stride), or a
         // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
-        CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, /*beta=*/0.0f, m, hs_v,
-                seq_kv, /*lda=*/seq_kv,
+        // K = kv (one kv-block); beta accumulates the blocks into pv.
+        CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, mm2_beta_, m, hs_v, kv,
+                /*lda=*/seq_kv,
                 /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/hs_v));
         CHECK(brgemm_kernel_create(mm2, mm2_brg));
         return status::success;
     };
 
     auto build_kernels = [&](bool select_postop) -> status_t {
-        CHECK(create_tile_kernels(
-                &mm1_kernel_, &mm2_kernel_, q_block_, select_postop));
-        if (q_tail_ != 0)
-            CHECK(create_tile_kernels(&mm1_tail_kernel_, &mm2_tail_kernel_,
-                    q_tail_, select_postop));
+        const dim_t ms[2] = {q_block_, q_tail_};
+        const dim_t kvs[2] = {kv_block_, kv_tail_};
+        for (int qi = 0; qi < 2; ++qi) {
+            if (qi == 1 && q_tail_ == 0) continue;
+            for (int ki = 0; ki < 2; ++ki) {
+                if (ki == 1 && kv_tail_ == 0) continue;
+                CHECK(create_tile_kernels(&mm1_kernels_[qi][ki],
+                        &mm2_kernels_[qi][ki], ms[qi], kvs[ki], select_postop));
+            }
+        }
         return status::success;
     };
     auto destroy_kernels = [&]() {
-        for (auto **k : {&mm1_kernel_, &mm2_kernel_, &mm1_tail_kernel_,
-                     &mm2_tail_kernel_}) {
-            if (*k) {
-                brgemm_kernel_destroy(*k);
-                *k = nullptr;
+        for (int qi = 0; qi < 2; ++qi)
+            for (int ki = 0; ki < 2; ++ki) {
+                if (mm1_kernels_[qi][ki]) {
+                    brgemm_kernel_destroy(mm1_kernels_[qi][ki]);
+                    mm1_kernels_[qi][ki] = nullptr;
+                }
+                if (mm2_kernels_[qi][ki]) {
+                    brgemm_kernel_destroy(mm2_kernels_[qi][ki]);
+                    mm2_kernels_[qi][ki] = nullptr;
+                }
             }
-        }
     };
 
     if (build_kernels(mm1_select_postop_) != status::success) {
@@ -662,12 +725,17 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                           my_scratch + scores_bytes + pv_bytes + prob_bytes)
                 : nullptr;
 
-        const auto *mm1 = is_tail ? mm1_tail_kernel_ : mm1_kernel_;
-        const auto *mm2 = is_tail ? mm2_tail_kernel_ : mm2_kernel_;
-        const auto &mm1_cfg = is_tail ? mm1_tail_amx_ : mm1_amx_;
-        const auto &mm2_cfg = is_tail ? mm2_tail_amx_ : mm2_amx_;
+        const int qi = is_tail ? 1 : 0;
+        // seq_kv tiling: n_kv_full full kv_block-wide blocks + an optional
+        // kv_tail remainder block. A single block (kv_block_ == seq_kv) leaves
+        // n_kv_full == 1, kv_tail == 0.
+        const dim_t kv_block = kv_block_;
+        const dim_t n_kv_full = seq_kv / kv_block;
+        const dim_t kv_tail = seq_kv - n_kv_full * kv_block;
 
-        // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv].
+        // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv], computed one
+        // kv_block-wide column slice at a time so each call's B panel
+        // [hs_qk, kv_block] is L2-resident.
         // For a transpose_b QK^T (or a bf16/f16 pack), K was materialised up
         // front into kt_all; point B at this (batch, kv_head)'s dense (VNNI)
         // [hs_qk, seq_kv] tile. Otherwise K is already [hs_qk, seq_kv] in place.
@@ -683,18 +751,19 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                                   + kv_head_idx)
                                 * vt_head_elems * qk_dt_sz
                                      : static_cast<const void *>(v_ptr);
+        // Element stride to advance one seq_kv column of mm1's B: VNNI pack
+        // factor for a packed tile, 1 for a dense transpose, else the K
+        // tensor's seq_kv physical stride (== 1 for in-place, non-transposed).
+        const dim_t mm1_bcol = need_kt ? (pack_b ? k_pack : 1) : k_seq_stride_;
+        const dim_t v_row = p_.v_strides[row_dim];
 
-        brgemm_batch_element_t batch1;
-        batch1.ptr.A = q_ptr;
-        batch1.ptr.B = b_ptr;
-        // Configure the mm1 AMX tiles (no-op for non-AMX f32).
-        if (mm1_cfg.need_config) amx_tile_configure(mm1_cfg.palette);
+        // Build the binary post-op rhs table ONCE in chain order (it does not
+        // depend on the kv-block): one entry per binary in mm1_post_ops (a
+        // scalar rhs is used as is; a tensor rhs is offset per
+        // batch/head/query-tile), then the fill scalar + dense condition for a
+        // fused select. Each kv-block reuses it, varying only oc_logical_off.
+        std::vector<const void *> rhs;
         if (has_mm1_postops) {
-            // Build the binary post-op rhs table in chain order: one
-            // entry per binary in mm1_post_ops (a scalar rhs is used as
-            // is; a tensor rhs is offset per batch/head/query-tile),
-            // then the fill scalar + dense condition for a fused select.
-            std::vector<const void *> rhs;
             rhs.reserve(p_.mm1_post_ops.size() + (select_in_mm1 ? 2 : 0));
             for (size_t pi = 0; pi < p_.mm1_post_ops.size(); ++pi) {
                 const auto &pop = p_.mm1_post_ops[pi];
@@ -705,7 +774,8 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                     // Offset the rhs base by (batch, head, query-tile) using
                     // its OWN rank: a 4D rhs indexes the flat query head, a 5D
                     // rhs splits it into (kv_head, group); broadcast axes (dim==1)
-                    // contribute nothing. The query row is offset by q0.
+                    // contribute nothing. The query row is offset by q0. The
+                    // kv-block column is handled by oc_logical_off, not here.
                     const auto &d = pop.rhs_dims;
                     const auto &s = pop.rhs_strides;
                     const int rn = static_cast<int>(d.size());
@@ -727,22 +797,42 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                 rhs.push_back(&fill);
                 rhs.push_back(c_ptr);
             }
+        }
 
-            // Position-dependent binary broadcasts (e.g. a per-key attention
-            // mask, or the dense select condition) address their rhs from the
-            // output element's logical offset, computed by the injector as
-            // (dst_element - data_C_ptr_) / dt_size. The scores tile is dense
-            // [M, seq_kv] and starts at logical (0, 0), so data_C_ptr_ is the
-            // tile base and the remaining logical offsets are zero.
-            brgemm_post_ops_data_t pod(
-                    /*bias=*/nullptr, /*binary_post_ops_rhs=*/rhs.data(),
-                    /*oc_logical_off=*/0, /*dst_row_logical_off=*/0,
-                    /*data_C_ptr_=*/reinterpret_cast<const char *>(scores),
-                    /*first_mb_matrix_addr_off=*/0);
-            brgemm_kernel_execute_postops(mm1, 1, &batch1,
-                    /*ptr_C=*/scores, /*ptr_D=*/scores, pod, amx_wsp);
-        } else {
-            brgemm_kernel_execute(mm1, 1, &batch1, scores, amx_wsp);
+        // Run mm1 for the kv-block [kv0, kv0+N): B slice offset by kv0 columns,
+        // output written into the full [m, seq_kv] score tile at column kv0
+        // (LDC/LDD = seq_kv). The post-op injector addresses a per-key mask /
+        // select condition at the GLOBAL column: data_C_ptr_ is the full tile
+        // base and oc_logical_off = kv0 (mirroring brgemm_matmul's N tiling);
+        // the rhs table above carries no kv0 offset.
+        auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
+            brgemm_batch_element_t be;
+            be.ptr.A = q_ptr;
+            be.ptr.B = static_cast<const char *>(b_ptr)
+                    + static_cast<size_t>(kv0) * mm1_bcol * qk_dt_sz;
+            float *c_blk = scores + kv0;
+            if (has_mm1_postops) {
+                brgemm_post_ops_data_t pod(
+                        /*bias=*/nullptr, /*binary_post_ops_rhs=*/rhs.data(),
+                        /*oc_logical_off=*/static_cast<size_t>(kv0),
+                        /*dst_row_logical_off=*/0,
+                        /*data_C_ptr_=*/reinterpret_cast<const char *>(scores),
+                        /*first_mb_matrix_addr_off=*/0);
+                brgemm_kernel_execute_postops(
+                        k, 1, &be, c_blk, c_blk, pod, amx_wsp);
+            } else {
+                brgemm_kernel_execute(k, 1, &be, c_blk, amx_wsp);
+            }
+        };
+
+        if (mm1_amx_[qi][0].need_config)
+            amx_tile_configure(mm1_amx_[qi][0].palette);
+        for (dim_t b = 0; b < n_kv_full; ++b)
+            run_mm1(mm1_kernels_[qi][0], b * kv_block);
+        if (kv_tail) {
+            if (mm1_amx_[qi][1].need_config)
+                amx_tile_configure(mm1_amx_[qi][1].palette);
+            run_mm1(mm1_kernels_[qi][1], n_kv_full * kv_block);
         }
 
         // Softmax over the full seq_kv axis per row. Each query row
@@ -826,19 +916,44 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
             }
         }
 
-        // mm2: pv[m, hs_v] = P[m, seq_kv] * V[seq_kv, hs_v].
+        // mm2: pv[m, hs_v] = P[m, seq_kv] * V[seq_kv, hs_v], tiled over the
+        // seq_kv reduction so each call's B panel [kv_block, hs_v] is
+        // L2-resident. The blocks accumulate into pv: for >1 block the kernels
+        // use beta = 1 onto a pre-zeroed pv; a single block uses beta = 0 and
+        // no zeroing (identical to the untiled path).
         // P is the softmax output in the compute type: for f32 that is the
         // scores tile; otherwise down-convert the dense [m, seq_kv] scores into
         // the prob tile first (mm2's A must match the BRGEMM input type).
         if (mm_dt != data_type::f32)
             convert_from_f32(
                     prob, mm_dt, scores, static_cast<size_t>(m) * seq_kv);
-        brgemm_batch_element_t batch2;
-        batch2.ptr.A = prob;
-        batch2.ptr.B = v_b_ptr;
-        // mm2 uses a different tile shape than mm1, so reconfigure its palette.
-        if (mm2_cfg.need_config) amx_tile_configure(mm2_cfg.palette);
-        brgemm_kernel_execute(mm2, 1, &batch2, pv, amx_wsp);
+        if (mm2_beta_ != 0.0f)
+            std::memset(pv, 0, static_cast<size_t>(m) * hs_v * sizeof(float));
+
+        // Run mm2 for the kv-block [kv0, kv0+K): A is P's column slice (lda =
+        // seq_kv), B is V's kv-block panel (packed: (kv0/k_pack) K-groups in;
+        // f32: kv0 rows down), both accumulating into the full pv tile.
+        auto run_mm2 = [&](const brgemm_kernel_t *k, dim_t kv0) {
+            brgemm_batch_element_t be;
+            be.ptr.A = static_cast<const char *>(prob)
+                    + static_cast<size_t>(kv0) * qk_dt_sz;
+            be.ptr.B = pack_b ? static_cast<const char *>(v_b_ptr)
+                            + static_cast<size_t>(kv0 / k_pack) * hs_v * k_pack
+                                    * qk_dt_sz
+                              : static_cast<const char *>(v_b_ptr)
+                            + static_cast<size_t>(kv0) * v_row * qk_dt_sz;
+            brgemm_kernel_execute(k, 1, &be, pv, amx_wsp);
+        };
+
+        if (mm2_amx_[qi][0].need_config)
+            amx_tile_configure(mm2_amx_[qi][0].palette);
+        for (dim_t b = 0; b < n_kv_full; ++b)
+            run_mm2(mm2_kernels_[qi][0], b * kv_block);
+        if (kv_tail) {
+            if (mm2_amx_[qi][1].need_config)
+                amx_tile_configure(mm2_amx_[qi][1].palette);
+            run_mm2(mm2_kernels_[qi][1], n_kv_full * kv_block);
+        }
 
         // Scatter the dense f32 pv tile to the (possibly strided) output,
         // down-converting to the output type.
@@ -868,8 +983,10 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
             }
         }
         // Release AMX tiles so the configured state does not leak past this
-        // work-item (no-op for non-AMX f32).
-        if (mm1_cfg.need_config || mm2_cfg.need_config) amx_tile_release();
+        // work-item (no-op for non-AMX f32). The full-block cfg's need_config
+        // is representative (the tail kernels share the ISA/dtype).
+        if (mm1_amx_[qi][0].need_config || mm2_amx_[qi][0].need_config)
+            amx_tile_release();
     });
 
     return status::success;

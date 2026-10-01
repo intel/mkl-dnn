@@ -198,6 +198,22 @@ private:
     sdp_blocked_params_t p_;
     dim_t q_block_ = 0;
     dim_t q_tail_ = 0; // seq_q % q_block_ (0 if evenly divided)
+    // seq_kv is tiled into kv_block_-wide blocks (+ a kv_tail_ = seq_kv %
+    // kv_block_ remainder, 0 if evenly divided or single block) so that each
+    // brgemm call's B panel (mm1: [head_size_qk x kv_block_]; mm2: [kv_block_ x
+    // head_size_v]) stays L2-resident, avoiding the large-N/large-K L2-bandwidth
+    // cliff (see notes/brgemm_mnk_l2_cache_findings.md). kv_block_ is a multiple
+    // of the VNNI pack factor so the packed K/V sub-panels start cleanly; when
+    // kv_block_ >= seq_kv there is a single block and no kv tail, reproducing
+    // the untiled behaviour byte-for-byte. The full [q_block_ x seq_kv] score
+    // tile and the exact full-row softmax are unchanged -- only the two GEMMs
+    // are split along seq_kv.
+    dim_t kv_block_ = 0;
+    dim_t kv_tail_ = 0;
+    // mm2 accumulates its output across kv-blocks: beta = 1 (onto a pre-zeroed
+    // pv tile) when tiled into >1 block, beta = 0 (fresh C) for the single-block
+    // case so that path stays identical to the untiled version.
+    float mm2_beta_ = 0.0f;
     size_t scratch_per_thread_ = 0;
     int nthr_ = 0;
 
@@ -240,13 +256,14 @@ private:
     // the pack layout and the kernel's expected layout stay in sync.
     dim_t b_k_pack_ = 1;
 
-    // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
-    // mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
-    // *_tail handle the ragged last query tile (m = q_tail_).
-    cpu::x64::brgemm_kernel_t *mm1_kernel_ = nullptr;
-    cpu::x64::brgemm_kernel_t *mm2_kernel_ = nullptr;
-    cpu::x64::brgemm_kernel_t *mm1_tail_kernel_ = nullptr;
-    cpu::x64::brgemm_kernel_t *mm2_tail_kernel_ = nullptr;
+    // mm1: scores[m, kv-block] = Q[m, hs_qk] * K[hs_qk, kv-block]   (N-tiled)
+    // mm2: pv[m, hs_v]        += P[m, kv-block] * V[kv-block, hs_v]  (K-tiled)
+    // Indexed [is_q_tail][is_kv_tail]: the second index selects the kv_block_-
+    // wide kernel ([.][0]) or the kv_tail_-wide remainder kernel ([.][1]); the
+    // [.][1] slots stay null when kv_tail_ == 0 (seq_kv divides evenly or a
+    // single block). The first index selects the full or ragged query tile.
+    cpu::x64::brgemm_kernel_t *mm1_kernels_[2][2] = {};
+    cpu::x64::brgemm_kernel_t *mm2_kernels_[2][2] = {};
 
     // AMX tile configuration for a BRGEMM kernel. For non-AMX ISAs (e.g. f32 on
     // avx512_core) need_config is false and wsp_size is 0. For AMX (bf16/f16 on
@@ -258,7 +275,8 @@ private:
         size_t wsp_size = 0;
         char palette[64] = {};
     };
-    brgemm_amx_cfg_t mm1_amx_, mm2_amx_, mm1_tail_amx_, mm2_tail_amx_;
+    // Indexed [is_q_tail][is_kv_tail], matching mm1_kernels_/mm2_kernels_.
+    brgemm_amx_cfg_t mm1_amx_[2][2], mm2_amx_[2][2];
     // Per-thread AMX tile-store scratch (max wsp over all kernels), 0 if none.
     size_t amx_wsp_bytes_ = 0;
 
