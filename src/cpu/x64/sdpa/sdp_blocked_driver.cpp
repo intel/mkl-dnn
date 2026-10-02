@@ -39,6 +39,7 @@
 #include "cpu/x64/brgemm/brgemm.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/jit_uni_softmax.hpp"
+#include "cpu/x64/sdpa/sdp_blocked_select_ir.hpp"
 #endif
 
 namespace dnnl {
@@ -554,6 +555,33 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
         }
     }
 
+    // Build the standalone select-mask pre-pass kernel when a select mask is
+    // present, is not already folded into mm1, the jit softmax path is used,
+    // and the condition is dense along seq_kv (column stride 1). Polarity, the
+    // seq_kv width, and the score/condition row strides are baked in; the row
+    // count is a runtime argument, so one instance serves both the full and
+    // query-tail tiles. When this stays null (a strided/broadcast condition
+    // column, no jit softmax, or compilation fails) execute() falls back to a
+    // scalar pre-pass.
+    if (use_jit_softmax_ && p_.has_select && !mm1_select_postop_) {
+        const int ndims = p_.ndims;
+        std::vector<dim_t> eff = p_.cond_strides;
+        for (int d = 0; d < ndims; ++d)
+            if (p_.cond_dims[d] == 1) eff[d] = 0;
+        const dim_t cond_col = eff[ndims - 1];
+        const dim_t cond_row = eff[ndims - 2];
+        if (cond_col == 1) {
+            auto k = std::make_shared<
+                    sdp_blocked_select_ir::select_ir_kernel_t>(
+                    sdp_blocked_select_ir::build_select_ir(
+                            static_cast<int>(seq_kv), p_.select_fusiable,
+                            /*scores_row_stride=*/seq_kv,
+                            /*cond_row_stride=*/cond_row));
+            if (k->create_kernel() == status::success)
+                select_kernel_ = std::move(k);
+        }
+    }
+
     return status::success;
 }
 
@@ -878,18 +906,33 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
         const bool prepass_select = has_select && !select_in_mm1;
         if (use_jit) {
             if (prepass_select) {
-                for (dim_t i = 0; i < m; ++i) {
-                    float *srow = scores + i * seq_kv;
-                    const uint8_t *crow
-                            = c_ptr ? c_ptr + i * cond_row : nullptr;
-                    for (dim_t j = 0; j < seq_kv; ++j) {
-                        float v = srow[j];
-                        if (crow) {
-                            const bool cond = crow[j * cond_col] != 0;
-                            const bool keep = select_fusiable ? cond : !cond;
-                            if (!keep) v = fill;
+                if (select_kernel_ && c_ptr) {
+                    // Standalone IR select kernel: dense condition (column
+                    // stride 1), both polarities and the broadcast-over-rows
+                    // (cond_row == 0) case baked in at build time.
+                    sdp_blocked_select_ir::select_row_args_t sa;
+                    sa.scores = scores;
+                    sa.cond = c_ptr;
+                    sa.fill = &fill;
+                    sa.n_rows = m;
+                    (*select_kernel_)(&sa);
+                } else {
+                    // Scalar fallback: strided/broadcast condition column, or
+                    // the IR kernel was not built.
+                    for (dim_t i = 0; i < m; ++i) {
+                        float *srow = scores + i * seq_kv;
+                        const uint8_t *crow
+                                = c_ptr ? c_ptr + i * cond_row : nullptr;
+                        for (dim_t j = 0; j < seq_kv; ++j) {
+                            float v = srow[j];
+                            if (crow) {
+                                const bool cond = crow[j * cond_col] != 0;
+                                const bool keep
+                                        = select_fusiable ? cond : !cond;
+                                if (!keep) v = fill;
+                            }
+                            srow[j] = v;
                         }
-                        srow[j] = v;
                     }
                 }
             }

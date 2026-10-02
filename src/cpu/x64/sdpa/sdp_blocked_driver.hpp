@@ -36,6 +36,9 @@ struct brgemm_kernel_t;
 namespace softmax_impl {
 struct jit_softmax_kernel_base_t;
 } // namespace softmax_impl
+namespace sdp_blocked_select_ir {
+class select_ir_kernel_t;
+} // namespace sdp_blocked_select_ir
 
 // -----------------------------------------------------------------------------
 // Decoupled blocked-softmax SDPA driver (x64).
@@ -307,6 +310,18 @@ private:
     // When true, mm1 applies the (fusiable, dense-condition) select-mask via a
     // binary_select post-op at its store, so the pre-pass is skipped entirely.
     bool mm1_select_postop_ = false;
+
+    // Standalone JIT kernel for the select-mask pre-pass (AVX2 / AVX-512 via
+    // the x64 CPU IR framework). Built only when a select mask is present, is
+    // not folded into mm1, the jit softmax path is used, and the condition is
+    // dense along seq_kv (column stride 1). When null (e.g. a strided/broadcast
+    // condition column, or no jit), execute() applies the mask with a scalar
+    // pre-pass instead. Polarity, widths and row strides are baked in at build
+    // time; the runtime row count is passed per call, so one instance serves
+    // both the full and query-tail tiles. A shared_ptr (like softmax_kernel_)
+    // so the member destroys cleanly on non-x64 builds where the kernel type is
+    // incomplete.
+    std::shared_ptr<sdp_blocked_select_ir::select_ir_kernel_t> select_kernel_;
 };
 
 } // namespace x64
