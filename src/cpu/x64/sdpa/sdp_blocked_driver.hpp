@@ -210,10 +210,17 @@ private:
     // are split along seq_kv.
     dim_t kv_block_ = 0;
     dim_t kv_tail_ = 0;
-    // mm2 accumulates its output across kv-blocks: beta = 1 (onto a pre-zeroed
-    // pv tile) when tiled into >1 block, beta = 0 (fresh C) for the single-block
-    // case so that path stays identical to the untiled version.
+    // mm2 accumulates its output across kv-blocks: when tiled into >1 block the
+    // first block uses a beta = 0 kernel (fresh C) and the rest beta = 1, so no
+    // destination pre-zeroing is needed; a single block keeps the beta = 0 path
+    // identical to the untiled version.
     float mm2_beta_ = 0.0f;
+    // When true, mm2 writes its f32 result DIRECTLY into the user output tensor
+    // (C = output, LDC = output row stride) instead of into the pv scratch tile
+    // followed by a down-convert/scatter. Enabled only when out_dt == f32 and
+    // the output column stride is 1; the pv tile is then not allocated. All
+    // other cases (bf16/f16 output, or a strided output column) keep pv+scatter.
+    bool mm2_direct_ = false;
     size_t scratch_per_thread_ = 0;
     int nthr_ = 0;
 
@@ -264,6 +271,13 @@ private:
     // single block). The first index selects the full or ragged query tile.
     cpu::x64::brgemm_kernel_t *mm1_kernels_[2][2] = {};
     cpu::x64::brgemm_kernel_t *mm2_kernels_[2][2] = {};
+
+    // Beta = 0 full-kv-block mm2 kernel used for the FIRST kv-block when seq_kv
+    // is tiled into >1 block: it writes fresh C (overwriting the destination)
+    // so the remaining blocks accumulate with beta = 1 WITHOUT a prior memset.
+    // Only built when kv_block_ < seq_kv (multi-block); indexed [is_q_tail].
+    // The tail block is never first, so no beta-0 tail variant is needed.
+    cpu::x64::brgemm_kernel_t *mm2_kernels_beta0_[2] = {};
 
     // AMX tile configuration for a BRGEMM kernel. For non-AMX ISAs (e.g. f32 on
     // avx512_core) need_config is false and wsp_size is 0. For AMX (bf16/f16 on

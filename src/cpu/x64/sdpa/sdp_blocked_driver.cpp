@@ -165,13 +165,16 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
 } // namespace
 
 sdp_blocked_driver_t::~sdp_blocked_driver_t() {
-    for (int qi = 0; qi < 2; ++qi)
+    for (int qi = 0; qi < 2; ++qi) {
         for (int ki = 0; ki < 2; ++ki) {
             if (mm1_kernels_[qi][ki])
                 brgemm_kernel_destroy(mm1_kernels_[qi][ki]);
             if (mm2_kernels_[qi][ki])
                 brgemm_kernel_destroy(mm2_kernels_[qi][ki]);
         }
+        if (mm2_kernels_beta0_[qi])
+            brgemm_kernel_destroy(mm2_kernels_beta0_[qi]);
+    }
 }
 
 status_t sdp_blocked_driver_t::init(
@@ -244,9 +247,19 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
     kv_block_ = nstl::max<dim_t>(kv_block, 1);
     kv_tail_ = kv_block_ < seq_kv ? seq_kv % kv_block_ : 0;
-    // >1 block -> mm2 accumulates across blocks (beta = 1 onto a zeroed pv);
-    // single block keeps the original fresh-C (beta = 0) path.
+    // >1 block -> mm2 accumulates across blocks: the first block uses a beta = 0
+    // kernel (fresh C) and the rest beta = 1, so no destination pre-zeroing is
+    // needed. A single block keeps the original fresh-C (beta = 0) path.
     mm2_beta_ = kv_block_ < seq_kv ? 1.0f : 0.0f;
+
+    // mm2 can write its f32 result straight into the user output tensor (C =
+    // output, LDC = output row stride), skipping the pv scratch tile and the
+    // down-convert/scatter, when the output is f32 with unit-stride rows. All
+    // other cases (bf16/f16 output or a strided output column) keep pv+scatter.
+    const dim_t o_row = p_.o_strides[row_dim];
+    const dim_t o_col = p_.o_strides[p_.ndims - 1];
+    mm2_direct_ = p_.out_dt == data_type::f32 && o_col == 1;
+    const dim_t mm2_ldc = mm2_direct_ ? o_row : hs_v;
 
     // BRGEMM leading dims mirror the online kernel: A/B leading dims come from
     // the user strides (row_dim = the M/K row axis), scores/pv are dense.
@@ -295,7 +308,7 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
         // K = kv (one kv-block of the reduction); beta accumulates across them.
         CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, mm2_beta_, m, hs_v, kv,
                 /*lda=*/seq_kv,
-                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/hs_v,
+                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/mm2_ldc,
                 /*post_ops=*/nullptr, /*select_postop=*/false,
                 /*transB=*/false, &mm2_amx.need_config, mm2_amx.palette,
                 &mm2_amx.wsp_size));
@@ -367,8 +380,9 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // scattered (and down-converted) to the (possibly strided) user output.
     const size_t scores_bytes
             = align64(static_cast<size_t>(q_block_) * seq_kv * sizeof(float));
-    const size_t pv_bytes
-            = align64(static_cast<size_t>(q_block_) * hs_v * sizeof(float));
+    const size_t pv_bytes = mm2_direct_
+            ? 0
+            : align64(static_cast<size_t>(q_block_) * hs_v * sizeof(float));
     const size_t prob_bytes = p_.mm_dt == data_type::f32
             ? 0
             : align64(static_cast<size_t>(q_block_) * seq_kv * qk_dt_sz);
@@ -418,6 +432,9 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
     const bool pack_b = b_k_pack_ == 2;
     const bool need_kt = mm1_transpose_k_ || pack_b;
     const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride_;
+    // mm2 destination leading dim: the output row stride when writing f32
+    // directly to the user tensor, otherwise the dense pv tile (ldc = hs_v).
+    const dim_t mm2_ldc = mm2_direct_ ? p_.o_strides[row_dim] : hs_v;
 
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t m,
@@ -434,7 +451,8 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
         // K = kv (one kv-block); beta accumulates the blocks into pv.
         CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, mm2_beta_, m, hs_v, kv,
                 /*lda=*/seq_kv,
-                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/hs_v));
+                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
+                /*ldc=*/mm2_ldc));
         CHECK(brgemm_kernel_create(mm2, mm2_brg));
         return status::success;
     };
@@ -449,11 +467,21 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
                 CHECK(create_tile_kernels(&mm1_kernels_[qi][ki],
                         &mm2_kernels_[qi][ki], ms[qi], kvs[ki], select_postop));
             }
+            // Multi-block: a beta = 0 full-kv-block mm2 kernel writes the first
+            // block so accumulation needs no destination pre-zeroing.
+            if (mm2_beta_ != 0.0f) {
+                brgemm_desc_t mm2_brg0;
+                CHECK(build_brgemm_desc(mm2_brg0, p_.mm_dt, /*beta=*/0.0f,
+                        ms[qi], hs_v, kv_block_, /*lda=*/seq_kv,
+                        /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
+                        /*ldc=*/mm2_ldc));
+                CHECK(brgemm_kernel_create(&mm2_kernels_beta0_[qi], mm2_brg0));
+            }
         }
         return status::success;
     };
     auto destroy_kernels = [&]() {
-        for (int qi = 0; qi < 2; ++qi)
+        for (int qi = 0; qi < 2; ++qi) {
             for (int ki = 0; ki < 2; ++ki) {
                 if (mm1_kernels_[qi][ki]) {
                     brgemm_kernel_destroy(mm1_kernels_[qi][ki]);
@@ -464,6 +492,11 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
                     mm2_kernels_[qi][ki] = nullptr;
                 }
             }
+            if (mm2_kernels_beta0_[qi]) {
+                brgemm_kernel_destroy(mm2_kernels_beta0_[qi]);
+                mm2_kernels_beta0_[qi] = nullptr;
+            }
+        }
     };
 
     if (build_kernels(mm1_select_postop_) != status::success) {
@@ -584,8 +617,9 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     const size_t block_size = scratch_per_thread_;
     const size_t scores_bytes
             = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
-    const size_t pv_bytes
-            = align64(static_cast<size_t>(q_block) * hs_v * sizeof(float));
+    const size_t pv_bytes = mm2_direct_
+            ? 0
+            : align64(static_cast<size_t>(q_block) * hs_v * sizeof(float));
     const data_type_t mm_dt = p_.mm_dt;
     const data_type_t out_dt = p_.out_dt;
     const size_t qk_dt_sz = types::data_type_size(mm_dt);
@@ -916,23 +950,27 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
             }
         }
 
-        // mm2: pv[m, hs_v] = P[m, seq_kv] * V[seq_kv, hs_v], tiled over the
+        // mm2: out[m, hs_v] = P[m, seq_kv] * V[seq_kv, hs_v], tiled over the
         // seq_kv reduction so each call's B panel [kv_block, hs_v] is
-        // L2-resident. The blocks accumulate into pv: for >1 block the kernels
-        // use beta = 1 onto a pre-zeroed pv; a single block uses beta = 0 and
-        // no zeroing (identical to the untiled path).
+        // L2-resident. The blocks accumulate: when tiled into >1 block the
+        // first block uses a beta = 0 kernel (fresh C) and the rest beta = 1, so
+        // no destination pre-zeroing is needed; a single block uses beta = 0
+        // (identical to the untiled path). mm2 writes either straight into the
+        // f32 user output (mm2_direct_) or into the dense pv scratch tile.
         // P is the softmax output in the compute type: for f32 that is the
         // scores tile; otherwise down-convert the dense [m, seq_kv] scores into
         // the prob tile first (mm2's A must match the BRGEMM input type).
         if (mm_dt != data_type::f32)
             convert_from_f32(
                     prob, mm_dt, scores, static_cast<size_t>(m) * seq_kv);
-        if (mm2_beta_ != 0.0f)
-            std::memset(pv, 0, static_cast<size_t>(m) * hs_v * sizeof(float));
+
+        // mm2 destination: the user output directly (f32, unit-stride rows) or
+        // the pv scratch tile that is scattered/down-converted below.
+        float *mm2_c = mm2_direct_ ? reinterpret_cast<float *>(o_ptr) : pv;
 
         // Run mm2 for the kv-block [kv0, kv0+K): A is P's column slice (lda =
         // seq_kv), B is V's kv-block panel (packed: (kv0/k_pack) K-groups in;
-        // f32: kv0 rows down), both accumulating into the full pv tile.
+        // f32: kv0 rows down), accumulating into mm2_c.
         auto run_mm2 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
@@ -942,12 +980,18 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                                     * qk_dt_sz
                               : static_cast<const char *>(v_b_ptr)
                             + static_cast<size_t>(kv0) * v_row * qk_dt_sz;
-            brgemm_kernel_execute(k, 1, &be, pv, amx_wsp);
+            brgemm_kernel_execute(k, 1, &be, mm2_c, amx_wsp);
         };
 
+        // The first kv-block writes fresh C (beta = 0); the rest accumulate
+        // with beta = 1. The first block is always a FULL kv_block (the tail,
+        // if any, is never first), so mm2_kernels_beta0_ (sized for kv_block_)
+        // is the right kernel.
+        const bool multi_block = kv_block < seq_kv;
         if (mm2_amx_[qi][0].need_config)
             amx_tile_configure(mm2_amx_[qi][0].palette);
-        for (dim_t b = 0; b < n_kv_full; ++b)
+        run_mm2(multi_block ? mm2_kernels_beta0_[qi] : mm2_kernels_[qi][0], 0);
+        for (dim_t b = 1; b < n_kv_full; ++b)
             run_mm2(mm2_kernels_[qi][0], b * kv_block);
         if (kv_tail) {
             if (mm2_amx_[qi][1].need_config)
@@ -955,31 +999,49 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
             run_mm2(mm2_kernels_[qi][1], n_kv_full * kv_block);
         }
 
-        // Scatter the dense f32 pv tile to the (possibly strided) output,
-        // down-converting to the output type.
-        if (out_dt == data_type::f32) {
-            for (dim_t i = 0; i < m; ++i) {
-                const float *prow = pv + i * hs_v;
-                float *out_row = reinterpret_cast<float *>(
-                        o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
-                for (dim_t d = 0; d < hs_v; ++d)
-                    out_row[d * o_col] = prow[d];
-            }
-        } else if (out_dt == data_type::f16) {
-            for (dim_t i = 0; i < m; ++i) {
-                const float *prow = pv + i * hs_v;
-                float16_t *out_row = reinterpret_cast<float16_t *>(
-                        o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
-                for (dim_t d = 0; d < hs_v; ++d)
-                    out_row[d * o_col] = float16_t(prow[d]);
-            }
-        } else { // bf16
-            for (dim_t i = 0; i < m; ++i) {
-                const float *prow = pv + i * hs_v;
-                bfloat16_t *out_row = reinterpret_cast<bfloat16_t *>(
-                        o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
-                for (dim_t d = 0; d < hs_v; ++d)
-                    out_row[d * o_col] = bfloat16_t(prow[d]);
+        // Write the result to the user output. When mm2 wrote f32 directly into
+        // the output there is nothing to do. Otherwise down-convert / copy the
+        // dense f32 pv tile to the (possibly strided) output; unit-stride rows
+        // (the common case) use the bulk converters / memcpy, a strided output
+        // column falls back to scalar per-element stores.
+        if (!mm2_direct_) {
+            const bool dense_col = o_col == 1;
+            if (out_dt == data_type::f32) {
+                for (dim_t i = 0; i < m; ++i) {
+                    const float *prow = pv + i * hs_v;
+                    float *out_row = reinterpret_cast<float *>(
+                            o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
+                    if (dense_col)
+                        std::memcpy(out_row, prow,
+                                static_cast<size_t>(hs_v) * sizeof(float));
+                    else
+                        for (dim_t d = 0; d < hs_v; ++d)
+                            out_row[d * o_col] = prow[d];
+                }
+            } else if (out_dt == data_type::f16) {
+                for (dim_t i = 0; i < m; ++i) {
+                    const float *prow = pv + i * hs_v;
+                    float16_t *out_row = reinterpret_cast<float16_t *>(
+                            o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
+                    if (dense_col)
+                        cvt_float_to_float16(
+                                out_row, prow, static_cast<size_t>(hs_v));
+                    else
+                        for (dim_t d = 0; d < hs_v; ++d)
+                            out_row[d * o_col] = float16_t(prow[d]);
+                }
+            } else { // bf16
+                for (dim_t i = 0; i < m; ++i) {
+                    const float *prow = pv + i * hs_v;
+                    bfloat16_t *out_row = reinterpret_cast<bfloat16_t *>(
+                            o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
+                    if (dense_col)
+                        cvt_float_to_bfloat16(
+                                out_row, prow, static_cast<size_t>(hs_v));
+                    else
+                        for (dim_t d = 0; d < hs_v; ++d)
+                            out_row[d * o_col] = bfloat16_t(prow[d]);
+                }
             }
         }
         // Release AMX tiles so the configured state does not leak past this
