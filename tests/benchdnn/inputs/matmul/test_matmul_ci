@@ -7,38 +7,6 @@
 --batch=harness_matmul_sparse
 
 # Note: post any manually added test cases below this point.
+# When a generator support must be expanded, leave a TODO note.
 
-## Int8 src logical-M scales
-## TODO: integrate into a generator once per_m policy is introduced.
---reset --dt=s8:s8:f32 --attr-scales=src:1 32x64:64x48
---reset --dt=s8:s8:bf16 --attr-scales=src:1+wei:0:2 17x64:64x19
---reset --dt=u8:s8:f32 --attr-scales=src:1+wei:2 32x64:64x48
---reset --dt=s8:s8:f32 --attr-scales=src:2 3x17x64:3x64x19
---reset --dt=s8:s8:bf16 --attr-scales=src:2+wei:0:2 5x32x64:5x64x48
---reset --dt=u8:s8:f32 --attr-scales=src:2+wei:4 3x17x64:3x64x19
-
-## fpX per-batch scales
-## TODO: extend generated coverage for fpX masks.
---reset --dt=f8_e4m3:f8_e4m3:f32 --attr-scales=src:3+wei:3 2x2x8x8:2x2x8x16_n"fp8_per_batch_mask_3"
-
-# Binary select post-op with broadcast
---reset
---dt=f32,bf16
---stag=abcd --wtag=abcd --dtag=abcd
---attr-post-ops=select:f32:common
-1x16x32x256:1x16x256x33n"sdpa_cond_bcast"
-1x16x33x257:1x16x257x37n"sdpa_cond_bcast_tail"
-
-## In-place binary post-ops
-## TODO: integrate into a generator once in-place post-ops are supported there.
---reset --dt=f32 --stag=abx --wtag=abx  --dtag=abx --attr-post-ops=mul_inplace:f32 180x1344:1344x1612
---reset --dt=f32 --stag=abx --wtag=abx  --dtag=abx --attr-post-ops=relu+mul_inplace:f32 956x1792:1792x260
---reset --dt=f32 --stag=abx --wtag=abx  --dtag=abx --attr-post-ops=mul_inplace:f32 5x1x160x704:1x1x704x8
---reset --dt=f16 --stag=abx --wtag=abdc --dtag=abx --attr-post-ops=mul_inplace:f16 7x5x420x100:1x1x100x1
---reset --dt=f16 --stag=abx --wtag=ba   --dtag=ba  --attr-post-ops=relu+mul_inplace:f16 256x1868:1868x592
---reset --dt=f16 --stag=abx --wtag=ba   --dtag=abx --attr-post-ops=mul_inplace:f16 1956x333:333x608
-
---batch=harness_matmul_int2
-
-# u3 weights decompression
 --batch=harness_matmul_decompression_u3
