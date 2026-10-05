@@ -50,17 +50,34 @@ sdp_fused_driver_t::~sdp_fused_driver_t() {
 }
 
 status_t sdp_fused_driver_t::init(
-        const sdp_fused_params_t &params, engine_t *engine) {
-    CHECK(configure(params));
+        const sdp_fused_conf_t &conf, engine_t *engine) {
+    p_ = conf.params;
+    kv_blk_ = conf.kv_blk;
+    off_scores_ = conf.off_scores;
+    off_acc_ = conf.off_acc;
+    off_pv_ = conf.off_pv;
+    off_row_max_ = conf.off_row_max;
+    off_row_denom_ = conf.off_row_denom;
+    off_old_coef_ = conf.off_old_coef;
+    scratch_per_thread_ = conf.scratch_per_thread;
+    nthr_ = conf.nthr;
     return create_kernels(engine);
 }
 
-status_t sdp_fused_driver_t::configure(const sdp_fused_params_t &params) {
-    p_ = params;
+status_t sdp_fused_driver_t::init(
+        const sdp_fused_params_t &params, engine_t *engine) {
+    sdp_fused_conf_t conf;
+    CHECK(configure(params, conf));
+    return init(conf, engine);
+}
 
-    const dim_t seq_q = p_.seq_q;
-    const dim_t seq_kv = p_.seq_kv;
-    const dim_t hs_v = p_.head_size_v;
+status_t sdp_fused_driver_t::configure(
+        const sdp_fused_params_t &params, sdp_fused_conf_t &conf) {
+    conf.params = params;
+
+    const dim_t seq_q = params.seq_q;
+    const dim_t seq_kv = params.seq_kv;
+    const dim_t hs_v = params.head_size_v;
 
     // KV tiling width for the streaming softmax: K/V are processed in chunks of
     // up to this many columns, bounding the per-thread scores tile
@@ -68,7 +85,7 @@ status_t sdp_fused_driver_t::configure(const sdp_fused_params_t &params) {
     // TODO: this is a fixed heuristic; it should be derived from the cache
     // size, seq_q and head size so the scores/pv tiles stay cache-resident.
     constexpr dim_t kv_block_width = 512;
-    kv_blk_ = nstl::min<dim_t>(seq_kv, kv_block_width);
+    conf.kv_blk = nstl::min<dim_t>(seq_kv, kv_block_width);
 
     // Per-thread scratch: scores, acc, pv, row_max, row_denom, old_coef, each
     // 64-byte aligned so no buffer straddles a cacheline shared with the next.
@@ -76,19 +93,19 @@ status_t sdp_fused_driver_t::configure(const sdp_fused_params_t &params) {
     // scratchpad from configure() alone.
     const size_t fsz = sizeof(float);
     const size_t scores_bytes
-            = align64(static_cast<size_t>(seq_q) * kv_blk_ * fsz);
+            = align64(static_cast<size_t>(seq_q) * conf.kv_blk * fsz);
     const size_t acc_bytes = align64(static_cast<size_t>(seq_q) * hs_v * fsz);
     const size_t pv_bytes = align64(static_cast<size_t>(seq_q) * hs_v * fsz);
     const size_t row_bytes = align64(static_cast<size_t>(seq_q) * fsz);
-    off_scores_ = 0;
-    off_acc_ = off_scores_ + scores_bytes;
-    off_pv_ = off_acc_ + acc_bytes;
-    off_row_max_ = off_pv_ + pv_bytes;
-    off_row_denom_ = off_row_max_ + row_bytes;
-    off_old_coef_ = off_row_denom_ + row_bytes;
-    scratch_per_thread_ = off_old_coef_ + row_bytes;
+    conf.off_scores = 0;
+    conf.off_acc = conf.off_scores + scores_bytes;
+    conf.off_pv = conf.off_acc + acc_bytes;
+    conf.off_row_max = conf.off_pv + pv_bytes;
+    conf.off_row_denom = conf.off_row_max + row_bytes;
+    conf.off_old_coef = conf.off_row_denom + row_bytes;
+    conf.scratch_per_thread = conf.off_old_coef + row_bytes;
 
-    nthr_ = dnnl_get_max_threads();
+    conf.nthr = dnnl_get_max_threads();
 
     return status::success;
 }

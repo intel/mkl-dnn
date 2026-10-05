@@ -179,13 +179,44 @@ sdp_blocked_driver_t::~sdp_blocked_driver_t() {
 }
 
 status_t sdp_blocked_driver_t::init(
-        const sdp_blocked_params_t &params, engine_t *engine) {
-    CHECK(configure(params));
-    return create_kernels(engine);
+        const sdp_blocked_conf_t &conf, engine_t *engine) {
+    p_ = conf.params;
+    q_block_ = conf.q_block;
+    q_tail_ = conf.q_tail;
+    kv_block_ = conf.kv_block;
+    kv_tail_ = conf.kv_tail;
+    mm2_beta_ = conf.mm2_beta;
+    mm2_direct_ = conf.mm2_direct;
+    b_k_pack_ = conf.b_k_pack;
+    mm1_transpose_k_ = conf.mm1_transpose_k;
+    k_seq_stride_ = conf.k_seq_stride;
+    k_hs_stride_ = conf.k_hs_stride;
+    mm1_select_postop_ = conf.mm1_select_postop;
+    num_head_kv_ = conf.num_head_kv;
+    amx_wsp_bytes_ = conf.amx_wsp_bytes;
+    scratch_per_thread_ = conf.scratch_per_thread;
+    kt_global_bytes_ = conf.kt_global_bytes;
+    vt_global_bytes_ = conf.vt_global_bytes;
+    nthr_ = conf.nthr;
+    for (int qi = 0; qi < 2; ++qi)
+        for (int ki = 0; ki < 2; ++ki) {
+            mm1_amx_[qi][ki] = conf.mm1_amx[qi][ki];
+            mm2_amx_[qi][ki] = conf.mm2_amx[qi][ki];
+        }
+    return create_kernels(conf, engine);
 }
 
-status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
-    p_ = params;
+status_t sdp_blocked_driver_t::init(
+        const sdp_blocked_params_t &params, engine_t *engine) {
+    sdp_blocked_conf_t conf;
+    CHECK(configure(params, conf));
+    return init(conf, engine);
+}
+
+status_t sdp_blocked_driver_t::configure(
+        const sdp_blocked_params_t &params, sdp_blocked_conf_t &conf) {
+    conf.params = params;
+    const sdp_blocked_params_t &p_ = conf.params;
 
     // Supported compute types so far: f32, f16 and bf16. bf16/f16 feed a
     // VNNI2-packed B tile (materialised up front); f32 uses a plain B. int8 and
@@ -207,7 +238,7 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
             || (p_.mm_dt == data_type::f16 && mayiuse(avx512_core_amx_fp16));
     const dim_t k_pack = needs_vnni_b ? 2 : 1;
     const bool pack_b = needs_vnni_b;
-    b_k_pack_ = k_pack;
+    conf.b_k_pack = k_pack;
 
     const dim_t seq_q = p_.seq_q;
     const dim_t seq_kv = p_.seq_kv;
@@ -226,8 +257,9 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     dim_t q_block = static_cast<dim_t>(score_tile_budget_bytes / row_bytes);
     q_block = nstl::max<dim_t>(q_block, 1);
     q_block = nstl::min<dim_t>(q_block, seq_q);
-    q_block_ = q_block;
-    q_tail_ = seq_q % q_block;
+    conf.q_block = q_block;
+    const dim_t q_tail = seq_q % q_block;
+    conf.q_tail = q_tail;
 
     // Tile the seq_kv axis of both matmuls so each brgemm call's weight panel
     // (mm1's K slice [hs_qk x kv_block], mm2's V slice [kv_block x hs_v]) stays
@@ -235,7 +267,7 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // turns memory-bound once that panel exceeds ~L2. Size kv_block so the wider
     // panel fits an L2/8 budget, then round DOWN to a multiple of 64 (clean VNNI
     // sub-panels, AMX-K-friendly). If that covers the whole axis (short context)
-    // kv_block_ == seq_kv: one untiled block, no kv tail, and mm2 keeps beta = 0.
+    // kv_block == seq_kv: one untiled block, no kv tail, and mm2 keeps beta = 0.
     const size_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
     dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
@@ -246,12 +278,15 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // to a single untiled block over the whole axis.
     if (kv_block < 64) kv_block = seq_kv;
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
-    kv_block_ = nstl::max<dim_t>(kv_block, 1);
-    kv_tail_ = kv_block_ < seq_kv ? seq_kv % kv_block_ : 0;
+    kv_block = nstl::max<dim_t>(kv_block, 1);
+    conf.kv_block = kv_block;
+    const dim_t kv_tail = kv_block < seq_kv ? seq_kv % kv_block : 0;
+    conf.kv_tail = kv_tail;
     // >1 block -> mm2 accumulates across blocks: the first block uses a beta = 0
     // kernel (fresh C) and the rest beta = 1, so no destination pre-zeroing is
     // needed. A single block keeps the original fresh-C (beta = 0) path.
-    mm2_beta_ = kv_block_ < seq_kv ? 1.0f : 0.0f;
+    const float mm2_beta = kv_block < seq_kv ? 1.0f : 0.0f;
+    conf.mm2_beta = mm2_beta;
 
     // mm2 can write its f32 result straight into the user output tensor (C =
     // output, LDC = output row stride), skipping the pv scratch tile and the
@@ -259,8 +294,9 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // other cases (bf16/f16 output or a strided output column) keep pv+scatter.
     const dim_t o_row = p_.o_strides[row_dim];
     const dim_t o_col = p_.o_strides[p_.ndims - 1];
-    mm2_direct_ = p_.out_dt == data_type::f32 && o_col == 1;
-    const dim_t mm2_ldc = mm2_direct_ ? o_row : hs_v;
+    const bool mm2_direct = p_.out_dt == data_type::f32 && o_col == 1;
+    conf.mm2_direct = mm2_direct;
+    const dim_t mm2_ldc = mm2_direct ? o_row : hs_v;
 
     // BRGEMM leading dims mirror the online kernel: A/B leading dims come from
     // the user strides (row_dim = the M/K row axis), scores/pv are dense.
@@ -277,42 +313,45 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // materialises a dense [hs_qk, seq_kv] transpose once (see execute); a K
     // that is logically pre-transposed but physically stored with hs_qk
     // contiguous therefore still gets transposed here.
-    k_seq_stride_ = p_.mm1_transpose_b ? p_.k_strides[row_dim]
-                                       : p_.k_strides[p_.ndims - 1];
-    k_hs_stride_ = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
-                                      : p_.k_strides[row_dim];
-    mm1_transpose_k_ = k_seq_stride_ != 1;
+    const dim_t k_seq_stride = p_.mm1_transpose_b ? p_.k_strides[row_dim]
+                                                  : p_.k_strides[p_.ndims - 1];
+    const dim_t k_hs_stride = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
+                                                 : p_.k_strides[row_dim];
+    conf.k_seq_stride = k_seq_stride;
+    conf.k_hs_stride = k_hs_stride;
+    const bool mm1_transpose_k = k_seq_stride != 1;
+    conf.mm1_transpose_k = mm1_transpose_k;
     // mm1 materialises a dense (and, for bf16/f16, VNNI-packed) [hs_qk, seq_kv]
     // B tile whenever it must transpose K or pack it; its ldb is then the dense
     // seq_kv. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in place.
-    const bool need_kt = mm1_transpose_k_ || pack_b;
-    const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride_;
+    const bool need_kt = mm1_transpose_k || pack_b;
+    const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride;
 
-    // Build the mm1/mm2 BRGEMM descriptors (no JIT) purely to read each
-    // kernel's AMX palette + tile-store wsp, which the per-thread scratch size
-    // depends on. create_kernels() rebuilds the identical descriptors (same
-    // arithmetic from the members set above) right before compiling them. kv is
-    // the seq_kv sub-block width for this (mm1 N / mm2 K); the mm1 post-op
-    // descriptors keep the full seq_kv width (po_width) so the fused mask/select
-    // is addressed by global column at runtime.
-    auto build_tile_descs = [&](dim_t m, dim_t kv, bool select_postop,
-                                    brgemm_amx_cfg_t &mm1_amx,
-                                    brgemm_amx_cfg_t &mm2_amx) -> status_t {
-        brgemm_desc_t mm1_brg, mm2_brg;
-        CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f, m, kv, hs_qk,
-                /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
+    // Build (and store in conf) the mm1/mm2 BRGEMM descriptors (no JIT), plus
+    // each kernel's AMX palette + tile-store wsp (the per-thread scratch size
+    // depends on them). create_kernels() compiles directly from these stored
+    // descriptors -- no rebuild. kv is the seq_kv sub-block width (mm1 N / mm2
+    // K); the mm1 post-op descriptors keep the full seq_kv width (po_width) so
+    // the fused mask/select is addressed by global column at runtime.
+    auto build_tile_descs = [&](dim_t m, dim_t kv, bool select_postop, int qi,
+                                    int ki) -> status_t {
+        brgemm_amx_cfg_t &mm1_amx = conf.mm1_amx[qi][ki];
+        brgemm_amx_cfg_t &mm2_amx = conf.mm2_amx[qi][ki];
+        CHECK(build_brgemm_desc(conf.mm1_desc[qi][ki], p_.mm_dt, /*beta=*/0.0f,
+                m, kv, hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop,
                 /*transB=*/false, &mm1_amx.need_config, mm1_amx.palette,
                 &mm1_amx.wsp_size, /*po_width=*/seq_kv));
         // mm2 B is the user V in place for f32 (ldb = its row stride), or a
         // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
         // K = kv (one kv-block of the reduction); beta accumulates across them.
-        CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, mm2_beta_, m, hs_v, kv,
-                /*lda=*/seq_kv,
+        CHECK(build_brgemm_desc(conf.mm2_desc[qi][ki], p_.mm_dt, mm2_beta, m,
+                hs_v, kv, /*lda=*/seq_kv,
                 /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/mm2_ldc,
                 /*post_ops=*/nullptr, /*select_postop=*/false,
                 /*transB=*/false, &mm2_amx.need_config, mm2_amx.palette,
                 &mm2_amx.wsp_size));
+        conf.mm_valid[qi][ki] = true;
         return status::success;
     };
 
@@ -335,23 +374,39 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     const bool want_select_postop = p_.has_select && p_.select_fusiable
             && cond_row_stride == seq_kv && cond_col_stride == 1;
 
-    mm1_select_postop_ = want_select_postop;
+    conf.mm1_select_postop = want_select_postop;
 
     // Descriptor grid: [is_q_tail][is_kv_tail]. The query dimension splits into
-    // q_block_ (+ q_tail_); the key dimension into kv_block_ (+ kv_tail_). Tail
-    // slots are only built when the corresponding remainder is non-zero.
+    // q_block (+ q_tail); the key dimension into kv_block (+ kv_tail). Tail
+    // slots are only built when the corresponding remainder is non-zero. The
+    // beta = 0 full-kv-block mm2 for the first block (when seq_kv is tiled) is
+    // built per q-tile.
     auto build_all_descs = [&](bool select_postop) -> status_t {
-        const dim_t ms[2] = {q_block_, q_tail_};
-        const dim_t kvs[2] = {kv_block_, kv_tail_};
+        const dim_t ms[2] = {q_block, q_tail};
+        const dim_t kvs[2] = {kv_block, kv_tail};
         for (int qi = 0; qi < 2; ++qi) {
-            if (qi == 1 && q_tail_ == 0) continue;
+            if (qi == 1 && q_tail == 0) continue;
             for (int ki = 0; ki < 2; ++ki) {
-                if (ki == 1 && kv_tail_ == 0) continue;
-                CHECK(build_tile_descs(ms[qi], kvs[ki], select_postop,
-                        mm1_amx_[qi][ki], mm2_amx_[qi][ki]));
+                if (ki == 1 && kv_tail == 0) continue;
+                CHECK(build_tile_descs(ms[qi], kvs[ki], select_postop, qi, ki));
+            }
+            if (mm2_beta != 0.0f) {
+                CHECK(build_brgemm_desc(conf.mm2_desc_beta0[qi], p_.mm_dt,
+                        /*beta=*/0.0f, ms[qi], hs_v, kv_block, /*lda=*/seq_kv,
+                        /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
+                        /*ldc=*/mm2_ldc));
+                conf.beta0_valid[qi] = true;
             }
         }
         return status::success;
+    };
+
+    auto clear_descs = [&]() {
+        for (int qi = 0; qi < 2; ++qi) {
+            for (int ki = 0; ki < 2; ++ki)
+                conf.mm_valid[qi][ki] = false;
+            conf.beta0_valid[qi] = false;
+        }
     };
 
     if (build_all_descs(want_select_postop) != status::success) {
@@ -359,7 +414,8 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
         // and let the pre-pass apply the mask instead. create_kernels() mirrors
         // this decision and additionally retries if the compiled kernel itself
         // rejects the post-op.
-        mm1_select_postop_ = false;
+        clear_descs();
+        conf.mm1_select_postop = false;
         CHECK(build_all_descs(false));
     }
 
@@ -369,7 +425,8 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // rather than compute silently incorrect results.
     for (int qi = 0; qi < 2; ++qi)
         for (int ki = 0; ki < 2; ++ki)
-            if ((mm1_amx_[qi][ki].need_config || mm2_amx_[qi][ki].need_config)
+            if ((conf.mm1_amx[qi][ki].need_config
+                        || conf.mm2_amx[qi][ki].need_config)
                     && !pack_b)
                 return status::unimplemented;
 
@@ -380,107 +437,62 @@ status_t sdp_blocked_driver_t::configure(const sdp_blocked_params_t &params) {
     // directly. The pv tile lets mm2 write a dense output that is then
     // scattered (and down-converted) to the (possibly strided) user output.
     const size_t scores_bytes
-            = align64(static_cast<size_t>(q_block_) * seq_kv * sizeof(float));
-    const size_t pv_bytes = mm2_direct_
+            = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
+    const size_t pv_bytes = mm2_direct
             ? 0
-            : align64(static_cast<size_t>(q_block_) * hs_v * sizeof(float));
+            : align64(static_cast<size_t>(q_block) * hs_v * sizeof(float));
     const size_t prob_bytes = p_.mm_dt == data_type::f32
             ? 0
-            : align64(static_cast<size_t>(q_block_) * seq_kv * qk_dt_sz);
+            : align64(static_cast<size_t>(q_block) * seq_kv * qk_dt_sz);
     // AMX (bf16/f16) kernels need a per-thread tile-store scratch; size it to
     // the largest wsp over all kernels (they run sequentially per work-item).
     size_t max_wsp = 0;
     for (int qi = 0; qi < 2; ++qi)
         for (int ki = 0; ki < 2; ++ki)
             max_wsp = nstl::max(max_wsp,
-                    nstl::max(mm1_amx_[qi][ki].wsp_size,
-                            mm2_amx_[qi][ki].wsp_size));
-    amx_wsp_bytes_ = max_wsp > 0 ? align64(max_wsp) : 0;
-    scratch_per_thread_ = scores_bytes + pv_bytes + prob_bytes + amx_wsp_bytes_;
+                    nstl::max(conf.mm1_amx[qi][ki].wsp_size,
+                            conf.mm2_amx[qi][ki].wsp_size));
+    conf.amx_wsp_bytes = max_wsp > 0 ? align64(max_wsp) : 0;
+    conf.scratch_per_thread
+            = scores_bytes + pv_bytes + prob_bytes + conf.amx_wsp_bytes;
 
-    nthr_ = dnnl_get_max_threads();
+    conf.nthr = dnnl_get_max_threads();
 
     // transpose_b QK^T: mm1 needs a dense [hs_qk, seq_kv] B tile per head, but
     // the brgemm ukernel has no transposed-B mode. Transpose the whole K tensor
     // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
-    // buffer that follows the per-thread blocks; kt_global_bytes_ sizes it. For
+    // buffer that follows the per-thread blocks; kt_global_bytes sizes it. For
     // bf16/f16 the tile is VNNI-packed over hs_qk (K padded to k_pack), so the
     // buffer uses rnd_up(hs_qk, k_pack) rows.
-    num_head_kv_ = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
+    const dim_t num_head_kv
+            = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
+    conf.num_head_kv = num_head_kv;
     const dim_t hs_qk_pad = utils::rnd_up(hs_qk, k_pack);
     const dim_t seq_kv_pad = utils::rnd_up(seq_kv, k_pack);
-    if (need_kt && num_head_kv_ > 0)
-        kt_global_bytes_ = static_cast<size_t>(p_.batch) * num_head_kv_
+    if (need_kt && num_head_kv > 0)
+        conf.kt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
                 * hs_qk_pad * seq_kv * qk_dt_sz;
     // bf16/f16: mm2's V is VNNI-packed once per (batch, kv_head) into a shared
     // [batch x num_head_kv x rnd_up(seq_kv, k_pack) x hs_v] buffer following the
     // transposed-K buffer.
-    if (pack_b && num_head_kv_ > 0)
-        vt_global_bytes_ = static_cast<size_t>(p_.batch) * num_head_kv_
+    if (pack_b && num_head_kv > 0)
+        conf.vt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
                 * seq_kv_pad * hs_v * qk_dt_sz;
 
     return status::success;
 }
 
-status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
+status_t sdp_blocked_driver_t::create_kernels(
+        const sdp_blocked_conf_t &conf, engine_t *engine) {
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
-    const dim_t hs_v = p_.head_size_v;
     const int row_dim = p_.ndims - 2;
-    // Recompute the packing / transpose / leading-dim decisions from the
-    // members configure() populated so the descriptors compiled here match the
-    // ones configure() sized the scratchpad from.
+    // Packing / transpose / leading-dim decisions mirror configure(); needed
+    // only for the (rare) select-post-op compile-failure rebuild below.
     const bool pack_b = b_k_pack_ == 2;
     const bool need_kt = mm1_transpose_k_ || pack_b;
     const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride_;
-    // mm2 destination leading dim: the output row stride when writing f32
-    // directly to the user tensor, otherwise the dense pv tile (ldc = hs_v).
-    const dim_t mm2_ldc = mm2_direct_ ? p_.o_strides[row_dim] : hs_v;
 
-    auto create_tile_kernels
-            = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t m,
-                      dim_t kv, bool select_postop) -> status_t {
-        brgemm_desc_t mm1_brg, mm2_brg;
-        CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f, m, kv, hs_qk,
-                /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb, /*ldc=*/seq_kv,
-                &p_.mm1_post_ops, select_postop, /*transB=*/false,
-                /*amx_need_config=*/nullptr, /*amx_palette=*/nullptr,
-                /*amx_wsp=*/nullptr, /*po_width=*/seq_kv));
-        CHECK(brgemm_kernel_create(mm1, mm1_brg));
-        // mm2 B is the user V in place for f32 (ldb = its row stride), or a
-        // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
-        // K = kv (one kv-block); beta accumulates the blocks into pv.
-        CHECK(build_brgemm_desc(mm2_brg, p_.mm_dt, mm2_beta_, m, hs_v, kv,
-                /*lda=*/seq_kv,
-                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
-                /*ldc=*/mm2_ldc));
-        CHECK(brgemm_kernel_create(mm2, mm2_brg));
-        return status::success;
-    };
-
-    auto build_kernels = [&](bool select_postop) -> status_t {
-        const dim_t ms[2] = {q_block_, q_tail_};
-        const dim_t kvs[2] = {kv_block_, kv_tail_};
-        for (int qi = 0; qi < 2; ++qi) {
-            if (qi == 1 && q_tail_ == 0) continue;
-            for (int ki = 0; ki < 2; ++ki) {
-                if (ki == 1 && kv_tail_ == 0) continue;
-                CHECK(create_tile_kernels(&mm1_kernels_[qi][ki],
-                        &mm2_kernels_[qi][ki], ms[qi], kvs[ki], select_postop));
-            }
-            // Multi-block: a beta = 0 full-kv-block mm2 kernel writes the first
-            // block so accumulation needs no destination pre-zeroing.
-            if (mm2_beta_ != 0.0f) {
-                brgemm_desc_t mm2_brg0;
-                CHECK(build_brgemm_desc(mm2_brg0, p_.mm_dt, /*beta=*/0.0f,
-                        ms[qi], hs_v, kv_block_, /*lda=*/seq_kv,
-                        /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
-                        /*ldc=*/mm2_ldc));
-                CHECK(brgemm_kernel_create(&mm2_kernels_beta0_[qi], mm2_brg0));
-            }
-        }
-        return status::success;
-    };
     auto destroy_kernels = [&]() {
         for (int qi = 0; qi < 2; ++qi) {
             for (int ki = 0; ki < 2; ++ki) {
@@ -500,12 +512,53 @@ status_t sdp_blocked_driver_t::create_kernels(engine_t *engine) {
         }
     };
 
-    if (build_kernels(mm1_select_postop_) != status::success) {
-        // The compiled ukernel rejected the select post-op; drop it and let the
-        // pre-pass apply the mask instead (matches the configure() fallback).
+    // Compile the mm1/mm2 (+ beta-0) kernels directly from the finalized
+    // descriptors configure() stored in `conf` -- no rebuild. mm2 descriptors
+    // carry no mm1 post-op, so only mm1 is affected by the select fallback.
+    auto compile_from_conf = [&]() -> status_t {
+        for (int qi = 0; qi < 2; ++qi) {
+            for (int ki = 0; ki < 2; ++ki) {
+                if (!conf.mm_valid[qi][ki]) continue;
+                CHECK(brgemm_kernel_create(
+                        &mm1_kernels_[qi][ki], conf.mm1_desc[qi][ki]));
+                CHECK(brgemm_kernel_create(
+                        &mm2_kernels_[qi][ki], conf.mm2_desc[qi][ki]));
+            }
+            if (conf.beta0_valid[qi])
+                CHECK(brgemm_kernel_create(
+                        &mm2_kernels_beta0_[qi], conf.mm2_desc_beta0[qi]));
+        }
+        return status::success;
+    };
+
+    if (compile_from_conf() != status::success) {
+        // The compiled ukernel rejected the fused select post-op even though
+        // the descriptor built. Drop it and let the pre-pass apply the mask:
+        // rebuild the mm1 descriptors without the post-op and recompile; mm2 +
+        // beta-0 are unaffected, so recompile those from conf.
         destroy_kernels();
         mm1_select_postop_ = false;
-        CHECK(build_kernels(false));
+        const dim_t ms[2] = {q_block_, q_tail_};
+        const dim_t kvs[2] = {kv_block_, kv_tail_};
+        for (int qi = 0; qi < 2; ++qi) {
+            if (qi == 1 && q_tail_ == 0) continue;
+            for (int ki = 0; ki < 2; ++ki) {
+                if (ki == 1 && kv_tail_ == 0) continue;
+                brgemm_desc_t mm1_brg;
+                CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f,
+                        ms[qi], kvs[ki], hs_qk, /*lda=*/p_.q_strides[row_dim],
+                        /*ldb=*/mm1_ldb, /*ldc=*/seq_kv, &p_.mm1_post_ops,
+                        /*select_postop=*/false, /*transB=*/false,
+                        /*amx_need_config=*/nullptr, /*amx_palette=*/nullptr,
+                        /*amx_wsp=*/nullptr, /*po_width=*/seq_kv));
+                CHECK(brgemm_kernel_create(&mm1_kernels_[qi][ki], mm1_brg));
+                CHECK(brgemm_kernel_create(
+                        &mm2_kernels_[qi][ki], conf.mm2_desc[qi][ki]));
+            }
+            if (conf.beta0_valid[qi])
+                CHECK(brgemm_kernel_create(
+                        &mm2_kernels_beta0_[qi], conf.mm2_desc_beta0[qi]));
+        }
     }
 
     // Reuse the vectorized jit softmax kernel for the max/exp/normalize over
@@ -1100,6 +1153,20 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
 #else // !DNNL_X64
 
 sdp_blocked_driver_t::~sdp_blocked_driver_t() = default;
+
+status_t sdp_blocked_driver_t::configure(
+        const sdp_blocked_params_t &params, sdp_blocked_conf_t &conf) {
+    UNUSED(params);
+    UNUSED(conf);
+    return status::unimplemented;
+}
+
+status_t sdp_blocked_driver_t::init(
+        const sdp_blocked_conf_t &conf, engine_t *engine) {
+    UNUSED(conf);
+    UNUSED(engine);
+    return status::unimplemented;
+}
 
 status_t sdp_blocked_driver_t::init(
         const sdp_blocked_params_t &params, engine_t *engine) {

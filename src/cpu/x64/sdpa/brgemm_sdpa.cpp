@@ -146,6 +146,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     auto scratchpad = scratchpad_registry().registrar();
 
     if (kind_ == sdpa_driver_kind_t::fused) {
+        auto &fp_ = fc_.params;
         fp_ = sdp_fused_params_t();
         fp_.ndims = sdpa_pd_t::ndims;
         fp_.batch = desc()->batch();
@@ -173,17 +174,17 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
                     cond_mdw.dims(), cond_mdw.dims() + sdpa_pd_t::ndims);
         }
 
-        // Size the scratchpad from a throwaway driver: configure() runs only
-        // the JIT-free arithmetic (KV tiling, per-thread scratch), so the pd
-        // never compiles a kernel.
-        sdp_fused_driver_t sizer;
-        CHECK(sizer.configure(fp_));
-        nthr_ = sizer.nthr();
+        // Derive the tiling + per-thread scratch layout once (JIT-free), then
+        // size the scratchpad from it; the primitive compiles its kernels from
+        // the same conf, so no work is repeated and the pd stays kernel-free.
+        CHECK(sdp_fused_driver_t::configure(fp_, fc_));
+        nthr_ = fc_.nthr;
         scratchpad.book(memory_tracking::names::key_sdpa_brgemm_buffer,
-                sizer.scratch_total(nthr_), 1, 64);
+                fc_.scratch_total(nthr_), 1, 64);
         return status::success;
     }
 
+    auto &bp_ = bc_.params;
     bp_ = sdp_blocked_params_t();
     bp_.ndims = sdpa_pd_t::ndims;
     bp_.batch = desc()->batch();
@@ -244,14 +245,14 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         bp_.mm1_post_ops.push_back(mk);
     }
 
-    // Size the scratchpad from a throwaway driver: configure() runs only the
-    // JIT-free arithmetic + the AMX palette/wsp read from the finalized BRGEMM
-    // descriptors, so the pd never compiles a kernel.
-    sdp_blocked_driver_t sizer;
-    CHECK(sizer.configure(bp_));
-    nthr_ = sizer.nthr();
+    // Derive the query/KV blocking, per-thread + global scratch layout, and the
+    // finalized BRGEMM descriptors once (JIT-free); size the scratchpad from the
+    // same conf the primitive later compiles its kernels from, so no work is
+    // repeated and the pd stays kernel-free.
+    CHECK(sdp_blocked_driver_t::configure(bp_, bc_));
+    nthr_ = bc_.nthr;
     scratchpad.book(memory_tracking::names::key_sdpa_brgemm_buffer,
-            sizer.scratch_total(nthr_), 1, 64);
+            bc_.scratch_total(nthr_), 1, 64);
 
     return status::success;
 }
@@ -259,10 +260,10 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 status_t brgemm_sdpa_fwd_t::init(engine_t *engine) {
     if (pd()->driver_kind() == sdpa_driver_kind_t::fused) {
         fused_driver_ = std::make_shared<sdp_fused_driver_t>();
-        return fused_driver_->init(pd()->fused_params(), engine);
+        return fused_driver_->init(pd()->fused_conf(), engine);
     }
     blocked_driver_ = std::make_shared<sdp_blocked_driver_t>();
-    return blocked_driver_->init(pd()->blocked_params(), engine);
+    return blocked_driver_->init(pd()->blocked_conf(), engine);
 }
 
 status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {

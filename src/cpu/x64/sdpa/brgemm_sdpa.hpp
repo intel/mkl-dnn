@@ -49,21 +49,22 @@ struct brgemm_sdpa_fwd_t : public primitive_t {
         status_t init(const engine_t *engine);
 
         sdpa_driver_kind_t driver_kind() const { return kind_; }
-        const sdp_blocked_params_t &blocked_params() const { return bp_; }
-        const sdp_fused_params_t &fused_params() const { return fp_; }
+        const sdp_blocked_conf_t &blocked_conf() const { return bc_; }
+        const sdp_fused_conf_t &fused_conf() const { return fc_; }
         int nthr() const { return nthr_; }
 
     private:
         friend struct brgemm_sdpa_fwd_t;
 
         sdpa_driver_kind_t kind_ = sdpa_driver_kind_t::blocked;
-        // Plain compute parameters derived from this pd's memory descriptors
-        // (see init()); only the struct matching kind_ is populated. The
-        // driver is JIT-compiled by the primitive (brgemm_sdpa_fwd_t::init),
-        // keeping the pd kernel-free; configure() is used here only to size the
-        // scratchpad.
-        sdp_blocked_params_t bp_;
-        sdp_fused_params_t fp_;
+        // Derived compute configuration computed once in init() (via the
+        // driver's static JIT-free configure()); only the struct matching
+        // kind_ is populated. It owns the KV/query tiling and per-thread
+        // scratch layout (and, for blocked, the finalized BRGEMM descriptors),
+        // so the pd sizes its scratchpad from it and the primitive JIT-compiles
+        // the kernels from it -- keeping the pd itself kernel-free.
+        sdp_blocked_conf_t bc_;
+        sdp_fused_conf_t fc_;
         int nthr_ = 1;
     };
 

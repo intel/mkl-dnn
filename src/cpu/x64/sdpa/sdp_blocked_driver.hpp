@@ -23,6 +23,14 @@
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
 
+#if DNNL_X64
+// Finalized (not compiled) BRGEMM descriptors live in sdp_blocked_conf_t by
+// value, so the x64 descriptor type must be complete. Guarded: the conf's
+// descriptor members are x64-only and this header is also parsed on other
+// architectures (via the graph backend), where only pointer members are used.
+#include "cpu/x64/brgemm/brgemm_types.hpp"
+#endif
+
 namespace dnnl {
 namespace impl {
 
@@ -153,6 +161,65 @@ struct sdp_blocked_run_args_t {
     std::vector<const void *> mm1_post_op_rhs;
 };
 
+// AMX tile configuration for a BRGEMM kernel. For non-AMX ISAs (e.g. f32 on
+// avx512_core) need_config is false and wsp_size is 0. For AMX (bf16/f16 on
+// avx512_core_amx*), the palette must be loaded via amx_tile_configure() before
+// the kernel runs and each thread needs a wsp_size-byte tile-store scratch
+// passed as the BRGEMM scratch argument. POD, so it lives in the header on all
+// architectures.
+struct brgemm_amx_cfg_t {
+    bool need_config = false;
+    size_t wsp_size = 0;
+    char palette[64] = {};
+};
+
+// Derived compute configuration: the full result of the JIT-free arithmetic
+// (query/KV blocking, per-thread + global scratch layout, and the finalized --
+// not compiled -- BRGEMM descriptors). Computed once by configure() and owned
+// by the primitive_desc (mirroring brgemm_matmul_conf_t + brg_descs_), so the
+// pd sizes its scratchpad from it and the primitive JIT-compiles the kernels
+// directly from its descriptors without recomputing or rebuilding anything.
+struct sdp_blocked_conf_t {
+    sdp_blocked_params_t params;
+    dim_t q_block = 0, q_tail = 0;
+    dim_t kv_block = 0, kv_tail = 0;
+    // mm2 accumulates across kv-blocks: beta = 0 for a single block, else the
+    // first block uses a beta = 0 kernel and the rest beta = 1.
+    float mm2_beta = 0.0f;
+    // mm2 writes its f32 result directly into the user output (no pv+scatter).
+    bool mm2_direct = false;
+    // BRGEMM B VNNI pack factor (1 plain, 2 VNNI2).
+    dim_t b_k_pack = 1;
+    bool mm1_transpose_k = false;
+    dim_t k_seq_stride = 0, k_hs_stride = 0;
+    // The (fusiable, dense-condition) select mask is folded into mm1 as a
+    // binary_select post-op; the descriptors below are built accordingly.
+    bool mm1_select_postop = false;
+    dim_t num_head_kv = 0;
+    size_t amx_wsp_bytes = 0;
+    size_t scratch_per_thread = 0;
+    size_t kt_global_bytes = 0, vt_global_bytes = 0;
+    int nthr = 0;
+
+    // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
+    brgemm_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2];
+
+#if DNNL_X64
+    // Finalized BRGEMM descriptors, indexed [is_q_tail][is_kv_tail]; the
+    // mm_valid flag marks which slots were built (tail slots stay unbuilt when
+    // the corresponding remainder is 0). mm2_beta0 is the beta = 0 full-kv-block
+    // mm2 descriptor used for the first block when seq_kv is tiled (per q-tile).
+    brgemm_desc_t mm1_desc[2][2], mm2_desc[2][2], mm2_desc_beta0[2];
+    bool mm_valid[2][2] = {};
+    bool beta0_valid[2] = {};
+#endif
+
+    size_t scratch_total(int n) const {
+        return scratch_per_thread * static_cast<size_t>(n) + kt_global_bytes
+                + vt_global_bytes;
+    }
+};
+
 // Owns the BRGEMM kernels for the (full / query-tail) tiles and drives the
 // blocked execute loop. x64-only; on other builds init() returns unimplemented.
 class sdp_blocked_driver_t {
@@ -162,20 +229,21 @@ public:
     sdp_blocked_driver_t(const sdp_blocked_driver_t &) = delete;
     sdp_blocked_driver_t &operator=(const sdp_blocked_driver_t &) = delete;
 
-    // Create the BRGEMM kernels and compute the query blocking + per-thread
-    // scratch size. Must be called once before execute(). The engine is used
-    // to instantiate the reused jit softmax kernel; the execute path stays
-    // engine-free. Equivalent to configure() followed by create_kernels().
-    status_t init(const sdp_blocked_params_t &params, engine_t *engine);
+    // Compute the derived configuration (query/KV blocking, per-thread + global
+    // scratch layout, and the finalized BRGEMM descriptors + AMX palette/wsp)
+    // from the plain params. JIT-free, so a primitive_desc can size its
+    // scratchpad from the returned conf without compiling kernels.
+    static status_t configure(
+            const sdp_blocked_params_t &params, sdp_blocked_conf_t &conf);
 
-    // Two-phase split of init() for the CPU sdpa primitive: configure() does
-    // only the JIT-free arithmetic (query blocking, per-thread scratch size,
-    // AMX palette + tile-store wsp read from the finalized BRGEMM descriptors)
-    // so a primitive_desc can size its scratchpad without compiling kernels;
-    // create_kernels() then JIT-compiles the BRGEMM + softmax kernels. Call
-    // configure() first, create_kernels() before execute().
-    status_t configure(const sdp_blocked_params_t &params);
-    status_t create_kernels(engine_t *engine);
+    // JIT-compile the BRGEMM + softmax kernels from a conf produced by
+    // configure(); must be called once before execute(). The engine is used to
+    // instantiate the reused jit softmax kernel; the execute path stays
+    // engine-free.
+    status_t init(const sdp_blocked_conf_t &conf, engine_t *engine);
+    // Convenience one-shot for callers that do not split pd sizing from kernel
+    // compilation (e.g. the graph backend): configure() then init(conf).
+    status_t init(const sdp_blocked_params_t &params, engine_t *engine);
 
     // Per-thread scratch requirement in bytes (scores + pv tiles). The caller
     // books nthr() * scratch_per_thread() bytes and passes the base pointer.
@@ -198,6 +266,10 @@ public:
             int nthr) const;
 
 private:
+    // JIT-compile the kernels from the already-populated members plus the
+    // finalized descriptors in `conf`. Shared by both init() overloads.
+    status_t create_kernels(const sdp_blocked_conf_t &conf, engine_t *engine);
+
     sdp_blocked_params_t p_;
     dim_t q_block_ = 0;
     dim_t q_tail_ = 0; // seq_q % q_block_ (0 if evenly divided)
@@ -282,16 +354,7 @@ private:
     // The tail block is never first, so no beta-0 tail variant is needed.
     cpu::x64::brgemm_kernel_t *mm2_kernels_beta0_[2] = {};
 
-    // AMX tile configuration for a BRGEMM kernel. For non-AMX ISAs (e.g. f32 on
-    // avx512_core) need_config is false and wsp_size is 0. For AMX (bf16/f16 on
-    // avx512_core_amx*), the palette must be loaded via amx_tile_configure()
-    // before the kernel runs and each thread needs a wsp_size-byte tile-store
-    // scratch passed as the BRGEMM scratch argument.
-    struct brgemm_amx_cfg_t {
-        bool need_config = false;
-        size_t wsp_size = 0;
-        char palette[64] = {};
-    };
+    // AMX tile configuration for a BRGEMM kernel (see brgemm_amx_cfg_t).
     // Indexed [is_q_tail][is_kv_tail], matching mm1_kernels_/mm2_kernels_.
     brgemm_amx_cfg_t mm1_amx_[2][2], mm2_amx_[2][2];
     // Per-thread AMX tile-store scratch (max wsp over all kernels), 0 if none.

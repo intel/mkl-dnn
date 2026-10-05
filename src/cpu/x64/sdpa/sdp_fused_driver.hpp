@@ -92,6 +92,26 @@ struct sdp_fused_run_args_t {
     float fill = 0.0f;
 };
 
+// Derived compute configuration: the full result of the JIT-free arithmetic
+// (KV tiling + per-thread scratch layout). Computed once by configure() and
+// owned by the primitive_desc (mirroring brgemm_matmul_conf_t), so the pd can
+// size its scratchpad without a throwaway driver and the driver compiles its
+// kernels from this without recomputing anything.
+struct sdp_fused_conf_t {
+    sdp_fused_params_t params;
+    // KV tiling width for the streaming softmax (seq_kv in tiles of kv_blk).
+    dim_t kv_blk = 0;
+    // Per-thread scratch: scores + acc + pv + row_max + row_denom + old_coef,
+    // each 64-byte aligned; offsets into the per-thread block.
+    size_t off_scores = 0, off_acc = 0, off_pv = 0, off_row_max = 0,
+           off_row_denom = 0, off_old_coef = 0;
+    size_t scratch_per_thread = 0;
+    int nthr = 0;
+    size_t scratch_total(int n) const {
+        return scratch_per_thread * static_cast<size_t>(n);
+    }
+};
+
 // Owns the BRGEMM + IR-softmax kernels for the (full / KV-tail) tiles and
 // drives the online-softmax execute loop. x64-only; on other builds init()
 // returns unimplemented.
@@ -106,20 +126,20 @@ public:
     sdp_fused_driver_t(const sdp_fused_driver_t &) = delete;
     sdp_fused_driver_t &operator=(const sdp_fused_driver_t &) = delete;
 
-    // Create the BRGEMM + IR-softmax kernels and compute the per-thread
-    // scratch size. Must be called once before execute(). The engine
-    // parameter is unused today (kept for interface parity with
-    // sdp_blocked_driver_t / future engine-dependent kernel selection).
-    // Equivalent to configure() followed by create_kernels().
-    status_t init(const sdp_fused_params_t &params, engine_t *engine);
+    // Compute the derived configuration (KV tiling + per-thread scratch
+    // layout) from the plain params. JIT-free, so a primitive_desc can size
+    // its scratchpad from the returned conf without compiling kernels.
+    static status_t configure(
+            const sdp_fused_params_t &params, sdp_fused_conf_t &conf);
 
-    // Two-phase split of init() for the CPU sdpa primitive: configure() does
-    // only the JIT-free arithmetic (KV tiling, per-thread scratch size) so a
-    // primitive_desc can size its scratchpad without compiling kernels;
-    // create_kernels() then JIT-compiles the BRGEMM + IR-softmax kernels. Call
-    // configure() first, create_kernels() before execute().
-    status_t configure(const sdp_fused_params_t &params);
-    status_t create_kernels(engine_t *engine);
+    // JIT-compile the BRGEMM + IR-softmax kernels from a conf produced by
+    // configure(); must be called once before execute(). The engine is unused
+    // today (kept for interface parity with sdp_blocked_driver_t / future
+    // engine-dependent kernel selection).
+    status_t init(const sdp_fused_conf_t &conf, engine_t *engine);
+    // Convenience one-shot for callers that do not split pd sizing from kernel
+    // compilation (e.g. the graph backend): configure() then init(conf).
+    status_t init(const sdp_fused_params_t &params, engine_t *engine);
 
     int nthr() const { return nthr_; }
     size_t scratch_total(int nthr) const {
@@ -132,6 +152,10 @@ public:
             int nthr) const;
 
 private:
+    // JIT-compile the kernels from the already-populated members (p_, kv_blk_,
+    // scratch offsets). Shared by both init() overloads.
+    status_t create_kernels(engine_t *engine);
+
     sdp_fused_params_t p_;
     // KV tiling width for the streaming softmax: seq_kv is processed in tiles
     // of kv_blk_.
