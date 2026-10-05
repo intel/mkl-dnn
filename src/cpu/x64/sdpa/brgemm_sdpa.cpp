@@ -29,9 +29,7 @@ namespace x64 {
 
 // Fills bp_ directly from this pd's memory descriptors (sdpa_desc_t), the
 // same way GPU's micro_fwd_t::pd_t::init() fills its own params struct from
-// desc() -- NOT by reusing the graph pattern-matching / subgraph-parsing
-// logic that the fused BRGEMM *graph kernel* (sdp_fused_brgemm_blocked_kernel_t)
-// uses to build the very same kind of struct from a lowered partition.
+// desc() -- not from any graph pattern-matching / subgraph-parsing logic.
 status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     using namespace data_type;
     using namespace status;
