@@ -1954,10 +1954,10 @@ status_t layout_propagator_for_sdpa_bwd(std::shared_ptr<op_t> &op,
         std::shared_ptr<primitive_desc_t> hint_fwd_pd;
         status = create_sdpa_pd(hint_fwd_pd, p_engine.get(), md_q.get(),
                 md_k.get(), md_v.get(), md_dst.get(), md_attn_mask.get(),
-                md_scale.get(), is_invert_scale, /* fill_md = */ nullptr,
-                /* invert_select = */ false, kv_head_number, mask_type,
-                softmax_alg, impl::prop_kind::forward_training, attr.get(),
-                qk_attr.get(), vs_attr.get());
+                md_scale.get(), is_invert_scale, kv_head_number, mask_type,
+                softmax_alg, /* fill_md = */ nullptr,
+                /* invert_select = */ false, impl::prop_kind::forward_training,
+                attr.get(), qk_attr.get(), vs_attr.get());
         VCHECK_LAYOUT_PROPAGATOR(status == status::success, status,
                 "failed to create hint fwd pd for sdpa_bwd scratchpad");
 

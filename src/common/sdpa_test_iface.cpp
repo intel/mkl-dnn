@@ -42,10 +42,9 @@ status_t sdpa_primitive_desc_create(
             attr, kq_attr, vs_attr));
 
     sdpa_desc_t sdpa_desc = create_sdpa_desc(query_desc, key_desc, value_desc,
-            dst_desc, mask_desc, scale_desc, stats_desc, fill_desc,
-            invert_select, invert_scale, kv_head_number,
-            static_cast<attn_mask_type_t>(attn_mask_type), softmax_alg, prop,
-            kq_attr, vs_attr);
+            dst_desc, mask_desc, scale_desc, stats_desc, invert_scale,
+            kv_head_number, static_cast<attn_mask_type_t>(attn_mask_type),
+            softmax_alg, fill_desc, invert_select, prop, kq_attr, vs_attr);
     return primitive_desc_create(primitive_desc_iface, engine,
             (const op_desc_t *)&sdpa_desc, nullptr, attr);
 }

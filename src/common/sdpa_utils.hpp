@@ -280,9 +280,9 @@ static inline sdpa_desc_t create_sdpa_desc(const memory_desc_t *q_md,
         const memory_desc_t *k_md, const memory_desc_t *v_md,
         const memory_desc_t *dst_md, const memory_desc_t *attn_mask_md,
         const memory_desc_t *scale_md, const memory_desc_t *stats_md,
-        const memory_desc_t *fill_md, bool invert_select, bool invert_scale,
-        dim_t kv_head_number, attn_mask_type_t attn_mask_type,
-        alg_kind_t softmax_alg, prop_kind_t prop,
+        bool invert_scale, dim_t kv_head_number,
+        attn_mask_type_t attn_mask_type, alg_kind_t softmax_alg,
+        const memory_desc_t *fill_md, bool invert_select, prop_kind_t prop,
         const primitive_attr_t *kq_attr, const primitive_attr_t *vs_attr) {
     auto sdpa_desc = sdpa_desc_t();
     sdpa_desc.primitive_kind = primitive_kind::sdpa;
@@ -357,10 +357,10 @@ static inline status_t create_sdpa_pd(
         const memory_desc_t *q_md, const memory_desc_t *k_md,
         const memory_desc_t *v_md, const memory_desc_t *dst_md,
         const memory_desc_t *attn_mask_md, const memory_desc_t *scale_md,
-        bool invert_scale, const memory_desc_t *fill_md, bool invert_select,
-        dim_t kv_head_number, attn_mask_type_t attn_mask_type,
-        alg_kind_t softmax_alg, prop_kind_t prop, const primitive_attr_t *attr,
-        const primitive_attr_t *kq_attr = nullptr,
+        bool invert_scale, dim_t kv_head_number,
+        attn_mask_type_t attn_mask_type, alg_kind_t softmax_alg,
+        const memory_desc_t *fill_md, bool invert_select, prop_kind_t prop,
+        const primitive_attr_t *attr, const primitive_attr_t *kq_attr = nullptr,
         const primitive_attr_t *vs_attr = nullptr) {
     CHECK(sdpa_attr_check(
             q_md, k_md, v_md, dst_md, engine, attr, kq_attr, vs_attr));
@@ -368,10 +368,9 @@ static inline status_t create_sdpa_pd(
             attn_mask_type, fill_md, engine, attr, kq_attr, vs_attr));
 
     auto sdpa_desc = create_sdpa_desc(q_md, k_md, v_md, dst_md, attn_mask_md,
-            scale_md, /* stats_md = */ nullptr, fill_md, invert_select,
-            invert_scale, kv_head_number,
-            static_cast<attn_mask_type_t>(attn_mask_type), softmax_alg, prop,
-            kq_attr, vs_attr);
+            scale_md, /* stats_md = */ nullptr, invert_scale, kv_head_number,
+            attn_mask_type, softmax_alg, fill_md, invert_select, prop, kq_attr,
+            vs_attr);
 
     primitive_attr_t sdpa_attr = attr ? *attr : default_attr();
 
