@@ -25,20 +25,22 @@
 
 #include "cpu/platform.hpp"
 
-#include "cpu/x64/sdpa/sdp_blocked_driver.hpp"
-#include "cpu/x64/sdpa/sdp_fused_driver.hpp"
+#include "cpu/x64/sdpa/sdpa_full_softmax.hpp"
+#include "cpu/x64/sdpa/sdpa_online_softmax.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
 namespace x64 {
 
-// Two interchangeable compute drivers back brgemm_sdpa_fwd_t: sdp_blocked_driver_t
-// (query-axis blocked, two-pass softmax; bf16/f16 and an additive attention
-// mask) and sdp_fused_driver_t (online/flash softmax; f32-only, no mask yet).
+// Two interchangeable compute strategies back brgemm_sdpa_fwd_t, both folded in
+// as free functions over the pd's conf + the primitive's kernels:
+// `full_softmax` (namespace sdpa_full_softmax -- query-axis blocked, two-pass
+// softmax; bf16/f16 and an additive attention mask) and `online_softmax`
+// (namespace sdpa_online_softmax -- online/flash softmax; f32-only).
 // pd_t::init() picks one by shape/dtype capability, or a forced choice via
-// ONEDNN_SDPA_IMPL={blocked,fused,auto} for debugging/perf comparisons.
-enum class sdpa_driver_kind_t { blocked, fused };
+// ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto}.
+enum class sdpa_impl_kind_t { full_softmax, online_softmax };
 
 struct brgemm_sdpa_fwd_t : public primitive_t {
     struct pd_t : public sdpa_fwd_pd_t {
@@ -48,23 +50,31 @@ struct brgemm_sdpa_fwd_t : public primitive_t {
 
         status_t init(const engine_t *engine);
 
-        sdpa_driver_kind_t driver_kind() const { return kind_; }
-        const sdp_blocked_conf_t &blocked_conf() const { return bc_; }
-        const sdp_fused_conf_t &fused_conf() const { return fc_; }
+        sdpa_impl_kind_t impl_kind() const { return kind_; }
+        const sdpa_full_softmax_conf_t &full_softmax_conf() const {
+            return full_conf_;
+        }
+        const sdpa_full_softmax_descs_t &full_softmax_descs() const {
+            return full_descs_;
+        }
+        const sdpa_online_softmax_conf_t &online_softmax_conf() const {
+            return online_conf_;
+        }
         int nthr() const { return nthr_; }
 
     private:
         friend struct brgemm_sdpa_fwd_t;
 
-        sdpa_driver_kind_t kind_ = sdpa_driver_kind_t::blocked;
+        sdpa_impl_kind_t kind_ = sdpa_impl_kind_t::full_softmax;
         // Derived compute configuration computed once in init() (via the
-        // driver's static JIT-free configure()); only the struct matching
-        // kind_ is populated. It owns the KV/query tiling and per-thread
-        // scratch layout (and, for blocked, the finalized BRGEMM descriptors),
-        // so the pd sizes its scratchpad from it and the primitive JIT-compiles
-        // the kernels from it -- keeping the pd itself kernel-free.
-        sdp_blocked_conf_t bc_;
-        sdp_fused_conf_t fc_;
+        // strategy's JIT-free configure()); only the struct matching kind_ is
+        // populated. It owns the KV/query tiling and per-thread scratch layout,
+        // so the pd sizes its scratchpad from it. For full_softmax, the finalized
+        // BRGEMM descriptors live alongside it in full_descs_ (like brgemm_matmul's
+        // brg_descs_); the primitive JIT-compiles the kernels from conf + descs.
+        sdpa_full_softmax_conf_t full_conf_;
+        sdpa_full_softmax_descs_t full_descs_;
+        sdpa_online_softmax_conf_t online_conf_;
         int nthr_ = 1;
     };
 
@@ -79,10 +89,12 @@ private:
         return static_cast<const pd_t *>(primitive_t::pd().get());
     }
 
-    // Owned compute driver, JIT-compiled in init(); only the one matching
-    // pd()->driver_kind() is created.
-    std::shared_ptr<sdp_blocked_driver_t> blocked_driver_;
-    std::shared_ptr<sdp_fused_driver_t> fused_driver_;
+    // Compute state owned by the primitive, built in init() from the pd's conf;
+    // only the one matching pd()->impl_kind() is populated. Both strategies
+    // are folded in as free functions (namespace sdpa_online_softmax / sdpa_full_softmax) over
+    // the pd conf (+ descs) and these kernels.
+    sdpa_online_softmax_kernels_t online_kernels_;
+    sdpa_full_softmax_kernels_t full_kernels_;
 };
 
 } // namespace x64

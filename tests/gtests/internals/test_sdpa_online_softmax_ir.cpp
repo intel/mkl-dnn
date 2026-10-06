@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-// Unit tests for the IR-based online-softmax epilogue of the fused (online/
-// flash) CPU SDPA driver (src/cpu/x64/sdpa/sdp_fused_softmax_ir.hpp). Each test
+// Unit tests for the IR-based online-softmax epilogue of the online-softmax
+// CPU SDPA (src/cpu/x64/sdpa/sdpa_online_softmax_ir.hpp). Each test
 // builds one epilogue IR, JITs it through the x64 CPU IR pipeline, runs it and
 // checks it against an independent scalar reference. The eltwise exp is a
 // polynomial approximation, so denominator-dependent outputs use a relative
@@ -31,12 +31,12 @@
 
 #include "oneapi/dnnl/dnnl.hpp"
 
-#include "cpu/x64/sdpa/sdp_fused_softmax_ir.hpp"
+#include "cpu/x64/sdpa/sdpa_online_softmax_ir.hpp"
 
 namespace dnnl {
 
 using namespace dnnl::impl::cpu::x64;
-using namespace dnnl::impl::cpu::x64::sdp_softmax_ir;
+using namespace dnnl::impl::cpu::x64::sdpa_softmax_ir;
 
 // Tests that require generating a kernel require AVX2.
 #define SKIP_IF_NO_AVX2() \
@@ -56,7 +56,7 @@ void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
         scores[j] *= scale;
         m_new = std::max(m_new, scores[j]);
     }
-    // corr is 0 for the first tile (m_old == -inf), as in the fused kernel.
+    // corr is 0 for the first tile (m_old == -inf), as in the online-softmax kernel.
     const float corr = m_old == neg_inf ? 0.f : std::exp(m_old - m_new);
     float tile_sum = 0.f;
     for (int j = 0; j < w; j++) {
@@ -119,7 +119,7 @@ void ref_acc_renorm(
 // softmax math. The eltwise exp is a polynomial approximation, so
 // denominator-dependent outputs use a relative tolerance; m_new is a plain max
 // and stays exact.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileRow) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileRow) {
     SKIP_IF_NO_AVX2();
 
     // Widths span pure tails (< simd_w), exact multiples, and multiples plus a
@@ -158,7 +158,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileRow) {
 // successive KV tiles, matching two scalar-reference updates. The first tile
 // exercises the -inf seed (the max reduction and exp both saturate correctly so
 // corr == 0); the second tile then consumes the finite state it produced.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineFirstTile) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineFirstTile) {
     SKIP_IF_NO_AVX2();
 
     const float neg_inf = -std::numeric_limits<float>::infinity();
@@ -202,7 +202,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineFirstTile) {
 // iteration. Every row carries its own finite running state and distinct data,
 // so a wrong stride would bleed rows into each other. Each row must match an
 // independent scalar-reference update.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileMultiRow) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     SKIP_IF_NO_AVX2();
 
     const float scale = 0.125f;
@@ -255,14 +255,14 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     }
 }
 
-// Validates the select mask fused into pass 1 of the softmax tile epilogue:
+// Validates the select mask folded into pass 1 of the softmax tile epilogue:
 // uint8 condition bytes choose between the scaled score and the fill scalar
 // before the running max/denominator update, in both the fusiable (keep where
 // cond != 0) and non-fusiable (keep where cond == 0) senses. Each row runs the
 // full scale -> select -> softmax chain against an independent scalar reference
 // over widths that exercise the ragged tail. The running state is finite (a
 // later KV tile) so even a fully masked row keeps l_new > 0.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
     SKIP_IF_NO_AVX2();
 
     const float scale = 0.125f;
@@ -342,7 +342,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
 // advancing the acc/pv/old_coef pointers each iteration. Every row carries a
 // distinct old_coef and distinct data, so a wrong stride would bleed rows into
 // each other. Each row must match an independent scalar-reference update.
-TEST(SdpFusedSoftmaxIr, AccRenormTile) {
+TEST(SdpaOnlineSoftmaxIr, AccRenormTile) {
     SKIP_IF_NO_AVX2();
 
     for (int seq_q : {1, 2, 3, 5}) {

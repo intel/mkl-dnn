@@ -32,22 +32,18 @@
 
 #include "cpu/platform.hpp"
 
-#include "cpu/x64/sdpa/sdp_blocked_driver.hpp"
+#include "cpu/x64/sdpa/sdpa_full_softmax.hpp"
 
-#if DNNL_X64
 #include "cpu/x64/amx_tile_configure.hpp"
 #include "cpu/x64/brgemm/brgemm.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/jit_uni_softmax.hpp"
-#include "cpu/x64/sdpa/sdp_blocked_select_ir.hpp"
-#endif
+#include "cpu/x64/sdpa/sdpa_full_softmax_select_ir.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
 namespace x64 {
-
-#if DNNL_X64
 
 namespace {
 // Round a byte count up to a 64-byte boundary so each thread's scratch block
@@ -81,7 +77,7 @@ inline void convert_from_f32(
 // (re)build the descriptor the kernel is compiled from (create_kernels).
 status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         dim_t M, dim_t N, dim_t K, dim_t lda, dim_t ldb, dim_t ldc,
-        const std::vector<sdp_mm1_post_op_t> *post_ops = nullptr,
+        const std::vector<sdpa_mm1_post_op_t> *post_ops = nullptr,
         bool select_postop = false, bool transB = false,
         bool *amx_need_config = nullptr, char *amx_palette = nullptr,
         size_t *amx_wsp = nullptr, dim_t po_width = 0) {
@@ -165,58 +161,24 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
 }
 } // namespace
 
-sdp_blocked_driver_t::~sdp_blocked_driver_t() {
+sdpa_full_softmax_kernels_t::sdpa_full_softmax_kernels_t() = default;
+
+sdpa_full_softmax_kernels_t::~sdpa_full_softmax_kernels_t() {
     for (int qi = 0; qi < 2; ++qi) {
         for (int ki = 0; ki < 2; ++ki) {
-            if (mm1_kernels_[qi][ki])
-                brgemm_kernel_destroy(mm1_kernels_[qi][ki]);
-            if (mm2_kernels_[qi][ki])
-                brgemm_kernel_destroy(mm2_kernels_[qi][ki]);
+            if (mm1_kernels[qi][ki]) brgemm_kernel_destroy(mm1_kernels[qi][ki]);
+            if (mm2_kernels[qi][ki]) brgemm_kernel_destroy(mm2_kernels[qi][ki]);
         }
-        if (mm2_kernels_beta0_[qi])
-            brgemm_kernel_destroy(mm2_kernels_beta0_[qi]);
+        if (mm2_kernels_beta0[qi]) brgemm_kernel_destroy(mm2_kernels_beta0[qi]);
     }
 }
 
-status_t sdp_blocked_driver_t::init(
-        const sdp_blocked_conf_t &conf, engine_t *engine) {
-    p_ = conf.params;
-    q_block_ = conf.q_block;
-    q_tail_ = conf.q_tail;
-    kv_block_ = conf.kv_block;
-    kv_tail_ = conf.kv_tail;
-    mm2_beta_ = conf.mm2_beta;
-    mm2_direct_ = conf.mm2_direct;
-    b_k_pack_ = conf.b_k_pack;
-    mm1_transpose_k_ = conf.mm1_transpose_k;
-    k_seq_stride_ = conf.k_seq_stride;
-    k_hs_stride_ = conf.k_hs_stride;
-    mm1_select_postop_ = conf.mm1_select_postop;
-    num_head_kv_ = conf.num_head_kv;
-    amx_wsp_bytes_ = conf.amx_wsp_bytes;
-    scratch_per_thread_ = conf.scratch_per_thread;
-    kt_global_bytes_ = conf.kt_global_bytes;
-    vt_global_bytes_ = conf.vt_global_bytes;
-    nthr_ = conf.nthr;
-    for (int qi = 0; qi < 2; ++qi)
-        for (int ki = 0; ki < 2; ++ki) {
-            mm1_amx_[qi][ki] = conf.mm1_amx[qi][ki];
-            mm2_amx_[qi][ki] = conf.mm2_amx[qi][ki];
-        }
-    return create_kernels(conf, engine);
-}
+namespace sdpa_full_softmax {
 
-status_t sdp_blocked_driver_t::init(
-        const sdp_blocked_params_t &params, engine_t *engine) {
-    sdp_blocked_conf_t conf;
-    CHECK(configure(params, conf));
-    return init(conf, engine);
-}
-
-status_t sdp_blocked_driver_t::configure(
-        const sdp_blocked_params_t &params, sdp_blocked_conf_t &conf) {
+status_t configure(const sdpa_full_softmax_params_t &params,
+        sdpa_full_softmax_conf_t &conf, sdpa_full_softmax_descs_t &descs) {
     conf.params = params;
-    const sdp_blocked_params_t &p_ = conf.params;
+    const sdpa_full_softmax_params_t &p_ = conf.params;
 
     // Supported compute types so far: f32, f16 and bf16. bf16/f16 feed a
     // VNNI2-packed B tile (materialised up front); f32 uses a plain B. int8 and
@@ -309,10 +271,10 @@ status_t sdp_blocked_driver_t::configure(
     //                            row_dim, hs_qk axis is the last dim.
     //   * transpose_b == false : K is [.., hs_qk, seq_kv] -> hs_qk axis is
     //                            row_dim, seq_kv axis is the last dim.
-    // In either orientation, if the seq_kv axis is not unit-stride the driver
-    // materialises a dense [hs_qk, seq_kv] transpose once (see execute); a K
-    // that is logically pre-transposed but physically stored with hs_qk
-    // contiguous therefore still gets transposed here.
+    // In either orientation, if the seq_kv axis is not unit-stride a dense
+    // [hs_qk, seq_kv] transpose is materialised once (see execute); a K that is
+    // logically pre-transposed but physically stored with hs_qk contiguous
+    // therefore still gets transposed here.
     const dim_t k_seq_stride = p_.mm1_transpose_b ? p_.k_strides[row_dim]
                                                   : p_.k_strides[p_.ndims - 1];
     const dim_t k_hs_stride = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
@@ -327,17 +289,17 @@ status_t sdp_blocked_driver_t::configure(
     const bool need_kt = mm1_transpose_k || pack_b;
     const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride;
 
-    // Build (and store in conf) the mm1/mm2 BRGEMM descriptors (no JIT), plus
-    // each kernel's AMX palette + tile-store wsp (the per-thread scratch size
-    // depends on them). create_kernels() compiles directly from these stored
-    // descriptors -- no rebuild. kv is the seq_kv sub-block width (mm1 N / mm2
-    // K); the mm1 post-op descriptors keep the full seq_kv width (po_width) so
-    // the fused mask/select is addressed by global column at runtime.
+    // Build the mm1/mm2 BRGEMM descriptors (no JIT) into `descs`, plus each
+    // kernel's AMX palette + tile-store wsp into the conf (the per-thread
+    // scratch size depends on them). create_kernels() compiles directly from
+    // these stored descriptors -- no rebuild. kv is the seq_kv sub-block width
+    // (mm1 N / mm2 K); the mm1 post-op descriptors keep the full seq_kv width
+    // (po_width) so the folded mask/select is addressed by global column.
     auto build_tile_descs = [&](dim_t m, dim_t kv, bool select_postop, int qi,
                                     int ki) -> status_t {
-        brgemm_amx_cfg_t &mm1_amx = conf.mm1_amx[qi][ki];
-        brgemm_amx_cfg_t &mm2_amx = conf.mm2_amx[qi][ki];
-        CHECK(build_brgemm_desc(conf.mm1_desc[qi][ki], p_.mm_dt, /*beta=*/0.0f,
+        sdpa_amx_cfg_t &mm1_amx = conf.mm1_amx[qi][ki];
+        sdpa_amx_cfg_t &mm2_amx = conf.mm2_amx[qi][ki];
+        CHECK(build_brgemm_desc(descs.mm1_desc[qi][ki], p_.mm_dt, /*beta=*/0.0f,
                 m, kv, hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop,
                 /*transB=*/false, &mm1_amx.need_config, mm1_amx.palette,
@@ -345,17 +307,17 @@ status_t sdp_blocked_driver_t::configure(
         // mm2 B is the user V in place for f32 (ldb = its row stride), or a
         // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
         // K = kv (one kv-block of the reduction); beta accumulates across them.
-        CHECK(build_brgemm_desc(conf.mm2_desc[qi][ki], p_.mm_dt, mm2_beta, m,
+        CHECK(build_brgemm_desc(descs.mm2_desc[qi][ki], p_.mm_dt, mm2_beta, m,
                 hs_v, kv, /*lda=*/seq_kv,
                 /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/mm2_ldc,
                 /*post_ops=*/nullptr, /*select_postop=*/false,
                 /*transB=*/false, &mm2_amx.need_config, mm2_amx.palette,
                 &mm2_amx.wsp_size));
-        conf.mm_valid[qi][ki] = true;
+        descs.mm_valid[qi][ki] = true;
         return status::success;
     };
 
-    // The select-mask can be fused into mm1 as a binary_select post-op only
+    // The select-mask can be folded into mm1 as a binary_select post-op only
     // when it is fusiable (keep-where-cond, not the inverted form) and the
     // user condition tile is dense [m x seq_kv] -- the ukernel addresses the
     // condition via the dst tile offsets, so its row stride must equal seq_kv
@@ -391,11 +353,11 @@ status_t sdp_blocked_driver_t::configure(
                 CHECK(build_tile_descs(ms[qi], kvs[ki], select_postop, qi, ki));
             }
             if (mm2_beta != 0.0f) {
-                CHECK(build_brgemm_desc(conf.mm2_desc_beta0[qi], p_.mm_dt,
+                CHECK(build_brgemm_desc(descs.mm2_desc_beta0[qi], p_.mm_dt,
                         /*beta=*/0.0f, ms[qi], hs_v, kv_block, /*lda=*/seq_kv,
                         /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
                         /*ldc=*/mm2_ldc));
-                conf.beta0_valid[qi] = true;
+                descs.beta0_valid[qi] = true;
             }
         }
         return status::success;
@@ -404,8 +366,8 @@ status_t sdp_blocked_driver_t::configure(
     auto clear_descs = [&]() {
         for (int qi = 0; qi < 2; ++qi) {
             for (int ki = 0; ki < 2; ++ki)
-                conf.mm_valid[qi][ki] = false;
-            conf.beta0_valid[qi] = false;
+                descs.mm_valid[qi][ki] = false;
+            descs.beta0_valid[qi] = false;
         }
     };
 
@@ -482,8 +444,26 @@ status_t sdp_blocked_driver_t::configure(
     return status::success;
 }
 
-status_t sdp_blocked_driver_t::create_kernels(
-        const sdp_blocked_conf_t &conf, engine_t *engine) {
+status_t create_kernels(const sdpa_full_softmax_conf_t &conf,
+        const sdpa_full_softmax_descs_t &descs, engine_t *engine,
+        sdpa_full_softmax_kernels_t &kernels) {
+    const sdpa_full_softmax_params_t &p_ = conf.params;
+    // Bind conf scalars + kernel slots to the member names the body uses.
+    const dim_t q_block_ = conf.q_block, q_tail_ = conf.q_tail;
+    const dim_t kv_block_ = conf.kv_block, kv_tail_ = conf.kv_tail;
+    const dim_t b_k_pack_ = conf.b_k_pack;
+    const bool mm1_transpose_k_ = conf.mm1_transpose_k;
+    const dim_t k_hs_stride_ = conf.k_hs_stride;
+    auto &mm1_kernels_ = kernels.mm1_kernels;
+    auto &mm2_kernels_ = kernels.mm2_kernels;
+    auto &mm2_kernels_beta0_ = kernels.mm2_kernels_beta0;
+    auto &softmax_pd_ = kernels.softmax_pd;
+    auto &softmax_kernel_ = kernels.softmax_kernel;
+    bool &use_jit_softmax_ = kernels.use_jit_softmax;
+    auto &select_kernel_ = kernels.select_kernel;
+    bool &mm1_select_postop_ = kernels.mm1_select_postop;
+    mm1_select_postop_ = conf.mm1_select_postop;
+
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
     const int row_dim = p_.ndims - 2;
@@ -513,26 +493,26 @@ status_t sdp_blocked_driver_t::create_kernels(
     };
 
     // Compile the mm1/mm2 (+ beta-0) kernels directly from the finalized
-    // descriptors configure() stored in `conf` -- no rebuild. mm2 descriptors
+    // descriptors configure() stored in `descs` -- no rebuild. mm2 descriptors
     // carry no mm1 post-op, so only mm1 is affected by the select fallback.
     auto compile_from_conf = [&]() -> status_t {
         for (int qi = 0; qi < 2; ++qi) {
             for (int ki = 0; ki < 2; ++ki) {
-                if (!conf.mm_valid[qi][ki]) continue;
+                if (!descs.mm_valid[qi][ki]) continue;
                 CHECK(brgemm_kernel_create(
-                        &mm1_kernels_[qi][ki], conf.mm1_desc[qi][ki]));
+                        &mm1_kernels_[qi][ki], descs.mm1_desc[qi][ki]));
                 CHECK(brgemm_kernel_create(
-                        &mm2_kernels_[qi][ki], conf.mm2_desc[qi][ki]));
+                        &mm2_kernels_[qi][ki], descs.mm2_desc[qi][ki]));
             }
-            if (conf.beta0_valid[qi])
+            if (descs.beta0_valid[qi])
                 CHECK(brgemm_kernel_create(
-                        &mm2_kernels_beta0_[qi], conf.mm2_desc_beta0[qi]));
+                        &mm2_kernels_beta0_[qi], descs.mm2_desc_beta0[qi]));
         }
         return status::success;
     };
 
     if (compile_from_conf() != status::success) {
-        // The compiled ukernel rejected the fused select post-op even though
+        // The compiled ukernel rejected the folded select post-op even though
         // the descriptor built. Drop it and let the pre-pass apply the mask:
         // rebuild the mm1 descriptors without the post-op and recompile; mm2 +
         // beta-0 are unaffected, so recompile those from conf.
@@ -553,11 +533,11 @@ status_t sdp_blocked_driver_t::create_kernels(
                         /*amx_wsp=*/nullptr, /*po_width=*/seq_kv));
                 CHECK(brgemm_kernel_create(&mm1_kernels_[qi][ki], mm1_brg));
                 CHECK(brgemm_kernel_create(
-                        &mm2_kernels_[qi][ki], conf.mm2_desc[qi][ki]));
+                        &mm2_kernels_[qi][ki], descs.mm2_desc[qi][ki]));
             }
-            if (conf.beta0_valid[qi])
+            if (descs.beta0_valid[qi])
                 CHECK(brgemm_kernel_create(
-                        &mm2_kernels_beta0_[qi], conf.mm2_desc_beta0[qi]));
+                        &mm2_kernels_beta0_[qi], descs.mm2_desc_beta0[qi]));
         }
     }
 
@@ -625,8 +605,8 @@ status_t sdp_blocked_driver_t::create_kernels(
         const dim_t cond_row = eff[ndims - 2];
         if (cond_col == 1) {
             auto k = std::make_shared<
-                    sdp_blocked_select_ir::select_ir_kernel_t>(
-                    sdp_blocked_select_ir::build_select_ir(
+                    sdpa_full_softmax_select_ir::select_ir_kernel_t>(
+                    sdpa_full_softmax_select_ir::build_select_ir(
                             static_cast<int>(seq_kv), p_.select_fusiable,
                             /*scores_row_stride=*/seq_kv,
                             /*cond_row_stride=*/cond_row));
@@ -638,8 +618,33 @@ status_t sdp_blocked_driver_t::create_kernels(
     return status::success;
 }
 
-status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
-        void *scratch_base, int nthr) const {
+status_t execute(const sdpa_full_softmax_conf_t &conf,
+        const sdpa_full_softmax_kernels_t &kernels,
+        const sdpa_full_softmax_run_args_t &args, void *scratch_base,
+        int nthr) {
+    const sdpa_full_softmax_params_t &p_ = conf.params;
+    // Bind conf scalars + compiled kernels to the member names the body uses.
+    const dim_t q_block_ = conf.q_block;
+    const dim_t kv_block_ = conf.kv_block;
+    const bool mm2_direct_ = conf.mm2_direct;
+    const dim_t b_k_pack_ = conf.b_k_pack;
+    const bool mm1_transpose_k_ = conf.mm1_transpose_k;
+    const dim_t k_seq_stride_ = conf.k_seq_stride;
+    const dim_t k_hs_stride_ = conf.k_hs_stride;
+    const dim_t num_head_kv_ = conf.num_head_kv;
+    const size_t amx_wsp_bytes_ = conf.amx_wsp_bytes;
+    const size_t scratch_per_thread_ = conf.scratch_per_thread;
+    const size_t kt_global_bytes_ = conf.kt_global_bytes;
+    const auto &mm1_amx_ = conf.mm1_amx;
+    const auto &mm2_amx_ = conf.mm2_amx;
+    const auto &mm1_kernels_ = kernels.mm1_kernels;
+    const auto &mm2_kernels_ = kernels.mm2_kernels;
+    const auto &mm2_kernels_beta0_ = kernels.mm2_kernels_beta0;
+    const bool use_jit_softmax_ = kernels.use_jit_softmax;
+    const auto &softmax_kernel_ = kernels.softmax_kernel;
+    const auto &select_kernel_ = kernels.select_kernel;
+    const bool mm1_select_postop_ = kernels.mm1_select_postop;
+
     const int ndims = p_.ndims;
     const int row_dim = ndims - 2;
     const dim_t seq_q = p_.seq_q;
@@ -876,7 +881,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
         // depend on the kv-block): one entry per binary in mm1_post_ops (a
         // scalar rhs is used as is; a tensor rhs is offset per
         // batch/head/query-tile), then the fill scalar + dense condition for a
-        // fused select. Each kv-block reuses it, varying only oc_logical_off.
+        // folded select. Each kv-block reuses it, varying only oc_logical_off.
         std::vector<const void *> rhs;
         if (has_mm1_postops) {
             rhs.reserve(p_.mm1_post_ops.size() + (select_in_mm1 ? 2 : 0));
@@ -953,8 +958,8 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
         // Softmax over the full seq_kv axis per row. Each query row
         // sees every key, so the result is exact (no online recurrence).
         // When the jit softmax kernel is available it does the max/exp/
-        // normalize; any scale/select not already fused into mm1 is
-        // applied in a cheap pre-pass (skipped when both are fused or
+        // normalize; any scale/select not already folded into mm1 is
+        // applied in a cheap pre-pass (skipped when both are folded or
         // absent). Otherwise fall back to a scalar two-pass softmax.
         const bool prepass_select = has_select && !select_in_mm1;
         if (use_jit) {
@@ -963,7 +968,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
                     // Standalone IR select kernel: dense condition (column
                     // stride 1), both polarities and the broadcast-over-rows
                     // (cond_row == 0) case baked in at build time.
-                    sdp_blocked_select_ir::select_row_args_t sa;
+                    sdpa_full_softmax_select_ir::select_row_args_t sa;
                     sa.scores = scores;
                     sa.cond = c_ptr;
                     sa.fill = &fill;
@@ -1150,40 +1155,7 @@ status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
     return status::success;
 }
 
-#else // !DNNL_X64
-
-sdp_blocked_driver_t::~sdp_blocked_driver_t() = default;
-
-status_t sdp_blocked_driver_t::configure(
-        const sdp_blocked_params_t &params, sdp_blocked_conf_t &conf) {
-    UNUSED(params);
-    UNUSED(conf);
-    return status::unimplemented;
-}
-
-status_t sdp_blocked_driver_t::init(
-        const sdp_blocked_conf_t &conf, engine_t *engine) {
-    UNUSED(conf);
-    UNUSED(engine);
-    return status::unimplemented;
-}
-
-status_t sdp_blocked_driver_t::init(
-        const sdp_blocked_params_t &params, engine_t *engine) {
-    UNUSED(params);
-    UNUSED(engine);
-    return status::unimplemented;
-}
-
-status_t sdp_blocked_driver_t::execute(const sdp_blocked_run_args_t &args,
-        void *scratch_base, int nthr) const {
-    UNUSED(args);
-    UNUSED(scratch_base);
-    UNUSED(nthr);
-    return status::unimplemented;
-}
-
-#endif // DNNL_X64
+} // namespace sdpa_full_softmax
 
 } // namespace x64
 } // namespace cpu

@@ -14,23 +14,17 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_X64_SDPA_SDP_BLOCKED_SELECT_IR_HPP
-#define CPU_X64_SDPA_SDP_BLOCKED_SELECT_IR_HPP
+#ifndef CPU_X64_SDPA_SDPA_FULL_SOFTMAX_SELECT_IR_HPP
+#define CPU_X64_SDPA_SDPA_FULL_SOFTMAX_SELECT_IR_HPP
 
-// Standalone IR-based select-mask pre-pass kernel for the blocked CPU SDPA
-// driver (sdp_blocked_driver_t, sdp_blocked_driver.hpp). The blocked driver
-// reuses the stock jit_uni_softmax primitive for the max/exp/normalize, but
-// that primitive cannot apply a pre-softmax select mask. So, when a select
-// mask is present and not already folded into mm1, the scores tile has the
-// mask applied in a separate pre-pass before softmax runs.
+// Select-mask pre-pass kernel for the full-softmax CPU SDPA (sdpa_full_softmax). The
+// full-softmax path reuses the stock jit_uni_softmax, which cannot apply a
+// pre-softmax select mask, so when a select mask is present and not folded into
+// mm1 the scores tile has the mask applied in a separate pass before softmax.
 //
-// This file builds that pre-pass as a small, self-contained JIT kernel with the
-// generic x64 CPU IR framework (src/cpu/x64/ir). It deliberately does NOT share
-// any code with the fused driver's online-softmax epilogue
-// (sdp_fused_softmax_ir.hpp): this is a local, select-only kernel with no
-// softmax, no scale and no online/streaming recurrence. It targets AVX2 and
-// AVX-512 through the IR, so no intrinsics are needed and tails are handled with
-// masked loads/stores.
+// Built as a small JIT kernel with the generic x64 CPU IR (src/cpu/x64/ir).
+// Select-only (no softmax/scale/streaming); targets AVX2 + AVX-512 with masked
+// tails, so no intrinsics. Shares no code with sdpa_online_softmax_ir.hpp.
 
 #include "oneapi/dnnl/dnnl_config.h"
 
@@ -52,7 +46,7 @@ namespace dnnl {
 namespace impl {
 namespace cpu {
 namespace x64 {
-namespace sdp_blocked_select_ir {
+namespace sdpa_full_softmax_select_ir {
 
 using namespace dnnl::impl::cpu::x64::ir;
 
@@ -180,9 +174,12 @@ inline ir_t build_select_ir(
 class select_ir_kernel_t : public jit_generator_t {
 public:
     select_ir_kernel_t(ir_t ir)
-        : jit_generator_t("sdp_blocked_select_ir", isa()), ir_(std::move(ir)) {}
+        : jit_generator_t("sdpa_full_softmax_select_ir", isa())
+        , ir_(std::move(ir)) {}
 
-    const char *name() const override { return "sdp_blocked_select_ir_kernel"; }
+    const char *name() const override {
+        return "sdpa_full_softmax_select_ir_kernel";
+    }
     const char *source_file() const override { return __FILE__; }
 
 protected:
@@ -224,11 +221,11 @@ private:
     ir_t ir_;
 };
 
-} // namespace sdp_blocked_select_ir
+} // namespace sdpa_full_softmax_select_ir
 } // namespace x64
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
 
 #endif // DNNL_X64
-#endif // CPU_X64_SDPA_SDP_BLOCKED_SELECT_IR_HPP
+#endif // CPU_X64_SDPA_SDPA_FULL_SOFTMAX_SELECT_IR_HPP

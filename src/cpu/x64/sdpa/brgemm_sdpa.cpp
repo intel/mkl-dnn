@@ -34,9 +34,9 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     using namespace data_type;
     using namespace status;
 
-    // The pd stays kernel-free: it only derives the plain compute params and
-    // sizes the scratchpad (via the driver's JIT-free configure()); the BRGEMM
-    // kernels are compiled later in brgemm_sdpa_fwd_t::init(engine).
+    // The pd stays kernel-free: it only derives the compute conf and sizes the
+    // scratchpad (via the JIT-free configure()); the BRGEMM kernels are compiled
+    // later in brgemm_sdpa_fwd_t::init(engine).
     UNUSED(engine);
     VDISPATCH_SDPA(is_fwd(), VERBOSE_BAD_PROPKIND);
 
@@ -118,34 +118,36 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     VDISPATCH_SDPA(
             sdpa_fwd_pd_t::set_default_formats(), VERBOSE_UNSUPPORTED_TAG);
 
-    // sdp_fused_driver_t never materializes the full [seq_q x seq_kv] score
-    // matrix, but is f32-only and has no attention-mask post-op yet;
-    // sdp_blocked_driver_t covers bf16/f16 and an additive mask. Pick fused
-    // whenever the shapes/dtypes allow it, unless overridden for
-    // debugging/perf comparisons via ONEDNN_SDPA_IMPL={blocked,fused,auto}
+    // The online-softmax strategy never materializes the full [seq_q x seq_kv]
+    // score matrix, but is f32-only and has no attention-mask post-op yet; the
+    // full-softmax strategy covers bf16/f16 and an additive mask. Pick
+    // online-softmax whenever the shapes/dtypes allow it, unless overridden for
+    // debugging/perf comparisons via ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto}
     // (auto, the default, is the capability-based choice above).
-    const bool fused_capable = dt == f32 && !with_buffer_mask();
+    const bool online_capable = dt == f32 && !with_buffer_mask();
     const std::string forced = getenv_string_user("SDPA_IMPL");
-    VDISPATCH_SDPA(utils::one_of(forced, std::string(), std::string("auto"),
-                           std::string("blocked"), std::string("fused")),
+    VDISPATCH_SDPA(
+            utils::one_of(forced, std::string(), std::string("auto"),
+                    std::string("full_softmax"), std::string("online_softmax")),
             "unknown ONEDNN_SDPA_IMPL value '%s'", forced.c_str());
-    if (forced == "fused") {
-        VDISPATCH_SDPA(fused_capable,
-                "the fused SDPA driver was forced via ONEDNN_SDPA_IMPL but "
+    if (forced == "online_softmax") {
+        VDISPATCH_SDPA(online_capable,
+                "the online-softmax SDPA strategy was forced via "
+                "ONEDNN_SDPA_IMPL but "
                 "does not support this data type or attention mask");
-        kind_ = sdpa_driver_kind_t::fused;
-    } else if (forced == "blocked") {
-        kind_ = sdpa_driver_kind_t::blocked;
+        kind_ = sdpa_impl_kind_t::online_softmax;
+    } else if (forced == "full_softmax") {
+        kind_ = sdpa_impl_kind_t::full_softmax;
     } else {
-        kind_ = fused_capable ? sdpa_driver_kind_t::fused
-                              : sdpa_driver_kind_t::blocked;
+        kind_ = online_capable ? sdpa_impl_kind_t::online_softmax
+                               : sdpa_impl_kind_t::full_softmax;
     }
 
     auto scratchpad = scratchpad_registry().registrar();
 
-    if (kind_ == sdpa_driver_kind_t::fused) {
-        auto &fp_ = fc_.params;
-        fp_ = sdp_fused_params_t();
+    if (kind_ == sdpa_impl_kind_t::online_softmax) {
+        auto &fp_ = online_conf_.params;
+        fp_ = sdpa_online_softmax_params_t();
         fp_.ndims = sdpa_pd_t::ndims;
         fp_.batch = desc()->batch();
         fp_.num_head_q = desc()->num_q_heads();
@@ -175,15 +177,15 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         // Derive the tiling + per-thread scratch layout once (JIT-free), then
         // size the scratchpad from it; the primitive compiles its kernels from
         // the same conf, so no work is repeated and the pd stays kernel-free.
-        CHECK(sdp_fused_driver_t::configure(fp_, fc_));
-        nthr_ = fc_.nthr;
+        CHECK(sdpa_online_softmax::configure(fp_, online_conf_));
+        nthr_ = online_conf_.nthr;
         scratchpad.book(memory_tracking::names::key_sdpa_brgemm_buffer,
-                fc_.scratch_total(nthr_), 1, 64);
+                online_conf_.scratch_total(nthr_), 1, 64);
         return status::success;
     }
 
-    auto &bp_ = bc_.params;
-    bp_ = sdp_blocked_params_t();
+    auto &bp_ = full_conf_.params;
+    bp_ = sdpa_full_softmax_params_t();
     bp_.ndims = sdpa_pd_t::ndims;
     bp_.batch = desc()->batch();
     bp_.num_head_q = desc()->num_q_heads();
@@ -205,7 +207,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // key_md()'s logical dim order is fixed by the pd contract to
     // [batch, kv_heads, head_size, keys] (keys() reads the *last* dim), i.e.
     // head_size is already the row axis and keys the inner axis -- the
-    // "non-transposed" orientation the driver expects.
+    // "non-transposed" orientation the full-softmax path expects.
     bp_.mm1_transpose_b = false;
     bp_.has_select = with_select_mask();
     bp_.select_fusiable = !desc()->invert_select;
@@ -223,7 +225,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // attention mask (binary-add, tensor rhs); soft-cap will be appended here
     // once the pd gains support for it.
     if (with_attn_scale()) {
-        sdp_mm1_post_op_t sc;
+        sdpa_mm1_post_op_t sc;
         sc.alg = alg_kind::binary_mul;
         sc.is_binary = true;
         sc.rhs_is_scalar = true;
@@ -232,7 +234,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     }
     if (with_buffer_mask()) {
         const memory_desc_wrapper mask_mdw(desc()->attn_mask_md());
-        sdp_mm1_post_op_t mk;
+        sdpa_mm1_post_op_t mk;
         mk.alg = alg_kind::binary_add;
         mk.is_binary = true;
         mk.rhs_is_scalar = false;
@@ -245,23 +247,23 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
     // Derive the query/KV blocking, per-thread + global scratch layout, and the
     // finalized BRGEMM descriptors once (JIT-free); size the scratchpad from the
-    // same conf the primitive later compiles its kernels from, so no work is
-    // repeated and the pd stays kernel-free.
-    CHECK(sdp_blocked_driver_t::configure(bp_, bc_));
-    nthr_ = bc_.nthr;
+    // conf the primitive later compiles its kernels from, so no work is repeated
+    // and the pd stays kernel-free.
+    CHECK(sdpa_full_softmax::configure(bp_, full_conf_, full_descs_));
+    nthr_ = full_conf_.nthr;
     scratchpad.book(memory_tracking::names::key_sdpa_brgemm_buffer,
-            bc_.scratch_total(nthr_), 1, 64);
+            full_conf_.scratch_total(nthr_), 1, 64);
 
     return status::success;
 }
 
 status_t brgemm_sdpa_fwd_t::init(engine_t *engine) {
-    if (pd()->driver_kind() == sdpa_driver_kind_t::fused) {
-        fused_driver_ = std::make_shared<sdp_fused_driver_t>();
-        return fused_driver_->init(pd()->fused_conf(), engine);
+    if (pd()->impl_kind() == sdpa_impl_kind_t::online_softmax) {
+        return sdpa_online_softmax::create_kernels(
+                pd()->online_softmax_conf(), engine, online_kernels_);
     }
-    blocked_driver_ = std::make_shared<sdp_blocked_driver_t>();
-    return blocked_driver_->init(pd()->blocked_conf(), engine);
+    return sdpa_full_softmax::create_kernels(pd()->full_softmax_conf(),
+            pd()->full_softmax_descs(), engine, full_kernels_);
 }
 
 status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
@@ -274,10 +276,9 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     auto *out = CTX_OUT_MEM(void *, DNNL_ARG_DST);
 
     // The scale is applied as a multiply; invert_scale means the user stored a
-    // divisor, so multiply by its reciprocal (matches the graph kernel). The
-    // local outlives the driver call (blocked passes &scale_val by pointer).
-    // The graph backend delivers the scale as a host scalar (kept on the host);
-    // a regular tensor scale is read from its device buffer instead.
+    // divisor, so multiply by its reciprocal. The local outlives the execute
+    // call (the full-softmax path passes &scale_val by pointer). A host scalar scale is read
+    // from host storage; a regular tensor scale from its device buffer.
     float scale_val = 1.0f;
     if (pd()->with_attn_scale()) {
         if (pd()->with_host_scale()) {
@@ -311,8 +312,8 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
         }
     }
 
-    if (pd()->driver_kind() == sdpa_driver_kind_t::fused) {
-        sdp_fused_run_args_t args;
+    if (pd()->impl_kind() == sdpa_impl_kind_t::online_softmax) {
+        sdpa_online_softmax_run_args_t args;
         args.q = q;
         args.k = k;
         args.v = v;
@@ -320,10 +321,11 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
         args.out = out;
         args.scale = scale_val;
         args.fill = fill_val;
-        return fused_driver_->execute(args, scratch, pd()->nthr());
+        return sdpa_online_softmax::execute(pd()->online_softmax_conf(),
+                online_kernels_, args, scratch, pd()->nthr());
     }
 
-    sdp_blocked_run_args_t args;
+    sdpa_full_softmax_run_args_t args;
     args.q = q;
     args.k = k;
     args.v = v;
@@ -336,7 +338,8 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     if (pd()->with_buffer_mask())
         args.mm1_post_op_rhs.push_back(
                 CTX_IN_MEM(const void *, DNNL_ARG_ATTN_MASK));
-    return blocked_driver_->execute(args, scratch, pd()->nthr());
+    return sdpa_full_softmax::execute(pd()->full_softmax_conf(), full_kernels_,
+            args, scratch, pd()->nthr());
 }
 
 } // namespace x64

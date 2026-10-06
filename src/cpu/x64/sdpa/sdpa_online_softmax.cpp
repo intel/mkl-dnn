@@ -26,8 +26,8 @@
 
 #include "cpu/x64/brgemm/brgemm.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
-#include "cpu/x64/sdpa/sdp_fused_driver.hpp"
-#include "cpu/x64/sdpa/sdp_fused_softmax_ir.hpp"
+#include "cpu/x64/sdpa/sdpa_online_softmax.hpp"
+#include "cpu/x64/sdpa/sdpa_online_softmax_ir.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -40,39 +40,18 @@ inline size_t align64(size_t n) {
 }
 } // namespace
 
-sdp_fused_driver_t::sdp_fused_driver_t() = default;
+sdpa_online_softmax_kernels_t::sdpa_online_softmax_kernels_t() = default;
 
-sdp_fused_driver_t::~sdp_fused_driver_t() {
-    for (auto *k :
-            {mm1_kernel_, mm2_kernel_, mm1_tail_kernel_, mm2_tail_kernel_}) {
+sdpa_online_softmax_kernels_t::~sdpa_online_softmax_kernels_t() {
+    for (auto *k : {mm1_kernel, mm2_kernel, mm1_tail_kernel, mm2_tail_kernel}) {
         if (k) brgemm_kernel_destroy(k);
     }
 }
 
-status_t sdp_fused_driver_t::init(
-        const sdp_fused_conf_t &conf, engine_t *engine) {
-    p_ = conf.params;
-    kv_blk_ = conf.kv_blk;
-    off_scores_ = conf.off_scores;
-    off_acc_ = conf.off_acc;
-    off_pv_ = conf.off_pv;
-    off_row_max_ = conf.off_row_max;
-    off_row_denom_ = conf.off_row_denom;
-    off_old_coef_ = conf.off_old_coef;
-    scratch_per_thread_ = conf.scratch_per_thread;
-    nthr_ = conf.nthr;
-    return create_kernels(engine);
-}
+namespace sdpa_online_softmax {
 
-status_t sdp_fused_driver_t::init(
-        const sdp_fused_params_t &params, engine_t *engine) {
-    sdp_fused_conf_t conf;
-    CHECK(configure(params, conf));
-    return init(conf, engine);
-}
-
-status_t sdp_fused_driver_t::configure(
-        const sdp_fused_params_t &params, sdp_fused_conf_t &conf) {
+status_t configure(const sdpa_online_softmax_params_t &params,
+        sdpa_online_softmax_conf_t &conf) {
     conf.params = params;
 
     const dim_t seq_q = params.seq_q;
@@ -110,8 +89,11 @@ status_t sdp_fused_driver_t::configure(
     return status::success;
 }
 
-status_t sdp_fused_driver_t::create_kernels(engine_t *engine) {
+status_t create_kernels(const sdpa_online_softmax_conf_t &conf,
+        engine_t *engine, sdpa_online_softmax_kernels_t &kernels) {
     UNUSED(engine);
+    const sdpa_online_softmax_params_t &p_ = conf.params;
+    const dim_t kv_blk_ = conf.kv_blk;
 
     const int ndims = p_.ndims;
     const dim_t seq_q = p_.seq_q;
@@ -146,7 +128,7 @@ status_t sdp_fused_driver_t::create_kernels(engine_t *engine) {
     // mm1 writes a dense [seq_q, w] tile (ldc = w); mm2 multiplies that dense
     // tile by V into a dense [seq_q, hs_v] per-tile buffer (beta=0). The
     // running normalized output is combined in the epilogue, so magnitudes
-    // stay O(|V|) (matches the blocked driver's normalize-before accuracy).
+    // stay O(|V|) (matches the full-softmax path's normalize-before accuracy).
     auto create_tile_kernels
             = [&](brgemm_kernel_t **mm1, brgemm_kernel_t **mm2, dim_t w) {
         CHECK(create_brgemm(mm1, /*beta=*/0.0f, seq_q, w, hs_qk,
@@ -158,16 +140,17 @@ status_t sdp_fused_driver_t::create_kernels(engine_t *engine) {
         return status::success;
     };
 
-    CHECK(create_tile_kernels(&mm1_kernel_, &mm2_kernel_, kv_blk_));
+    CHECK(create_tile_kernels(
+            &kernels.mm1_kernel, &kernels.mm2_kernel, kv_blk_));
     if (kv_tail != 0)
         CHECK(create_tile_kernels(
-                &mm1_tail_kernel_, &mm2_tail_kernel_, kv_tail));
+                &kernels.mm1_tail_kernel, &kernels.mm2_tail_kernel, kv_tail));
 
     // Build the JIT online-softmax epilogue (AVX2 IR). One softmax kernel per
     // tile width (full/tail), plus one acc-renormalization kernel. If AVX2 is
     // unavailable the execute path falls back to the scalar epilogue.
     if (mayiuse(avx2)) {
-        using namespace sdp_softmax_ir;
+        using namespace sdpa_softmax_ir;
         // Condition tensor row stride in elements; columns are contiguous. A
         // seq_q axis of extent 1 is a broadcast axis (meaningless stride), so
         // every query row reads the same condition row -> stride 0.
@@ -183,24 +166,44 @@ status_t sdp_fused_driver_t::create_kernels(engine_t *engine) {
             slot = std::move(k);
             return status::success;
         };
-        status_t st = build_ir_kernel(softmax_ir_kernel_,
+        status_t st = build_ir_kernel(kernels.softmax_ir_kernel,
                 build_softmax_tile_ir(sq, static_cast<int>(kv_blk_),
                         p_.has_select, p_.select_fusiable, cond_stride));
         if (st == status::success && kv_tail != 0)
-            st = build_ir_kernel(softmax_tail_ir_kernel_,
+            st = build_ir_kernel(kernels.softmax_tail_ir_kernel,
                     build_softmax_tile_ir(sq, static_cast<int>(kv_tail),
                             p_.has_select, p_.select_fusiable, cond_stride));
         if (st == status::success)
-            st = build_ir_kernel(acc_renorm_ir_kernel_,
+            st = build_ir_kernel(kernels.acc_renorm_ir_kernel,
                     build_acc_renorm_ir(sq, static_cast<int>(hs_v)));
-        use_ir_epilogue_ = st == status::success;
+        kernels.use_ir_epilogue = st == status::success;
     }
 
     return status::success;
 }
 
-status_t sdp_fused_driver_t::execute(
-        const sdp_fused_run_args_t &args, void *scratch_base, int nthr) const {
+status_t execute(const sdpa_online_softmax_conf_t &conf,
+        const sdpa_online_softmax_kernels_t &kernels,
+        const sdpa_online_softmax_run_args_t &args, void *scratch_base,
+        int nthr) {
+    // Aliases so the loop below reads the pd-owned conf and primitive-owned
+    // kernels directly, without copying any state into this call.
+    const sdpa_online_softmax_params_t &p_ = conf.params;
+    const dim_t kv_blk_ = conf.kv_blk;
+    const size_t off_scores_ = conf.off_scores, off_acc_ = conf.off_acc,
+                 off_pv_ = conf.off_pv, off_row_max_ = conf.off_row_max,
+                 off_row_denom_ = conf.off_row_denom,
+                 off_old_coef_ = conf.off_old_coef;
+    const size_t scratch_per_thread_ = conf.scratch_per_thread;
+    auto *const mm1_kernel_ = kernels.mm1_kernel;
+    auto *const mm2_kernel_ = kernels.mm2_kernel;
+    auto *const mm1_tail_kernel_ = kernels.mm1_tail_kernel;
+    auto *const mm2_tail_kernel_ = kernels.mm2_tail_kernel;
+    const auto &softmax_ir_kernel_ = kernels.softmax_ir_kernel;
+    const auto &softmax_tail_ir_kernel_ = kernels.softmax_tail_ir_kernel;
+    const auto &acc_renorm_ir_kernel_ = kernels.acc_renorm_ir_kernel;
+    const bool use_ir_epilogue_ = kernels.use_ir_epilogue;
+
     auto *q_base = static_cast<const char *>(args.q);
     auto *k_base = static_cast<const char *>(args.k);
     auto *v_base = static_cast<const char *>(args.v);
@@ -310,7 +313,7 @@ status_t sdp_fused_driver_t::execute(
             if (use_ir_epilogue_) {
                 const auto &sm = is_tail ? softmax_tail_ir_kernel_
                                          : softmax_ir_kernel_;
-                sdp_softmax_ir::softmax_row_args_t sargs;
+                sdpa_softmax_ir::softmax_row_args_t sargs;
                 sargs.scores = scores;
                 sargs.scale = &scale_val;
                 sargs.m = row_max;
@@ -357,7 +360,7 @@ status_t sdp_fused_driver_t::execute(
                     row_denom[i] = l_new;
                     row_max[i] = m_new;
                     // Pre-normalize P by the running denominator so mm2
-                    // accumulates O(1) magnitudes (matches the blocked driver's
+                    // accumulates O(1) magnitudes (matches the full-softmax path's
                     // accuracy). acc then holds U/l; refresh it with old_coef =
                     // corr*l_old/l_new.
                     for (dim_t j = 0; j < w; ++j)
@@ -374,7 +377,7 @@ status_t sdp_fused_driver_t::execute(
 
             // Renormalize the running output: acc = old_coef*acc + pv.
             if (use_ir_epilogue_) {
-                sdp_softmax_ir::acc_renorm_args_t aargs;
+                sdpa_softmax_ir::acc_renorm_args_t aargs;
                 aargs.acc = acc;
                 aargs.pv = pv;
                 aargs.old_coef = old_coef;
@@ -401,6 +404,8 @@ status_t sdp_fused_driver_t::execute(
 
     return status::success;
 }
+
+} // namespace sdpa_online_softmax
 
 } // namespace x64
 } // namespace cpu
