@@ -14,6 +14,14 @@
 # limitations under the License.
 #===============================================================================
 
+# Standalone gemmstone build; oneDNN sets ONEDNN_GEMMSTONE_DIR.
+if(NOT DEFINED ONEDNN_GEMMSTONE_DIR)
+    cmake_minimum_required(VERSION 3.18)
+    project(gemmstone)
+    include(cmake/standalone.cmake)
+    return()
+endif()
+
 # TODO: Extend conversion warning support to GEMM code
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM" OR CMAKE_CXX_COMPILER_ID MATCHES "(Apple)?[Cc]lang")
     append(CMAKE_CXX_FLAGS " -Wno-implicit-int-conversion")
@@ -52,6 +60,11 @@ foreach(d ${DIRS})
         )
     list(APPEND SOURCES "${d_sources}")
 endforeach()
+
+# Standalone-only sources
+list(REMOVE_ITEM SOURCES
+    ${ONEDNN_GEMMSTONE_DIR}/dsl/utils/logging.cpp
+    ${ONEDNN_GEMMSTONE_DIR}/generator/ngen_elf.cpp)
 
 # There is no easy way to emulate target_compile_definitions() with the dpcpp
 # host compiler arguments. As such, we cannot split compilation of the generator

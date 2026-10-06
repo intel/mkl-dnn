@@ -1,0 +1,16 @@
+*.TMP
+*.aub
+*.bin
+*.o
+*.pdb*
+*.sln
+*.swp
+*vcxproj*
+*~
+*~*
+.gdb*
+.vs
+.vscode
+My*
+build
+.cache

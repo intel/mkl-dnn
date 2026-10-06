@@ -35,6 +35,8 @@ add_subdirectory(gemm/jit)
 include("${PROJECT_SOURCE_DIR}/cmake/gen_gpu_kernel_list.cmake")
 
 file(GLOB_RECURSE CL_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cl)
+# gemm/jit OpenCL kernels are benchstone-only
+list(FILTER CL_SOURCES EXCLUDE REGEX "/gemm/jit/")
 file(GLOB_RECURSE CL_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/*.h
     ${CMAKE_CURRENT_SOURCE_DIR}/*.hxx
