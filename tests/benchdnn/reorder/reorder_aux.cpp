@@ -151,11 +151,18 @@ benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
         SAFE_V(FAIL);
     }
 
+    // The same tags were already used to create descriptors in `init_pd`, so a
+    // failure is not expected.
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
     switch (arg) {
         case DNNL_ARG_SRC:
-            return dnn_mem_t::init_md(ndims, dims.data(), src_dt(), stag);
+            DNN_SAFE_V(
+                    dnn_mem_t::init_md(md, ndims, dims.data(), src_dt(), stag));
+            return md;
         case DNNL_ARG_DST:
-            return dnn_mem_t::init_md(ndims, dims.data(), dst_dt(), dtag);
+            DNN_SAFE_V(
+                    dnn_mem_t::init_md(md, ndims, dims.data(), dst_dt(), dtag));
+            return md;
         default:
             assert(!"unsupported arg");
             return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);

@@ -1399,7 +1399,7 @@ post_ops_rhs_tensor_entry_t get_po_rhs_tensor_entry(
 
 } // namespace
 
-int attr_args_t::prepare_post_ops_mds(const attr_t &attr, int ndims,
+dnnl_status_t attr_args_t::prepare_post_ops_mds(const attr_t &attr, int ndims,
         const dnnl_dims_t prb_dims, dnnl_primitive_kind_t prim_kind,
         const sparse_options_t *sparse_options) {
     const auto &po = attr.post_ops;
@@ -1439,13 +1439,14 @@ int attr_args_t::prepare_post_ops_mds(const attr_t &attr, int ndims,
                     rhs_tensor_dims[d] = (!(mask & (1 << d))) ? 1 : dims[d];
             }
 
-            auto rhs_tensor_desc = dnn_mem_t::init_md(ndims, rhs_tensor_dims,
-                    po_rhs_tensor_entry.dt, po_rhs_tensor_entry.tag,
-                    po_rhs_tensor_entry.strides);
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> rhs_tensor_desc;
+            DNN_SAFE_STATUS(dnn_mem_t::init_md(rhs_tensor_desc, ndims,
+                    rhs_tensor_dims, po_rhs_tensor_entry.dt,
+                    po_rhs_tensor_entry.tag, po_rhs_tensor_entry.strides));
             if (e.binary.grouped) {
-                rhs_tensor_desc = dnn_mem_t::init_grouped_md(ndims,
-                        rhs_tensor_dims, po_rhs_tensor_entry.dt,
-                        grouped_var_dim_idx, grouped_count);
+                DNN_SAFE_STATUS(dnn_mem_t::init_grouped_md(rhs_tensor_desc,
+                        ndims, rhs_tensor_dims, po_rhs_tensor_entry.dt,
+                        grouped_var_dim_idx, grouped_count));
             }
             mds.emplace((DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx)
                                 | po_rhs_tensor_entry.arg_attr_mask),
@@ -1476,8 +1477,10 @@ int attr_args_t::prepare_post_ops_mds(const attr_t &attr, int ndims,
                 for (auto d = 0; d < ndims; ++d)
                     src2_tensor_dims[d]
                             = (!(src2_mask & (1 << d))) ? 1 : dims[d];
-                auto rhs_src2_tensor_desc = dnn_mem_t::init_md(
-                        ndims, src2_tensor_dims, e.binary.src2_dt, tag::any);
+                benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t>
+                        rhs_src2_tensor_desc;
+                DNN_SAFE_STATUS(dnn_mem_t::init_md(rhs_src2_tensor_desc, ndims,
+                        src2_tensor_dims, e.binary.src2_dt, tag::any));
                 mds.emplace(
                         (DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) | DNNL_ARG_SRC_2),
                         std::move(rhs_src2_tensor_desc));
@@ -1498,13 +1501,17 @@ int attr_args_t::prepare_post_ops_mds(const attr_t &attr, int ndims,
 
     // dropout
     if (!attr.dropout.is_def()) {
-        auto dropout_mask_desc = attr.dropout.has_output_mask()
-                ? dnn_mem_t::init_md(ndims, dims, dnnl_u8, attr.dropout.tag)
-                : dnn_mem_t::init_md();
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dropout_mask_desc;
+        if (attr.dropout.has_output_mask()) {
+            DNN_SAFE_STATUS(dnn_mem_t::init_md(
+                    dropout_mask_desc, ndims, dims, dnnl_u8, attr.dropout.tag));
+        } else {
+            DNN_SAFE_STATUS(dnn_mem_t::init_md(dropout_mask_desc));
+        }
         mds.emplace(DNNL_ARG_ATTR_DROPOUT_MASK, std::move(dropout_mask_desc));
     }
 
-    return OK;
+    return dnnl_success;
 }
 
 void attr_args_t::prepare_dw_post_op(

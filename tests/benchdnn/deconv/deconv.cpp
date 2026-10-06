@@ -228,18 +228,23 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, prb->src_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->get_dt(SRC), prb->stag);
-    auto wei_d = dnn_mem_t::init_md(prb->ndims + prb->has_groups,
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(
+            dnn_mem_t::init_md(src_d, prb->ndims, prb->src_dims().data(),
+                    force_f32_dt ? dnnl_f32 : prb->get_dt(SRC), prb->stag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(wei_d, prb->ndims + prb->has_groups,
             prb->wei_dims().data(), force_f32_dt ? dnnl_f32 : prb->get_dt(WEI),
-            prb->wtag);
+            prb->wtag));
     benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> bia_d {};
     if (prb->bia_dt() != dnnl_data_type_undef) {
-        bia_d = dnn_mem_t::init_md(1, prb->bia_dims().data(),
-                force_f32_dt ? dnnl_f32 : prb->get_dt(BIA), tag::any);
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(bia_d, 1, prb->bia_dims().data(),
+                force_f32_dt ? dnnl_f32 : prb->get_dt(BIA), tag::any));
     }
-    auto dst_d = dnn_mem_t::init_md(prb->ndims, prb->dst_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->get_dt(DST), prb->dtag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(
+            dnn_mem_t::init_md(dst_d, prb->ndims, prb->dst_dims().data(),
+                    force_f32_dt ? dnnl_f32 : prb->get_dt(DST), prb->dtag));
 
     dnnl_alg_kind_t alg = dnnl_deconvolution_direct;
     if (prb->alg == WINO) alg = dnnl_deconvolution_winograd;
@@ -253,8 +258,8 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
         attr_args.prepare_quant(
                 prb->attr, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_mask);
     }
-    attr_args.prepare_post_ops_mds(
-            prb->attr, prb->ndims, prb->dst_dims().data());
+    DNN_SAFE_STATUS(attr_args.prepare_post_ops_mds(
+            prb->attr, prb->ndims, prb->dst_dims().data()));
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
             create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
@@ -465,8 +470,10 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                         query_md_dims(mem.md_) + wei_ndims, wei_tr_dims);
                 // Queried weights are always with groups.
                 std::swap(wei_tr_dims[1], wei_tr_dims[2]);
-                auto wei_tr_md = dnn_mem_t::init_md(
-                        wei_ndims, wei_tr_dims, dnnl_f32, tag::abx);
+                benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_tr_md;
+                DNN_SAFE(dnn_mem_t::init_md(wei_tr_md, wei_ndims, wei_tr_dims,
+                                 dnnl_f32, tag::abx),
+                        WARN);
 
                 ref_mem_map.emplace(DNNL_ARG_WEIGHTS_1,
                         dnn_mem_t(
@@ -504,8 +511,10 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                         query_md_dims(mem.md_) + wei_ndims, wei_tr_dims);
                 // Queried weights are always with groups.
                 std::swap(wei_tr_dims[1], wei_tr_dims[2]);
-                auto wei_tr_md = dnn_mem_t::init_md(
-                        wei_ndims, wei_tr_dims, dnnl_f32, tag::abx);
+                benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_tr_md;
+                DNN_SAFE(dnn_mem_t::init_md(wei_tr_md, wei_ndims, wei_tr_dims,
+                                 dnnl_f32, tag::abx),
+                        WARN);
                 ref_mem_map.emplace(DNNL_ARG_DIFF_WEIGHTS_1,
                         dnn_mem_t(
                                 wei_tr_md, ref_engine, /* prefill = */ false));

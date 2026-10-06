@@ -69,7 +69,10 @@ dnn_mem_t::dnn_mem_t(const_dnnl_memory_desc_t md, dnnl_data_type_t dt,
     : engine_(engine), is_mapped_(false) {
     const int ndims = query_md_ndims(md);
     if (ndims > 0) {
-        auto md_wrapper = dnn_mem_t::init_md(ndims, query_md_dims(md), dt, tag);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md_wrapper;
+        if (dnn_mem_t::init_md(md_wrapper, ndims, query_md_dims(md), dt, tag)
+                != dnnl_success)
+            return;
         md_ = md_wrapper.release();
         active_ = (initialize(prefill) == OK);
     }
@@ -92,7 +95,10 @@ dnn_mem_t::dnn_mem_t(int ndims, const dnnl_dims_t dims, dnnl_data_type_t dt,
         const std::string &tag, const engine_t &engine, bool prefill)
     : engine_(engine), is_mapped_(false) {
     if (ndims > 0) {
-        auto md_wrapper = dnn_mem_t::init_md(ndims, dims, dt, tag);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md_wrapper;
+        if (dnn_mem_t::init_md(md_wrapper, ndims, dims, dt, tag)
+                != dnnl_success)
+            return;
         md_ = md_wrapper.release();
         active_ = (initialize(prefill) == OK);
     }
@@ -666,14 +672,17 @@ dnnl_memory_desc_t dnn_mem_t::pad_memory_desc(
     return ret;
 }
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_md() {
+dnnl_status_t dnn_mem_t::init_md(
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md_out) {
     dnnl_memory_desc_t zero_md {};
-    DNN_SAFE_V(dnnl_memory_desc_create_with_tag(
+    DNN_SAFE_STATUS(dnnl_memory_desc_create_with_tag(
             &zero_md, 0, nullptr, dnnl_data_type_undef, dnnl_format_tag_undef));
-    return zero_md;
+    md_out.reset(zero_md);
+    return dnnl_success;
 }
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_md(int ndims,
+dnnl_status_t dnn_mem_t::init_md(
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md_out, int ndims,
         const dnnl_dims_t dims, dnnl_data_type_t data_type,
         const std::string &tag_, const dims_t &strides_) {
     dnnl_memory_desc_t md {};
@@ -681,9 +690,10 @@ benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_md(int ndims,
     // Ignore tag_ in case strides_ are explicitly provided
     if (use_strides) {
         const std::vector<dnnl_dim_t> &strides(strides_);
-        DNN_SAFE_V(dnnl_memory_desc_create_with_strides(
+        DNN_SAFE_STATUS(dnnl_memory_desc_create_with_strides(
                 &md, ndims, dims, data_type, strides.data()));
-        return md;
+        md_out.reset(md);
+        return dnnl_success;
     }
 
     auto tag = normalize_tag(tag_, ndims);
@@ -693,42 +703,48 @@ benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_md(int ndims,
                 ? dnnl_format_tag_undef
                 : tag == tag::any ? dnnl_format_tag_any
                                   : str2fmt_tag(tag.c_str());
-        DNN_SAFE_V(dnnl_memory_desc_create_with_tag(
+        DNN_SAFE_STATUS(dnnl_memory_desc_create_with_tag(
                 &md, ndims, dims, data_type, enum_tag));
-        return md;
+        md_out.reset(md);
+        return dnnl_success;
     }
 
-    DNN_SAFE_V(dnnl_memory_desc_create_with_string_tag(
+    DNN_SAFE_STATUS(dnnl_memory_desc_create_with_string_tag(
             &md, ndims, dims, data_type, tag.data()));
-
-    return md;
+    md_out.reset(md);
+    return dnnl_success;
 }
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_csr_md(int ndims,
+dnnl_status_t dnn_mem_t::init_csr_md(
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md_out, int ndims,
         const dnnl_dims_t dims, dnnl_data_type_t data_type, dnnl_dim_t nnz,
         dnnl_data_type_t indices_dt, dnnl_data_type_t pointers_dt) {
     dnnl_memory_desc_t md {};
-    DNN_SAFE_V(dnnl_memory_desc_create_with_csr_encoding(
+    DNN_SAFE_STATUS(dnnl_memory_desc_create_with_csr_encoding(
             &md, ndims, dims, data_type, nnz, indices_dt, pointers_dt));
-    return md;
+    md_out.reset(md);
+    return dnnl_success;
 }
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_coo_md(int ndims,
+dnnl_status_t dnn_mem_t::init_coo_md(
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md_out, int ndims,
         const dnnl_dims_t dims, dnnl_data_type_t data_type, dnnl_dim_t nnz,
         dnnl_data_type_t indices_dt) {
     dnnl_memory_desc_t md {};
-    DNN_SAFE_V(dnnl_memory_desc_create_with_coo_encoding(
+    DNN_SAFE_STATUS(dnnl_memory_desc_create_with_coo_encoding(
             &md, ndims, dims, data_type, nnz, indices_dt));
-    return md;
+    md_out.reset(md);
+    return dnnl_success;
 }
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_sparse_packed_md(
-        int ndims, const dnnl_dims_t dims, dnnl_data_type_t data_type,
-        dnnl_dim_t nnz) {
+dnnl_status_t dnn_mem_t::init_sparse_packed_md(
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md_out, int ndims,
+        const dnnl_dims_t dims, dnnl_data_type_t data_type, dnnl_dim_t nnz) {
     dnnl_memory_desc_t md {};
-    DNN_SAFE_V(dnnl_memory_desc_create_with_packed_encoding(
+    DNN_SAFE_STATUS(dnnl_memory_desc_create_with_packed_encoding(
             &md, ndims, dims, data_type, nnz));
-    return md;
+    md_out.reset(md);
+    return dnnl_success;
 }
 
 benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_host_scalar_md(
@@ -738,16 +754,18 @@ benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_host_scalar_md(
     return md;
 }
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dnn_mem_t::init_grouped_md(
-        int ndims, const dnnl_dims_t dims, dnnl_data_type_t data_type,
+dnnl_status_t dnn_mem_t::init_grouped_md(
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md_out, int ndims,
+        const dnnl_dims_t dims, dnnl_data_type_t data_type,
         int variable_dim_idx, dnnl_dim_t group_count,
         dnnl_data_type_t offsets_dt) {
     dnnl_memory_desc_t md {};
 #if DNNL_EXPERIMENTAL_GROUPED_MEMORY
-    DNN_SAFE_V(dnnl_memory_desc_create_with_grouped_encoding(&md, ndims, dims,
-            data_type, variable_dim_idx, group_count, offsets_dt));
+    DNN_SAFE_STATUS(dnnl_memory_desc_create_with_grouped_encoding(&md, ndims,
+            dims, data_type, variable_dim_idx, group_count, offsets_dt));
 #endif
-    return md;
+    md_out.reset(md);
+    return dnnl_success;
 }
 
 int dnn_mem_t::initialize_memory_create_sycl(const handle_info_t &handle_info) {

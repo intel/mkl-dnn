@@ -37,20 +37,26 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, prb->src_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->get_dt(SRC), prb->stag);
-    auto wei_d = dnn_mem_t::init_md(prb->ndims, prb->wei_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->get_dt(WEI), prb->wtag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(
+            dnn_mem_t::init_md(src_d, prb->ndims, prb->src_dims().data(),
+                    force_f32_dt ? dnnl_f32 : prb->get_dt(SRC), prb->stag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_d;
+    DNN_SAFE_STATUS(
+            dnn_mem_t::init_md(wei_d, prb->ndims, prb->wei_dims().data(),
+                    force_f32_dt ? dnnl_f32 : prb->get_dt(WEI), prb->wtag));
     benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> bia_d {};
     if (prb->bia_dt() != dnnl_data_type_undef) {
-        bia_d = dnn_mem_t::init_md(1, prb->bia_dims().data(),
-                force_f32_dt ? dnnl_f32 : prb->get_dt(BIA), tag::any);
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(bia_d, 1, prb->bia_dims().data(),
+                force_f32_dt ? dnnl_f32 : prb->get_dt(BIA), tag::any));
     }
-    auto dst_d = dnn_mem_t::init_md(2, prb->dst_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->get_dt(DST), prb->dtag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, 2, prb->dst_dims().data(),
+            force_f32_dt ? dnnl_f32 : prb->get_dt(DST), prb->dtag));
 
     attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, 2, prb->dst_dims().data());
+    DNN_SAFE_STATUS(attr_args.prepare_post_ops_mds(
+            prb->attr, 2, prb->dst_dims().data()));
     auto wei_scale = prb->attr.scales.get(DNNL_ARG_WEIGHTS);
     if (wei_scale.policy == policy_t::PER_OC) {
         attr_args.prepare_quant(

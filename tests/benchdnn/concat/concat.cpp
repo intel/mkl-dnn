@@ -41,14 +41,16 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
 
     for (int i_input = 0; i_input < prb->n_inputs(); ++i_input) {
         const dims_t &i_vdims = prb->vdims[i_input];
-        src_d_wrappers[i_input] = dnn_mem_t::init_md(prb->ndims, i_vdims.data(),
-                force_f32_dt ? dnnl_f32 : prb->sdt, prb->stag[i_input]);
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(src_d_wrappers[i_input], prb->ndims,
+                i_vdims.data(), force_f32_dt ? dnnl_f32 : prb->sdt,
+                prb->stag[i_input]));
     }
 
     benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d {};
     if (prb->dtag != tag::undef) {
-        dst_d = dnn_mem_t::init_md(prb->ndims, prb->dst_dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->ddt, prb->dtag);
+        DNN_SAFE_STATUS(
+                dnn_mem_t::init_md(dst_d, prb->ndims, prb->dst_dims.data(),
+                        force_f32_dt ? dnnl_f32 : prb->ddt, prb->dtag));
     }
 
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;

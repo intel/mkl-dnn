@@ -532,7 +532,10 @@ static int check_tags() {
         }
         const dnnl_dims_t dims
                 = {7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};
-        auto md_from_str = dnn_mem_t::init_md(ndims, dims, dnnl_f32, str_tag);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md_from_str;
+        DNN_SAFE(
+                dnn_mem_t::init_md(md_from_str, ndims, dims, dnnl_f32, str_tag),
+                WARN);
 
         dnnl_memory_desc_t md_from_tag;
         DNN_SAFE(dnnl_memory_desc_create_with_tag(

@@ -98,21 +98,25 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
 
-    auto src0_d = dnn_mem_t::init_md(prb->ndims, prb->vdims[0].data(),
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src0_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src0_d, prb->ndims, prb->vdims[0].data(),
             force_f32_dt ? dnnl_f32 : prb->sdt[0], prb->stag[0],
-            prb->strides[0]);
+            prb->strides[0]));
 
-    auto src1_d = dnn_mem_t::init_md(prb->ndims, prb->vdims[1].data(),
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src1_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src1_d, prb->ndims, prb->vdims[1].data(),
             force_f32_dt ? dnnl_f32 : prb->sdt[1], prb->stag[1],
-            prb->strides[1]);
+            prb->strides[1]));
 
-    auto dst_d = dnn_mem_t::init_md(prb->ndims, prb->dst_dims.data(),
-            force_f32_dt ? dnnl_f32 : prb->ddt, prb->dtag, prb->strides[2]);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, prb->ndims, prb->dst_dims.data(),
+            force_f32_dt ? dnnl_f32 : prb->ddt, prb->dtag, prb->strides[2]));
 
     dnnl_alg_kind_t alg = attr_t::post_ops_t::kind2dnnl_kind(prb->alg);
 
     attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dst_dims.data());
+    DNN_SAFE_STATUS(attr_args.prepare_post_ops_mds(
+            prb->attr, prb->ndims, prb->dst_dims.data()));
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
             create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
@@ -124,13 +128,13 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     // shape information about the src2 input which is passed on to the
     // src2_d descriptor. In this case, it complies with user input while
     // creating the primitive descriptor.
-    auto src2_d = prb->is_ternary_op()
-            ? dnn_mem_t::init_md(prb->ndims,
-                      prb->vdims.size() > 2 ? prb->vdims[2].data()
-                                            : prb->vdims[0].data(),
-                      dnnl_s8,
-                      prb->stag.size() > 2 ? prb->stag[2] : prb->stag[0])
-            : nullptr;
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src2_d;
+    if (prb->is_ternary_op()) {
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(src2_d, prb->ndims,
+                prb->vdims.size() > 2 ? prb->vdims[2].data()
+                                      : prb->vdims[0].data(),
+                dnnl_s8, prb->stag.size() > 2 ? prb->stag[2] : prb->stag[0]));
+    }
 
     TIME_C_PD(DNN_SAFE_STATUS(dnnl_binary_primitive_desc_create_v2(
             &init_pd_args.pd, init_pd_args.engine, alg,

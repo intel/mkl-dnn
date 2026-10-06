@@ -84,13 +84,16 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, prb->vdims[0].data(),
-            force_f32_dt ? dnnl_f32 : prb->sdt, prb->stag);
-    auto dst_d = dnn_mem_t::init_md(prb->ndims, prb->vdims[1].data(),
-            force_f32_dt ? dnnl_f32 : prb->ddt, prb->dtag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src_d, prb->ndims, prb->vdims[0].data(),
+            force_f32_dt ? dnnl_f32 : prb->sdt, prb->stag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, prb->ndims, prb->vdims[1].data(),
+            force_f32_dt ? dnnl_f32 : prb->ddt, prb->dtag));
 
     attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->vdims[1].data());
+    DNN_SAFE_STATUS(attr_args.prepare_post_ops_mds(
+            prb->attr, prb->ndims, prb->vdims[1].data()));
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
             create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));

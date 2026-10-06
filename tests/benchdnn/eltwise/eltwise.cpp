@@ -38,15 +38,18 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, prb->dims.data(),
-            force_f32_dt ? dnnl_f32 : prb->dt, prb->tag);
-    auto dst_d = dnn_mem_t::init_md(prb->ndims, prb->dims.data(),
-            force_f32_dt ? dnnl_f32 : prb->dt, tag::any);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src_d, prb->ndims, prb->dims.data(),
+            force_f32_dt ? dnnl_f32 : prb->dt, prb->tag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, prb->ndims, prb->dims.data(),
+            force_f32_dt ? dnnl_f32 : prb->dt, tag::any));
 
     dnnl_alg_kind_t alg = attr_t::post_ops_t::kind2dnnl_kind(prb->alg);
 
     attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dims.data());
+    DNN_SAFE_STATUS(attr_args.prepare_post_ops_mds(
+            prb->attr, prb->ndims, prb->dims.data()));
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
             create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
@@ -60,13 +63,16 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
                 init_pd_args.src_md ? init_pd_args.src_md : src_d, dst_d,
                 prb->alpha, prb->beta, dnnl_attr)));
     } else {
-        auto diff_src_d = dnn_mem_t::init_md(prb->ndims, prb->dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->dt, tag::any);
-        auto diff_dst_d = dnn_mem_t::init_md(prb->ndims, prb->dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->dt, tag::any);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_src_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(diff_src_d, prb->ndims,
+                prb->dims.data(), force_f32_dt ? dnnl_f32 : prb->dt, tag::any));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_dst_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(diff_dst_d, prb->ndims,
+                prb->dims.data(), force_f32_dt ? dnnl_f32 : prb->dt, tag::any));
         if (prb->use_dst()) // Need to create with proper tag
-            dst_d = dnn_mem_t::init_md(prb->ndims, prb->dims.data(),
-                    force_f32_dt ? dnnl_f32 : prb->dt, prb->tag);
+            DNN_SAFE_STATUS(
+                    dnn_mem_t::init_md(dst_d, prb->ndims, prb->dims.data(),
+                            force_f32_dt ? dnnl_f32 : prb->dt, prb->tag));
         auto &data_d = prb->use_dst() ? dst_d : src_d;
 
         TIME_C_PD(DNN_SAFE_STATUS(dnnl_eltwise_backward_primitive_desc_create(

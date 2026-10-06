@@ -121,7 +121,10 @@ void exec_softmax_bwd(dnnl_engine_t eng, dnnl_stream_t strm,
 // Create a 3-D f32 plain memory on `eng`.
 dnn_mem_t make_3d(dnnl_engine_t eng, int64_t d0, int64_t d1, int64_t d2) {
     dnnl_dims_t dims = {d0, d1, d2};
-    auto md = dnn_mem_t::init_md(3, dims, dnnl_f32, tag::abx);
+    // Dims come from the problem tensors, so a plain f32 descriptor is not
+    // expected to fail.
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
+    DNN_SAFE_V(dnn_mem_t::init_md(md, 3, dims, dnnl_f32, tag::abx));
     return dnn_mem_t(md, eng, /* prefill = */ false);
 }
 

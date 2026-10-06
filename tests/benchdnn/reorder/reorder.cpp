@@ -88,7 +88,11 @@ dnn_mem_t setup_compensation_memory(const prb_t *prb, flag_bit_t flag) {
     if (prb->is_reorder_with_compensation(flag)) {
         dims_t dims = prb->get_compensation_dims(flag);
         int ndims = static_cast<int>(dims.size());
-        auto md = dnn_mem_t::init_md(ndims, dims.data(), dnnl_s32, tag::abx);
+        // Compensation dims are derived from the problem dims, so a plain s32
+        // descriptor is not expected to fail.
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
+        DNN_SAFE_V(
+                dnn_mem_t::init_md(md, ndims, dims.data(), dnnl_s32, tag::abx));
         m = dnn_mem_t(md, get_cpu_engine(), /* prefill = */ false);
     }
     return m;
@@ -118,8 +122,10 @@ int compare_compensation(const prb_t *prb, dnn_mem_map_t &mem_map,
         // piece of memory which is described by shortened tag coming from prb
         // into a separate memory and reorder it to plain so that it is a
         // straight comparison of values in native plain layout.
-        auto comp_md = dnn_mem_t::init_md(mem_ref.ndims(), mem_ref.dims(),
-                mem_ref.dt(), trim_tag_by_mask(prb->dtag, comp_mask));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> comp_md;
+        DNN_SAFE(dnn_mem_t::init_md(comp_md, mem_ref.ndims(), mem_ref.dims(),
+                         mem_ref.dt(), trim_tag_by_mask(prb->dtag, comp_mask)),
+                WARN);
         // Predefined handle_info won't use prefilling no matter what.
         dnn_mem_t comp_m(comp_md, mem_ref.engine(), /* prefill = */ false,
                 {false, comp_handle});
@@ -154,12 +160,14 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     for (int d = 0; d < prb->ndims; ++d)
         if (prb->runtime_dim_mask & (1 << d)) dims[d] = DNNL_RUNTIME_DIM_VAL;
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, dims.data(),
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src_d, prb->ndims, dims.data(),
             force_f32_dt ? dnnl_f32 : prb->src_dt(), prb->stag,
-            prb->strides[0]);
-    auto dst_d = dnn_mem_t::init_md(prb->ndims, dims.data(),
+            prb->strides[0]));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, prb->ndims, dims.data(),
             force_f32_dt ? dnnl_f32 : prb->dst_dt(), prb->dtag,
-            prb->strides[1]);
+            prb->strides[1]));
 
     // Prepare and assign extra for dst_md.
     auto &extra = static_cast<dnnl_memory_desc_t>(dst_d)->extra;

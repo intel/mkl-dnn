@@ -22,8 +22,10 @@ namespace self {
 
 static int check_bool_operator() {
     dnnl_dim_t dims {1};
-    auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
-    auto md0 = dnn_mem_t::init_md(0, &dims, dnnl_f32, tag::abx);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
+    DNN_SAFE(dnn_mem_t::init_md(md, 1, &dims, dnnl_f32, tag::abx), WARN);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md0;
+    DNN_SAFE(dnn_mem_t::init_md(md0, 0, &dims, dnnl_f32, tag::abx), WARN);
     {
         dnn_mem_t m;
         SELF_CHECK_EQ(bool(m), false);
@@ -61,8 +63,22 @@ static int check_bool_operator() {
     return OK;
 }
 
+static int check_init_md_status() {
+    dnnl_dims_t dims {2, 16};
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
+    SELF_CHECK_EQ(
+            dnn_mem_t::init_md(md, 2, dims, dnnl_f32, "ab"), dnnl_success);
+    // A tag with more letters than `ndims` must return an error instead of
+    // terminating the run.
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> bad_md;
+    SELF_CHECK_EQ(dnn_mem_t::init_md(bad_md, 2, dims, dnnl_f32, "abcd"),
+            dnnl_invalid_arguments);
+    return OK;
+}
+
 void memory() {
     RUN(check_bool_operator());
+    RUN(check_init_md_status());
 }
 
 } // namespace self

@@ -76,31 +76,54 @@ dnnl_data_type_t prb_t::get_dt(data_kind_t data_kind) const {
 }
 
 benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
+    // The same tags were already used to create descriptors in `init_pd`, so a
+    // failure is not expected.
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
     switch (arg) {
         case DNNL_ARG_QUERIES:
-            return dnn_mem_t::init_md(ndims, q_dims().data(), q_dt(), qtag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, q_dims().data(), q_dt(), qtag));
+            return md;
         case DNNL_ARG_KEYS:
-            return dnn_mem_t::init_md(ndims, k_dims().data(), k_dt(), ktag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, k_dims().data(), k_dt(), ktag));
+            return md;
         case DNNL_ARG_VALUES:
-            return dnn_mem_t::init_md(ndims, v_dims().data(), v_dt(), vtag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, v_dims().data(), v_dt(), vtag));
+            return md;
         case DNNL_ARG_DST:
-            return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, dst_dims.data(), dst_dt(), dtag));
+            return md;
         case DNNL_ARG_ATTN_MASK:
-            if (with_mask())
-                return dnn_mem_t::init_md(
-                        ndims, msk_dims.data(), mdt, tag::abx);
-            return dnn_mem_t::init_md();
+            if (with_mask()) {
+                DNN_SAFE_V(dnn_mem_t::init_md(
+                        md, ndims, msk_dims.data(), mdt, tag::abx));
+                return md;
+            }
+            DNN_SAFE_V(dnn_mem_t::init_md(md));
+            return md;
         case DNNL_ARG_DIFF_QUERIES:
-            return dnn_mem_t::init_md(ndims, q_dims().data(), q_dt(), qtag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, q_dims().data(), q_dt(), qtag));
+            return md;
         case DNNL_ARG_DIFF_KEYS:
-            return dnn_mem_t::init_md(ndims, k_dims().data(), k_dt(), ktag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, k_dims().data(), k_dt(), ktag));
+            return md;
         case DNNL_ARG_DIFF_VALUES:
-            return dnn_mem_t::init_md(ndims, v_dims().data(), v_dt(), vtag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, v_dims().data(), v_dt(), vtag));
+            return md;
         case DNNL_ARG_DIFF_DST:
-            return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, dst_dims.data(), dst_dt(), dtag));
+            return md;
         case DNNL_ARG_DS:
-            return dnn_mem_t::init_md(
-                    ndims, score_dims.data(), dnnl_f32, tag::abx);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, score_dims.data(), dnnl_f32, tag::abx));
+            return md;
         default:
             assert(!"unsupported arg");
             return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);

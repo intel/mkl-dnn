@@ -196,29 +196,34 @@ struct dnn_mem_t {
     dnnl_memory_desc_t pad_memory_desc(
             const_dnnl_memory_desc_t md, bool *was_padded = nullptr) const;
     // Initializes zero memory descriptor
-    static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_md();
+    static dnnl_status_t init_md(
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md);
     // Initializes memory descriptor from sporadic tag or strides.
-    static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_md(int ndims,
+    static dnnl_status_t init_md(
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md, int ndims,
             const dnnl_dims_t dims, dnnl_data_type_t data_type,
             const std::string &tag, const dims_t &strides_ = {});
     // Initializes memory descriptor for CSR encoding.
-    static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_csr_md(int ndims,
+    static dnnl_status_t init_csr_md(
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md, int ndims,
             const dnnl_dims_t dims, dnnl_data_type_t data_type, dnnl_dim_t nnz,
             dnnl_data_type_t indices_dt, dnnl_data_type_t pointers_dt);
     // Initializes memory descriptor for COO encoding.
-    static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_coo_md(int ndims,
+    static dnnl_status_t init_coo_md(
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md, int ndims,
             const dnnl_dims_t dims, dnnl_data_type_t data_type, dnnl_dim_t nnz,
             dnnl_data_type_t indices_dt);
     // Initializes memory descriptor for packed encoding.
-    static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_sparse_packed_md(
-            int ndims, const dnnl_dims_t dims, dnnl_data_type_t data_type,
-            dnnl_dim_t nnz);
+    static dnnl_status_t init_sparse_packed_md(
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md, int ndims,
+            const dnnl_dims_t dims, dnnl_data_type_t data_type, dnnl_dim_t nnz);
     // Initializes memory descriptor for host scalar memory.
     static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_host_scalar_md(
             dnnl_data_type_t data_type);
     // Initializes memory descriptor for grouped encoding.
-    static benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> init_grouped_md(
-            int ndims, const dnnl_dims_t dims, dnnl_data_type_t data_type,
+    static dnnl_status_t init_grouped_md(
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md, int ndims,
+            const dnnl_dims_t dims, dnnl_data_type_t data_type,
             int variable_dim_idx, dnnl_dim_t group_count,
             dnnl_data_type_t offsets_dt = dnnl_s32);
 
