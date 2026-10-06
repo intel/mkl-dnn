@@ -1694,7 +1694,8 @@ end x64ir
 
 // Validates def_use for the elementwise/reduction ops added for the softmax
 // epilogue. The rmw ops read dst and s0 and write dst; vbcast overwrites dst
-// and only reads s0; vhreduce_max reads and writes both dst and its scratch.
+// and only reads s0; vhreduce_max reads and writes dst and only writes its
+// workspace (the lowering overwrites it before reading it).
 TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir_t ir;
     const vreg_t ptr = ir.new_gpr();
@@ -1720,7 +1721,7 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     const vreg_t bc = ir.new_vec(data_type::f32);
     const int i_bc = ir.n_ops();
     ir.vbcast(bc, x);
-    const vreg_t cm = ir.new_vec(data_type::s32);
+    const vreg_t cm = ir.new_mask();
     const int i_cmp = ir.n_ops();
     ir.vcmp_ne_zero(cm, u8);
     const vreg_t ws = ir.new_vec(data_type::f32);
@@ -1758,14 +1759,13 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
     EXPECT_NE(std::find(uses.begin(), uses.end(), (int)y), uses.end());
     EXPECT_NE(std::find(uses.begin(), uses.end(), (int)mask), uses.end());
-    // vhreduce_max reads and writes both dst and workspace.
+    // vhreduce_max reads and writes dst and only writes its workspace (the
+    // lowering overwrites the workspace before reading it).
     ir.def_use(ir.ops()[i_hm], defs, uses);
     ASSERT_EQ(defs.size(), 2u);
     EXPECT_NE(std::find(defs.begin(), defs.end(), (int)x), defs.end());
     EXPECT_NE(std::find(defs.begin(), defs.end(), (int)ws), defs.end());
-    ASSERT_EQ(uses.size(), 2u);
-    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
-    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)ws), uses.end());
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
     // vexp reads and writes dst in place.
     ir.def_use(ir.ops()[i_exp], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)x}));
@@ -2011,7 +2011,7 @@ TEST(IntegrationTests, SelectMaskFromCondition) {
     ir.vload(cond, cond_ptr, 0, data_type::s32);
 
     // mask lanes = (cond != 0); a = mask ? b : a  ->  lane = cond ? b : a.
-    const vreg_t mask = ir.new_vec(data_type::s32);
+    const vreg_t mask = ir.new_mask();
     ir.vcmp_ne_zero(mask, cond);
     ir.vblend(a, b, mask);
     ir.vstore(c_ptr, 0, a, data_type::f32);
@@ -2071,7 +2071,7 @@ TEST(IntegrationTests, LoadU8SelectMask) {
     // Full block: widen bytes -> integer lanes -> mask -> select.
     const vreg_t cond = ir.new_vec(data_type::s32);
     ir.vload_u8(cond, cond_ptr, 0, simd_w());
-    const vreg_t mask = ir.new_vec(data_type::s32);
+    const vreg_t mask = ir.new_mask();
     ir.vcmp_ne_zero(mask, cond);
     const vreg_t a = ir.new_vec(data_type::f32);
     ir.vload(a, a_ptr, 0, data_type::f32);
@@ -2084,7 +2084,7 @@ TEST(IntegrationTests, LoadU8SelectMask) {
     // past the tail widen to zero and are dropped by the masked store.
     const vreg_t condt = ir.new_vec(data_type::s32);
     ir.vload_u8(condt, cond_ptr, 0, tail);
-    const vreg_t maskt = ir.new_vec(data_type::s32);
+    const vreg_t maskt = ir.new_mask();
     ir.vcmp_ne_zero(maskt, condt);
     const vreg_t at = ir.new_vec(data_type::f32);
     ir.vload(at, a_ptr, 0, data_type::f32);

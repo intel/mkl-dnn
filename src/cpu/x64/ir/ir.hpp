@@ -347,8 +347,10 @@ struct DNNL_API ir_t {
     void vmul(vreg_t dst, vreg_t src);
     void vdiv(vreg_t dst, vreg_t src);
     void vmax(vreg_t dst, vreg_t src);
+    // `dst` is a mask vreg: a lane is set where `src` != 0. The mask is a
+    // per-lane predicate (opmask or sign bit), consumed only by mask ops.
     void vcmp_ne_zero(vreg_t dst, vreg_t src);
-    // `mask` is a mask vreg from set_mask_imm.
+    // `mask` is a mask vreg from set_mask_imm or vcmp_ne_zero.
     void vblend(vreg_t dst, vreg_t src, vreg_t mask);
     void vbcast(vreg_t dst, vreg_t src);
     // `workspace` is scratch. It is overwritten by this call, so pass a vreg

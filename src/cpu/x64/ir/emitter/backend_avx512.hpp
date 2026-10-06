@@ -186,11 +186,9 @@ struct avx512_backend_t {
         else { JIT_ASSERT(!"vmax: dtype not implemented"); }
     }
 
-    // dst lane is all-ones when s0 is nonzero, otherwise zero. The result is
-    // an opmask, not a floating-point vector.
-    void vcmp_ne_zero(int d, int s, int ws, data_type_t dt) {
-        // AVX-512 compares target k-registers; the AVX2 scratch is unused.
-        UNUSED(ws);
+    // Build the predicate mask for `s != 0`. On AVX-512 a mask is an opmask,
+    // one bit per lane, set where the lane is nonzero.
+    void vcmp_ne_zero(int d, int s, data_type_t dt) {
         if (dt == data_type::s32) {
             gen().vptestmd(Xbyak::Opmask(d), Xbyak::Zmm(s), Xbyak::Zmm(s));
         } else {
@@ -198,7 +196,7 @@ struct avx512_backend_t {
         }
     }
 
-    // dst = mask ? s0 : dst. `mask` is a per-lane all-ones/zero opmask.
+    // dst = mask ? s0 : dst. `mask` is a per-lane predicate opmask.
     void vblend(int d, int s, int mask, data_type_t dt) {
         if (dt == data_type::f32) {
             JIT_ASSERT(mask >= 1 && mask <= 7);

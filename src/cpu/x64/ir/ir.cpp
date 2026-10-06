@@ -206,6 +206,8 @@ void ir_t::vmax(vreg_t dst, vreg_t src) {
 }
 
 void ir_t::vcmp_ne_zero(vreg_t dst, vreg_t src) {
+    assert(vreg_info_[(int)dst].kind == reg_kind_t::mask
+            && "vcmp_ne_zero: dst must be a mask vreg");
     op_t op;
     op.kind = op_kind_t::vcmp_ne_zero;
     op.dst = dst;

@@ -155,16 +155,17 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vmax: dtype not implemented"); }
     }
 
-    // dst = (s0 != 0) ? all-ones : 0, per lane, tested on the integer bit
-    // pattern. The result is a lane mask (all bits set where nonzero).
-    void vcmp_ne_zero(int d, int s, int ws, data_type_t dt) {
+    // Build the predicate mask for `s != 0`. On AVX2 a mask is a per-lane sign
+    // bit (what vblendvps and vmaskmovps read), so only bit 31 of each lane is
+    // defined.
+    void vcmp_ne_zero(int d, int s, data_type_t dt) {
         if (dt == data_type::s32) {
-            gen().vpxor(Xbyak::Ymm(ws), Xbyak::Ymm(ws), Xbyak::Ymm(ws));
-            // d = (s == 0) ? -1 : 0
-            gen().vpcmpeqd(Xbyak::Ymm(d), Xbyak::Ymm(s), Xbyak::Ymm(ws));
-            // ws = -1 (all ones), then invert d: (s != 0) ? -1 : 0
-            gen().vpcmpeqd(Xbyak::Ymm(ws), Xbyak::Ymm(ws), Xbyak::Ymm(ws));
-            gen().vpxor(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(ws));
+            // sign((-s) | s) is set iff s != 0, for any integer s. Zeroing `d`
+            // first corrupts `s` if they alias, so `d` must differ from `s`.
+            assert(d != s);
+            gen().vpxor(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(d));
+            gen().vpsubd(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s)); // -s
+            gen().vpor(Xbyak::Ymm(d), Xbyak::Ymm(d), Xbyak::Ymm(s)); // (-s) | s
         } else {
             JIT_ASSERT(!"vcmp_ne_zero: dtype not implemented");
         }

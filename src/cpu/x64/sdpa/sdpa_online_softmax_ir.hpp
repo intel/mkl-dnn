@@ -390,15 +390,12 @@ protected:
         const int rsp_idx = Xbyak::Operand::RSP;
         const int param_idx = abi_param1.getIdx();
 
-        // Scratch registers the emitter reserves for spill handling. They are
-        // not part of the register pool.
-        const int gpr_scratch0 = 10, gpr_scratch1 = 11;
-        const int vec_scratch0 = 13, vec_scratch1 = 14, vec_scratch2 = 15;
+        // The eltwise injector (vexp) writes this opmask on AVX-512 and restores
+        // nothing, so it is kept out of the allocatable mask file.
         const int exp_opmask = 1;
 
-        const reg_config_t reg_cfg = make_reg_config(isa(), param_idx, rsp_idx,
-                {gpr_scratch0, gpr_scratch1},
-                {vec_scratch0, vec_scratch1, vec_scratch2}, {exp_opmask});
+        const reg_config_t reg_cfg
+                = make_reg_config(isa(), param_idx, rsp_idx, {exp_opmask});
 
         const reg_alloc_result_t alloc = allocate_registers(ir_, reg_cfg.pools);
 
