@@ -1706,7 +1706,7 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir.vload(y, ptr, simd_w() * (dim_t)sizeof(float), data_type::f32);
     const vreg_t u8 = ir.new_vec(data_type::s32);
     const int i_u8 = ir.n_ops();
-    ir.vload_u8(u8, ptr, 0, simd_w());
+    ir.vload_widen(u8, ptr, 0, simd_w(), data_type::u8);
 
     const int i_sub = ir.n_ops();
     ir.vsub(x, y);
@@ -1744,7 +1744,7 @@ TEST(IRBuilderTests, NewVectorOpsDefUse) {
     ir.def_use(ir.ops()[i_bc], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)bc}));
     EXPECT_EQ(uses, std::vector<int>({(int)x}));
-    // vload_u8 overwrites dst and reads the base pointer.
+    // vload_widen overwrites dst and reads the base pointer.
     ir.def_use(ir.ops()[i_u8], defs, uses);
     EXPECT_EQ(defs, std::vector<int>({(int)u8}));
     EXPECT_EQ(uses, std::vector<int>({(int)ptr}));
@@ -2049,7 +2049,7 @@ struct load_u8_args_t {
     float *dst;
 };
 
-// Validates vload_u8 feeding the select-mask path, the real SDPA attention-mask
+// Validates vload_widen feeding the select-mask path, the real SDPA attention-mask
 // use: uint8 condition bytes are widened into integer lanes, turned into a lane
 // mask with vcmp_ne_zero, and consumed by vblend to pick `b` where the byte is
 // nonzero and `a` where it is zero.
@@ -2070,7 +2070,7 @@ TEST(IntegrationTests, LoadU8SelectMask) {
 
     // Full block: widen bytes -> integer lanes -> mask -> select.
     const vreg_t cond = ir.new_vec(data_type::s32);
-    ir.vload_u8(cond, cond_ptr, 0, simd_w());
+    ir.vload_widen(cond, cond_ptr, 0, simd_w(), data_type::u8);
     const vreg_t mask = ir.new_mask();
     ir.vcmp_ne_zero(mask, cond);
     const vreg_t a = ir.new_vec(data_type::f32);
@@ -2083,7 +2083,7 @@ TEST(IntegrationTests, LoadU8SelectMask) {
     // Tail block: the tail bytes are packed one at a time by the load; lanes
     // past the tail widen to zero and are dropped by the masked store.
     const vreg_t condt = ir.new_vec(data_type::s32);
-    ir.vload_u8(condt, cond_ptr, 0, tail);
+    ir.vload_widen(condt, cond_ptr, 0, tail, data_type::u8);
     const vreg_t maskt = ir.new_mask();
     ir.vcmp_ne_zero(maskt, condt);
     const vreg_t at = ir.new_vec(data_type::f32);

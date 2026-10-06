@@ -136,14 +136,15 @@ struct avx512_backend_t {
         }
     }
 
-    // Load `n_elems` uint8 bytes at [base + disp] into the low `n_elems`
-    // element lanes of `d`, each zero-extended to `d`'s element type `dt`.
-    void vload_u8(int d, int base, dim_t disp, int n_elems, data_type_t dt) {
-        if (dt != data_type::s32) {
-            JIT_ASSERT(!"vload_u8: dtype not implemented");
+    // Load `n_elems` elements of `mem_dt` at [base + disp] into the low lanes
+    // of `d`, each widened (zero-extended) to `d`'s wider element type `reg_dt`.
+    void vload_widen(int d, int base, dim_t disp, int n_elems,
+            data_type_t mem_dt, data_type_t reg_dt) {
+        if (mem_dt != data_type::u8 || reg_dt != data_type::s32) {
+            JIT_ASSERT(!"vload_widen: dtype not implemented");
             return;
         }
-        const int simd_w = vlen / (int)types::data_type_size(dt);
+        const int simd_w = vlen / (int)types::data_type_size(reg_dt);
         assert(n_elems > 0 && n_elems <= simd_w);
         const Xbyak::Reg64 base_reg(base);
         if (n_elems == simd_w) {

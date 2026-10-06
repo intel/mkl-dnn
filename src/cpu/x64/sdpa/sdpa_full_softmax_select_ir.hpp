@@ -78,7 +78,7 @@ struct select_row_args_t {
 // per iteration (a 0 condition stride means every row reads the same condition
 // row, i.e. a broadcast-over-rows condition). Per block the op chain is:
 // load scores -> widen the uint8 condition and turn it into a lane mask
-// (vload_u8 -> vcmp_ne_zero) -> vblend the broadcast `fill` into the masked-out
+// (vload_widen -> vcmp_ne_zero) -> vblend the broadcast `fill` into the masked-out
 // lanes -> store scores. Which lanes are masked out follows the driver:
 // fusiable keeps the score where cond != 0, non-fusiable where cond == 0.
 inline ir_t build_select_ir(
@@ -125,7 +125,7 @@ inline ir_t build_select_ir(
                 ir.vload_masked(blk, sc_ptr, sc_off, m, data_type::f32);
 
             const vreg_t cond = ir.new_vec(data_type::s32);
-            ir.vload_u8(cond, cond_ptr, cond_off, n);
+            ir.vload_widen(cond, cond_ptr, cond_off, n, data_type::u8);
             const vreg_t cmask = ir.new_mask();
             ir.vcmp_ne_zero(cmask, cond);
 

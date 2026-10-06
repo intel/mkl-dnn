@@ -92,7 +92,7 @@ struct acc_renorm_args_t {
 // handled with masked loads/stores). Mirrors the per-row scalar epilogue in
 // sdpa_online_softmax_driver.cpp for a single KV tile. With `has_select`, each block also
 // gets the attention select mask applied right after scaling: uint8 condition
-// bytes are widened and turned into a lane mask (vload_u8 -> vcmp_ne_zero),
+// bytes are widened and turned into a lane mask (vload_widen -> vcmp_ne_zero),
 // then vblend selects the broadcast `fill` scalar into the masked-out lanes.
 // Which lanes are masked out follows the online-softmax path: fusiable keeps the score
 // where cond != 0, non-fusiable where cond == 0.
@@ -173,7 +173,7 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         auto apply_select = [&](vreg_t blk, dim_t cond_off, int n) -> vreg_t {
             if (!has_select) return blk;
             const vreg_t cond = ir.new_vec(data_type::s32);
-            ir.vload_u8(cond, cond_ptr, cond_off, n);
+            ir.vload_widen(cond, cond_ptr, cond_off, n, data_type::u8);
             const vreg_t cmask = ir.new_mask();
             ir.vcmp_ne_zero(cmask, cond);
             if (fusiable) {
