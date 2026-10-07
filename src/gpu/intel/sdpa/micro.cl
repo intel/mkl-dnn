@@ -354,7 +354,9 @@ DECLARE_2D_TILE_RSELECT(a_scale_tile_type, SUBGROUP_SIZE, ugemm_vs_sg_tile_n, 1,
 #define tile_load_block_rem_q(t, ptr, n, ld, off_r, off_c) \
     tile_load_block(t, ptr, ld, off_r, off_c);
 #define tile_store_block_rem_q(t, ptr, n, ld, off_r, off_c) \
-    tile_store_block(t, ptr, ld, off_r, off_c);
+    { \
+        if ((off_c) < (n)) tile_store_block(t, ptr, ld, off_r, off_c); \
+    }
 #endif
 
 #define binary_add(x, y) ((x) + (y))
