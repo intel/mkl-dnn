@@ -97,8 +97,15 @@ struct sdpa_online_softmax_conf_t {
     sdpa_online_softmax_params_t params;
     // KV tiling width for the streaming softmax (seq_kv in tiles of kv_blk).
     dim_t kv_blk = 0;
+    // Query-axis blocking: the seq_q rows are processed in blocks of q_blk so
+    // the per-block Q slice, scores tile and running accumulator stay
+    // L2-resident across the KV sweep (avoids re-streaming all of Q per KV
+    // tile). q_tail is the ragged last block (seq_q % q_blk, 0 if it divides).
+    dim_t q_blk = 0;
+    dim_t q_tail = 0;
     // Per-thread scratch: scores + acc + pv + row_max + row_denom + old_coef,
-    // each 64-byte aligned; offsets into the per-thread block.
+    // each 64-byte aligned; offsets into the per-thread block. Sized for one
+    // query block (q_blk rows), not the full seq_q.
     size_t off_scores = 0, off_acc = 0, off_pv = 0, off_row_max = 0,
            off_row_denom = 0, off_old_coef = 0;
     size_t scratch_per_thread = 0;
@@ -125,16 +132,20 @@ struct sdpa_online_softmax_kernels_t {
             = delete;
 
     // mm1 computes a scores tile Q*K[:, tile]; mm2 computes the P_tile*V[tile,:]
-    // partial (beta=0) that the epilogue rescales into the running output. The
-    // *_tail variants handle the ragged last KV tile.
-    brgemm_kernel_t *mm1_kernel = nullptr, *mm2_kernel = nullptr,
-                    *mm1_tail_kernel = nullptr, *mm2_tail_kernel = nullptr;
+    // partial (beta=0) that the epilogue rescales into the running output.
+    // Indexed [q_tail?][kv_tail?]: a brgemm baked for the full q_blk rows vs the
+    // ragged last query block, and the full kv_blk vs the ragged last KV tile.
+    brgemm_kernel_t *mm1_kernel[2][2] = {};
+    brgemm_kernel_t *mm2_kernel[2][2] = {};
     // JIT online-softmax epilogue (AVX2 IR): the softmax kernels apply scale +
-    // select-mask + streaming-softmax to one KV tile (full/tail width);
-    // acc_renorm rescales the running output by old_coef and adds the tile's
-    // P*V.
-    std::unique_ptr<sdpa_softmax_ir::softmax_ir_kernel_t> softmax_ir_kernel,
-            softmax_tail_ir_kernel, acc_renorm_ir_kernel;
+    // select-mask + streaming-softmax to one KV tile, indexed [q_tail?][kv_tail?]
+    // (row count baked from q_blk/q_tail, width from kv_blk/kv_tail); acc_renorm
+    // rescales the running output by old_coef and adds the tile's P*V and
+    // depends only on the query-block row count ([q_tail?]).
+    std::unique_ptr<sdpa_softmax_ir::softmax_ir_kernel_t> softmax_ir_kernel[2]
+                                                                           [2];
+    std::unique_ptr<sdpa_softmax_ir::softmax_ir_kernel_t>
+            acc_renorm_ir_kernel[2];
     bool use_ir_epilogue = false;
 };
 
