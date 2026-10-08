@@ -17,14 +17,10 @@
 #ifndef CPU_X64_SDPA_SDPA_FULL_SOFTMAX_SELECT_IR_HPP
 #define CPU_X64_SDPA_SDPA_FULL_SOFTMAX_SELECT_IR_HPP
 
-// Select-mask pre-pass kernel for the full-softmax CPU SDPA (sdpa_full_softmax). The
-// full-softmax path reuses the stock jit_uni_softmax, which cannot apply a
-// pre-softmax select mask, so when a select mask is present and not folded into
-// mm1 the scores tile has the mask applied in a separate pass before softmax.
-//
-// Built as a small JIT kernel with the generic x64 CPU IR (src/cpu/x64/ir).
-// Select-only (no softmax/scale/streaming); targets AVX2 + AVX-512 with masked
-// tails, so no intrinsics. Shares no code with sdpa_online_softmax_ir.hpp.
+// Select-mask pre-pass kernel for the full-softmax CPU SDPA. The full-softmax
+// path reuses jit_uni_softmax, which cannot apply a pre-softmax select mask,
+// so when a select mask is present and not folded into mm1 the scores tile has
+// the mask applied in a separate pass before softmax.
 
 #include "oneapi/dnnl/dnnl_config.h"
 
@@ -60,10 +56,12 @@ inline int simd_w() {
 
 // Arguments for the select pre-pass kernel. A tile of `n_rows` score rows of
 // `w` elements each (the kernel bakes `w`) is updated in place; a masked-out
-// lane takes `fill`. scores points at the first row (contiguous, row stride
-// baked into the kernel); cond points at the matching condition row (one uint8
-// byte per score, columns contiguous, row stride baked into the kernel). fill
-// is a loop-invariant scalar shared by every row and lane.
+// key's score is replaced with `fill`. `scores` points at query 0, key 0.
+// Within each query row, the `w` key scores are adjacent floats; the baked-in
+// score row stride advances to the next query. `cond` points at the matching
+// condition for query 0, key 0; key conditions are adjacent uint8 values, and
+// its baked-in row stride advances to the next query (or is zero to reuse the
+// same condition row). `fill` is shared by every row and key.
 struct select_row_args_t {
     float *scores; // in/out: score rows; masked-out lanes become fill
     const uint8_t *cond; // select condition bytes (row 0, column 0)
@@ -79,15 +77,10 @@ struct select_row_args_t {
 // row, i.e. a broadcast-over-rows condition). Per block the op chain is:
 // load scores -> widen the uint8 condition and turn it into a lane mask
 // (vload_widen -> vcmp_ne_zero) -> vblend the broadcast `fill` into the masked-out
-// lanes -> store scores. Which lanes are masked out follows the driver:
-// fusiable keeps the score where cond != 0, non-fusiable where cond == 0.
-inline ir_t build_select_ir(
-        int w, bool fusiable, dim_t scores_row_stride, dim_t cond_row_stride) {
-    const int n_blk = w / simd_w();
-    const int tail = w % simd_w();
-    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
-    const dim_t tail_off = n_blk * vbytes;
-
+// lanes -> store scores. With `invert_select` false, keep scores where
+// `cond != 0`; with it true, keep scores where `cond == 0`.
+inline ir_t build_select_ir(dim_t w, bool invert_select,
+        dim_t scores_row_stride, dim_t cond_row_stride) {
     ir_t ir;
 
     // Row pointers: advanced one row per loop iteration.
@@ -102,12 +95,17 @@ inline ir_t build_select_ir(
     const vreg_t rows = ir.new_gpr();
     ir.load_param(rows, offsetof(select_row_args_t, n_rows));
 
+    const dim_t n_blk = w / simd_w();
+    const int tail = static_cast<int>(w % simd_w());
     // One mask, reused by every masked tail op and every row, active for `tail`.
     vreg_t mask = vreg_t::none;
     if (tail) {
         mask = ir.new_mask();
         ir.set_mask_imm(mask, tail);
     }
+
+    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
+    const dim_t tail_off = n_blk * vbytes;
 
     // Apply the select mask to the single row at the current pointers.
     auto row_body = [&]() {
@@ -130,16 +128,14 @@ inline ir_t build_select_ir(
             ir.vcmp_ne_zero(cmask, cond);
 
             vreg_t out;
-            if (fusiable) {
-                // Keep the score where cond != 0, else fill: start from fill
-                // and blend the score into the cond != 0 lanes.
+            if (!invert_select) {
+                // Seed with fill, then replace nonzero-condition lanes by scores.
                 const vreg_t sel = ir.new_vec(data_type::f32);
                 ir.vbcast(sel, fill_bc);
                 ir.vblend(sel, blk, cmask);
                 out = sel;
             } else {
-                // Keep the score where cond == 0, else fill: blend fill into
-                // the cond != 0 lanes.
+                // Keep scores as the base, replacing nonzero-condition lanes by fill.
                 ir.vblend(blk, fill_bc, cmask);
                 out = blk;
             }
@@ -150,9 +146,8 @@ inline ir_t build_select_ir(
                 ir.vstore_masked(sc_ptr, sc_off, out, m, data_type::f32);
         };
 
-        for (int b = 0; b < n_blk; ++b)
-            apply_block(
-                    b * vbytes, (dim_t)b * simd_w(), simd_w(), vreg_t::none);
+        for (dim_t b = 0; b < n_blk; ++b)
+            apply_block(b * vbytes, b * simd_w(), simd_w(), vreg_t::none);
         if (tail) apply_block(tail_off, (dim_t)n_blk * simd_w(), tail, mask);
 
         // Advance to the next row. The last iteration's advance is harmless
@@ -166,16 +161,19 @@ inline ir_t build_select_ir(
     return ir;
 }
 
-// JIT kernel that runs a select pre-pass IR: allocate registers, emit code and
-// finalize. The IR uses no eltwise and no post-ops, so neither an eltwise
-// injector nor a post-ops injector is wired up. Construct with an IR from
-// build_select_ir(), call create_kernel(), then invoke via
-// operator()(const select_row_args_t *).
+// JIT kernel for the select pre-pass. Construct with its build-time shape and
+// strides, call create_kernel(), then invoke via operator()(const
+// select_row_args_t *). generate() builds the IR and runs the register
+// allocation and emission pipeline.
 class select_ir_kernel_t : public jit_generator_t {
 public:
-    select_ir_kernel_t(ir_t ir)
+    select_ir_kernel_t(dim_t w, bool invert_select, dim_t scores_row_stride,
+            dim_t cond_row_stride)
         : jit_generator_t("sdpa_full_softmax_select_ir", isa())
-        , ir_(std::move(ir)) {}
+        , w_(w)
+        , scores_row_stride_(scores_row_stride)
+        , cond_row_stride_(cond_row_stride)
+        , invert_select_(invert_select) {}
 
     const char *name() const override {
         return "sdpa_full_softmax_select_ir_kernel";
@@ -184,6 +182,9 @@ public:
 
 protected:
     void generate() override {
+        ir_t ir = build_select_ir(
+                w_, invert_select_, scores_row_stride_, cond_row_stride_);
+
         const int rsp_idx = Xbyak::Operand::RSP;
         const int param_idx = abi_param1.getIdx();
 
@@ -191,7 +192,7 @@ protected:
         const reg_config_t reg_cfg = make_reg_config(
                 isa(), param_idx, rsp_idx, /*reserved_masks=*/ {});
 
-        const reg_alloc_result_t alloc = allocate_registers(ir_, reg_cfg.pools);
+        const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
 
         preamble();
 
@@ -200,7 +201,7 @@ protected:
 
         // No eltwise and no attribute post-ops in this IR.
         data_section_t data;
-        emit(*this, ir_, alloc, reg_cfg, data, /*postops=*/nullptr);
+        emit(*this, ir, alloc, reg_cfg, data, /*postops=*/nullptr);
 
         if (frame > 0) add(rsp, frame);
 
@@ -210,7 +211,10 @@ protected:
     }
 
 private:
-    ir_t ir_;
+    dim_t w_;
+    dim_t scores_row_stride_;
+    dim_t cond_row_stride_;
+    bool invert_select_;
 };
 
 } // namespace sdpa_full_softmax_select_ir

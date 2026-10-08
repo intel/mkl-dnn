@@ -108,11 +108,11 @@ struct sdpa_full_softmax_params_t {
     // alg_kind (softmax_accurate_inf_as_zero vs softmax_accurate).
     bool softmax_inf_as_zero = false;
 
-    // The mm1 (QK^T) post-op chain, carried verbatim from the graph in graph
-    // order (scale / soft-cap / attention-mask; the select is handled
-    // separately). Mirrors decomp's sub_matmul1_attr post-ops but sliced to the
-    // per-query-tile shape and folded into the BRGEMM store. Empty when mm1 has
-    // no post-ops.
+    // The currently supported mm1 (QK^T) post-op chain, carried from the graph
+    // in graph order (scale / attention-mask; the select is handled separately).
+    // Mirrors decomp's sub_matmul1_attr post-ops but sliced to the per-query-tile
+    // shape and folded into the BRGEMM store. Soft-cap is not yet wired to this
+    // path. Empty when mm1 has no post-ops.
     std::vector<sdpa_mm1_post_op_t> mm1_post_ops;
 };
 
