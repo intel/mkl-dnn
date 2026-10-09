@@ -27,7 +27,6 @@
 #include "graph/backend/dnnl/kernels/large_partition.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp.hpp"
 #include "graph/backend/dnnl/kernels/sdp_decomp_training.hpp"
-#include "graph/backend/dnnl/kernels/sdp_fused_brgemm.hpp"
 #include "graph/backend/dnnl/kernels/sdp_primitive.hpp"
 
 #include "graph/backend/dnnl/dnnl_partition_impl.hpp"
@@ -53,7 +52,6 @@ private:
         automatic,
         primitive,
         decomp,
-        fused_brgemm,
         large,
     };
 
@@ -76,10 +74,6 @@ public:
                 break;
             case sdpa_impl_kind_t::decomp:
                 kernel = std::make_shared<sdp_decomp_kernel_t<quantized, dt>>();
-                ret = kernel->compile_impl(part, eng, inputs, outputs);
-                break;
-            case sdpa_impl_kind_t::fused_brgemm:
-                kernel = std::make_shared<sdp_fused_brgemm_kernel_t>();
                 ret = kernel->compile_impl(part, eng, inputs, outputs);
                 break;
             case sdpa_impl_kind_t::automatic:
@@ -116,15 +110,13 @@ public:
 
     // Internal env var to force a specific SDPA implementation, for oneDNN
     // debug and testing only:
-    //   ONEDNN_GRAPH_SDPA_IMPL={auto|primitive|decomp|fused_brgemm|large}
+    //   ONEDNN_GRAPH_SDPA_IMPL={auto|primitive|decomp|large}
     // The legacy knob ONEDNN_GRAPH_SDPA_FORCE_PRIMITIVE>0 is preserved and maps
     // to `large` (its historical behavior).
     sdpa_impl_kind_t forced_impl() const {
         using graph::utils::check_verbose_string_user;
         if (check_verbose_string_user("GRAPH_SDPA_IMPL", "large"))
             return sdpa_impl_kind_t::large;
-        if (check_verbose_string_user("GRAPH_SDPA_IMPL", "fused_brgemm"))
-            return sdpa_impl_kind_t::fused_brgemm;
         if (check_verbose_string_user("GRAPH_SDPA_IMPL", "decomp"))
             return sdpa_impl_kind_t::decomp;
         if (check_verbose_string_user("GRAPH_SDPA_IMPL", "primitive"))

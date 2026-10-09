@@ -649,8 +649,12 @@ status_t insert_reshape_for_sdpa(std::shared_ptr<subgraph_t> &sg) {
             index += 1;
         }
         // Insert reshape for mask
-        if (cur_op->get_attr<int64_t>(op_attr::mask_type)
-                == static_cast<int64_t>(attn_mask_type::buffer)) {
+        const auto mask_type = cur_op->get_attr<int64_t>(op_attr::mask_type);
+        const bool with_buffer_mask
+                = mask_type == static_cast<int64_t>(attn_mask_type::buffer);
+        const bool with_select_mask
+                = mask_type == static_cast<int64_t>(attn_mask_type::select);
+        if (with_buffer_mask || with_select_mask) {
             int32_t mask_ndims = cur_op->get_input_logical_tensor(index).ndims;
             if (mask_ndims == 5) {
                 auto mask_dims
