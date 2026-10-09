@@ -146,13 +146,15 @@ void ir_t::vload_bcast(
     ops_.push_back(op);
 }
 
-void ir_t::vload_u8(vreg_t dst, vreg_t base, dim_t disp, int n_elems) {
+void ir_t::vload_widen(
+        vreg_t dst, vreg_t base, dim_t disp, int n_elems, data_type_t mem_dt) {
     op_t op;
-    op.kind = op_kind_t::vload_u8;
+    op.kind = op_kind_t::vload_widen;
     op.dst = dst;
     op.imm = n_elems;
     op.mem.base = base;
     op.mem.disp = disp;
+    op.mem_dt = mem_dt;
     ops_.push_back(op);
 }
 
@@ -206,6 +208,8 @@ void ir_t::vmax(vreg_t dst, vreg_t src) {
 }
 
 void ir_t::vcmp_ne_zero(vreg_t dst, vreg_t src) {
+    assert(vreg_info_[(int)dst].kind == reg_kind_t::mask
+            && "vcmp_ne_zero: dst must be a mask vreg");
     op_t op;
     op.kind = op_kind_t::vcmp_ne_zero;
     op.dst = dst;
@@ -241,6 +245,8 @@ void ir_t::vhreduce(vreg_t dst, vreg_t workspace) {
 }
 
 void ir_t::vhreduce_max(vreg_t dst, vreg_t workspace) {
+    assert(dst != workspace && "vhreduce_max: workspace must differ from dst");
+
     op_t op;
     op.kind = op_kind_t::vhreduce_max;
     op.dst = dst;
@@ -473,7 +479,7 @@ void ir_t::def_use(
         case op_kind_t::vload:
         case op_kind_t::vload_scalar:
         case op_kind_t::vload_bcast:
-        case op_kind_t::vload_u8:
+        case op_kind_t::vload_widen:
             u(op.mem.base);
             d(op.dst);
             break;

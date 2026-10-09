@@ -109,8 +109,8 @@ enum class op_kind_t {
     vstore_scalar,
     // dst = broadcast([base + disp]) (load one element, replicated across dst)
     vload_bcast,
-    // dst = imm uint8 bytes at [base + disp], each zero-extended to an s32 lane
-    vload_u8,
+    // dst = imm elements of mem_dt at [base + disp], each widened to a dst lane
+    vload_widen,
     // dst += sum_{i=0}^{N-1} (s0[i] * s1[i]), where N is the dot length
     vdot,
     // dst += s0 (vector add)
@@ -223,7 +223,7 @@ struct mem_t {
 //         * mov_imm        -> literal constant
 //         * loop_begin     -> loop trip count
 //         * set_mask_imm   -> active element count
-//         * vload_u8 / vload_masked / vstore_masked -> active element count
+//         * vload_widen / vload_masked / vstore_masked -> active element count
 //         * veltwise       -> eltwise algorithm (alg_kind_t)
 //         * inject_postops -> index into inject_postops_args()
 //         * if_begin       -> right-hand side of the comparison when s1 is
@@ -339,16 +339,20 @@ struct DNNL_API ir_t {
     void vload_scalar(vreg_t dst, vreg_t base, dim_t disp, data_type_t mem_dt);
     void vstore_scalar(vreg_t base, dim_t disp, vreg_t src, data_type_t mem_dt);
     void vload_bcast(vreg_t dst, vreg_t base, dim_t disp, data_type_t mem_dt);
-    // `n_elems` is the active uint8 byte count (a full vector or a tail).
-    void vload_u8(vreg_t dst, vreg_t base, dim_t disp, int n_elems);
+    // `n_elems` is the active element count (a full vector or a tail). Each
+    // `mem_dt` element is widened (zero-extended) to dst's wider element type.
+    void vload_widen(vreg_t dst, vreg_t base, dim_t disp, int n_elems,
+            data_type_t mem_dt);
     void vdot(vreg_t dst, vreg_t a, vreg_t b);
     void vadd(vreg_t dst, vreg_t src);
     void vsub(vreg_t dst, vreg_t src);
     void vmul(vreg_t dst, vreg_t src);
     void vdiv(vreg_t dst, vreg_t src);
     void vmax(vreg_t dst, vreg_t src);
+    // `dst` is a mask vreg: a lane is set where `src` != 0. The mask is a
+    // per-lane predicate (opmask or sign bit), consumed only by mask ops.
     void vcmp_ne_zero(vreg_t dst, vreg_t src);
-    // `mask` is a mask vreg from set_mask_imm.
+    // `mask` is a mask vreg from set_mask_imm or vcmp_ne_zero.
     void vblend(vreg_t dst, vreg_t src, vreg_t mask);
     void vbcast(vreg_t dst, vreg_t src);
     // `workspace` is scratch. It is overwritten by this call, so pass a vreg

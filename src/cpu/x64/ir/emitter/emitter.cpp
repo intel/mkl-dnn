@@ -262,10 +262,11 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
-            case op_kind_t::vload_u8: { // overwrites dst
-                int base = gpr_use(op.mem.base, gpr_scratch0).getIdx();
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                be.vload_u8(d, base, op.mem.disp, (int)op.imm, dt_of(op.dst));
+            case op_kind_t::vload_widen: { // overwrites dst
+                int base = gpr_use(op.mem.base).getIdx();
+                int d = reg_of(op.dst);
+                be.vload_widen(d, base, op.mem.disp, (int)op.imm, op.mem_dt,
+                        dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
@@ -285,9 +286,8 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 break;
             }
             case op_kind_t::vsub: { // rmw: reads and writes dst
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                if (spilled(op.dst)) spill_reload(op.dst, d);
-                int s = vec_use(op.s0, vec_scratch1);
+                int d = vec_use(op.dst);
+                int s = vec_use(op.s0);
                 be.vsub(d, s, dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
@@ -300,43 +300,38 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 break;
             }
             case op_kind_t::vdiv: { // rmw: reads and writes dst
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                if (spilled(op.dst)) spill_reload(op.dst, d);
-                int s = vec_use(op.s0, vec_scratch1);
+                int d = vec_use(op.dst);
+                int s = vec_use(op.s0);
                 be.vdiv(d, s, dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
             case op_kind_t::vmax: { // rmw: reads and writes dst
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                if (spilled(op.dst)) spill_reload(op.dst, d);
-                int s = vec_use(op.s0, vec_scratch1);
+                int d = vec_use(op.dst);
+                int s = vec_use(op.s0);
                 be.vmax(d, s, dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
             case op_kind_t::vblend: { // rmw: dst = mask ? s0 : dst
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                if (spilled(op.dst)) spill_reload(op.dst, d);
-                int s = vec_use(op.s0, vec_scratch1);
-                int m = vec_use(op.s1, vec_scratch2);
-                be.vblend(d, s, m, dt_of(op.dst));
+                int d = vec_use(op.dst);
+                int s = vec_use(op.s0);
+                JIT_ASSERT(!spilled(op.s1) && "vblend: mask spilled");
+                be.vblend(d, s, phys(op.s1), dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
             case op_kind_t::vbcast: { // overwrites dst, reads s0
-                int s = vec_use(op.s0, vec_scratch1);
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
+                int s = vec_use(op.s0);
+                int d = reg_of(op.dst);
                 be.vbcast(d, s, dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
-            case op_kind_t::vcmp_ne_zero: { // overwrites dst, reads s0
-                int s = vec_use(op.s0, vec_scratch1);
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                // vec_scratch2 supplies the zero compare operand.
-                be.vcmp_ne_zero(d, s, vec_scratch2, dt_of(op.dst));
-                if (spilled(op.dst)) spill_store(op.dst, d);
+            case op_kind_t::vcmp_ne_zero: { // writes the mask dst, reads s0
+                JIT_ASSERT(!spilled(op.dst) && "vcmp_ne_zero: mask spilled");
+                int s = vec_use(op.s0);
+                be.vcmp_ne_zero(phys(op.dst), s, dt_of(op.s0));
                 break;
             }
             case op_kind_t::vhreduce: { // reads and writes dst, overwrites ws
@@ -347,12 +342,13 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 if (spilled(op.s0)) spill_store(op.s0, ws);
                 break;
             }
-            case op_kind_t::vhreduce_max: { // reads and writes dst
-                int d = spilled(op.dst) ? vec_scratch0 : phys(op.dst);
-                if (spilled(op.dst)) spill_reload(op.dst, d);
-                int ws = vec_use(op.s0, vec_scratch1);
+            case op_kind_t::
+                    vhreduce_max: { // reads and writes dst, overwrites ws
+                int d = vec_use(op.dst);
+                int ws = reg_of(op.s0);
                 be.vhreduce_max(d, ws, dt_of(op.dst));
                 if (spilled(op.dst)) spill_store(op.dst, d);
+                if (spilled(op.s0)) spill_store(op.s0, ws);
                 break;
             }
 
