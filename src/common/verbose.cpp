@@ -1684,7 +1684,12 @@ std::string init_info_sdpa(const engine_t *e, const pd_t *pd) {
     ss << ",alg:" << desc->softmax_alg;
     if (pd->with_attn_mask()) {
         auto *md = desc->attn_mask_md();
-        ss << delimiter << "msk:buffer_" << (md->dims[2] == 1 ? 1 : 2) << 'd';
+        const char *mask_kind = desc->mask_type == attn_mask_type::select
+                ? "select"
+                : "buffer";
+        ss << delimiter << "msk:" << mask_kind << "_"
+           << (md->dims[2] == 1 ? 1 : 2) << 'd';
+        if (desc->invert_select) ss << ":invert";
     } else if (pd->with_causal_mask()) {
         ss << delimiter;
         if (desc->mask_type == attn_mask_type::top_left)

@@ -625,9 +625,11 @@ void serialize(serialization_stream_t &sstream, const sdpa_desc_t &desc) {
     serialize(sstream, desc.diff_v_desc);
     serialize(sstream, desc.attn_mask_desc);
     serialize(sstream, desc.scale_desc);
+    serialize(sstream, desc.fill_desc);
     sstream.append(desc.kq_acc_dt);
     sstream.append(desc.vs_acc_dt);
     sstream.append(desc.invert_scale);
+    sstream.append(desc.invert_select);
     sstream.append(desc.kv_head_number);
     sstream.append(desc.mask_type);
     sstream.append(desc.softmax_alg);
