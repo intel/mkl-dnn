@@ -76,13 +76,12 @@ if(DNNL_TARGET_ARCH STREQUAL "X64" AND NOT DNNL_CPU_RUNTIME STREQUAL "NONE")
     list(REMOVE_ITEM TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test_xbyak_no_exception.cpp)
 endif()
 
-# Register the fused SDPA softmax IR epilogue tests as a separate executable.
-# The kernel lives in the graph backend, so this is X64 + graph only.
-list(REMOVE_ITEM TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test_sdp_fused_softmax_ir.cpp)
-if(ONEDNN_BUILD_GRAPH AND DNNL_TARGET_ARCH STREQUAL "X64"
-        AND NOT DNNL_CPU_RUNTIME STREQUAL "NONE")
-    register_exe(${TEST_EXE}_sdp_fused_softmax_ir
-            "${MAIN_SRC_GTEST};${CMAKE_CURRENT_SOURCE_DIR}/test_sdp_fused_softmax_ir.cpp"
+# Register the online-softmax SDPA IR epilogue tests as a separate executable.
+# These live under src/cpu/x64/sdpa, so they are X64 only (no graph dependency).
+list(REMOVE_ITEM TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test_sdpa_online_softmax_ir.cpp)
+if(DNNL_TARGET_ARCH STREQUAL "X64" AND NOT DNNL_CPU_RUNTIME STREQUAL "NONE")
+    register_exe(${TEST_EXE}_sdpa_online_softmax_ir
+            "${MAIN_SRC_GTEST};${CMAKE_CURRENT_SOURCE_DIR}/test_sdpa_online_softmax_ir.cpp"
             "test" "dnnl_gtest")
 endif()
 

@@ -14,8 +14,8 @@
 * limitations under the License.
 *******************************************************************************/
 
-// Unit tests for the IR-based online-softmax epilogue of the fused CPU SDPA
-// kernel (src/graph/backend/dnnl/kernels/sdp_fused_softmax_ir.hpp). Each test
+// Unit tests for the IR-based online-softmax epilogue of the online-softmax
+// CPU SDPA (src/cpu/x64/sdpa/sdpa_online_softmax_ir.hpp). Each test
 // builds one epilogue IR, JITs it through the x64 CPU IR pipeline, runs it and
 // checks it against an independent scalar reference. The eltwise exp is a
 // polynomial approximation, so denominator-dependent outputs use a relative
@@ -31,12 +31,12 @@
 
 #include "oneapi/dnnl/dnnl.hpp"
 
-#include "graph/backend/dnnl/kernels/sdp_fused_softmax_ir.hpp"
+#include "cpu/x64/sdpa/sdpa_online_softmax_ir.hpp"
 
 namespace dnnl {
 
 using namespace dnnl::impl::cpu::x64;
-using namespace dnnl::impl::cpu::x64::sdp_softmax_ir;
+using namespace dnnl::impl::cpu::x64::sdpa_softmax_ir;
 
 // Tests that require generating a kernel require AVX2.
 #define SKIP_IF_NO_AVX2() \
@@ -56,7 +56,7 @@ void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
         scores[j] *= scale;
         m_new = std::max(m_new, scores[j]);
     }
-    // corr is 0 for the first tile (m_old == -inf), as in the fused kernel.
+    // corr is 0 for the first tile (m_old == -inf), as in the online-softmax kernel.
     const float corr = m_old == neg_inf ? 0.f : std::exp(m_old - m_new);
     float tile_sum = 0.f;
     for (int j = 0; j < w; j++) {
@@ -74,10 +74,10 @@ void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
 
 // Scalar reference for one online-softmax row update with the select mask, as
 // in build_softmax_tile_ir(..., has_select=true). A lane is kept when cond != 0
-// (fusiable) or cond == 0 (non-fusiable); otherwise it takes `fill`.
+// unless `invert_select` is true, in which case it is kept when cond == 0.
 void ref_softmax_row_masked(std::vector<float> &scores, float scale,
-        const std::vector<uint8_t> &cond, float fill, bool fusiable, float &m,
-        float &l, float &old_coef) {
+        const std::vector<uint8_t> &cond, float fill, bool invert_select,
+        float &m, float &l, float &old_coef) {
     const int w = (int)scores.size();
     const float neg_inf = -std::numeric_limits<float>::infinity();
     const float m_old = m, l_old = l;
@@ -85,7 +85,7 @@ void ref_softmax_row_masked(std::vector<float> &scores, float scale,
     for (int j = 0; j < w; j++) {
         float v = scores[j] * scale;
         const bool c = cond[j] != 0;
-        const bool keep = fusiable ? c : !c;
+        const bool keep = invert_select ? !c : c;
         if (!keep) v = fill;
         scores[j] = v;
         m_new = std::max(m_new, v);
@@ -119,14 +119,14 @@ void ref_acc_renorm(
 // softmax math. The eltwise exp is a polynomial approximation, so
 // denominator-dependent outputs use a relative tolerance; m_new is a plain max
 // and stays exact.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileRow) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileRow) {
     SKIP_IF_NO_AVX2();
 
     // Widths span pure tails (< simd_w), exact multiples, and multiples plus a
     // ragged tail, so the masked-tail path and its lane neutralization run.
-    for (int w : {1, 5, 7, simd_w, 9, 15, 2 * simd_w, 17, 23, 4 * simd_w - 1,
-                 4 * simd_w}) {
-        softmax_ir_kernel_t kernel(build_softmax_tile_ir(1, w));
+    for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
+                 4 * simd_w() - 1, 4 * simd_w()}) {
+        softmax_tile_ir_kernel_t kernel(1, w, false, false, -1);
         ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
 
         std::vector<float> scores(w), ref(w);
@@ -158,13 +158,13 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileRow) {
 // successive KV tiles, matching two scalar-reference updates. The first tile
 // exercises the -inf seed (the max reduction and exp both saturate correctly so
 // corr == 0); the second tile then consumes the finite state it produced.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineFirstTile) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineFirstTile) {
     SKIP_IF_NO_AVX2();
 
     const float neg_inf = -std::numeric_limits<float>::infinity();
-    for (int w : {1, 5, 7, simd_w, 9, 15, 2 * simd_w, 17, 23, 4 * simd_w - 1,
-                 4 * simd_w}) {
-        softmax_ir_kernel_t kernel(build_softmax_tile_ir(1, w));
+    for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
+                 4 * simd_w() - 1, 4 * simd_w()}) {
+        softmax_tile_ir_kernel_t kernel(1, w, false, false, -1);
         ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
 
         const float scale = 0.125f;
@@ -202,13 +202,13 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineFirstTile) {
 // iteration. Every row carries its own finite running state and distinct data,
 // so a wrong stride would bleed rows into each other. Each row must match an
 // independent scalar-reference update.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileMultiRow) {
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     SKIP_IF_NO_AVX2();
 
     const float scale = 0.125f;
     for (int seq_q : {2, 3, 5}) {
-        for (int w : {1, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
-            softmax_ir_kernel_t kernel(build_softmax_tile_ir(seq_q, w));
+        for (int w : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
+            softmax_tile_ir_kernel_t kernel(seq_q, w, false, false, -1);
             ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " w=" << w;
 
@@ -255,26 +255,26 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     }
 }
 
-// Validates the select mask fused into pass 1 of the softmax tile epilogue:
+// Validates the select mask folded into pass 1 of the softmax tile epilogue:
 // uint8 condition bytes choose between the scaled score and the fill scalar
-// before the running max/denominator update, in both the fusiable (keep where
-// cond != 0) and non-fusiable (keep where cond == 0) senses. Each row runs the
-// full scale -> select -> softmax chain against an independent scalar reference
-// over widths that exercise the ragged tail. The running state is finite (a
-// later KV tile) so even a fully masked row keeps l_new > 0.
-TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
+// before the running max/denominator update, in both select polarities. Each
+// row runs the full scale -> select -> softmax chain against an independent
+// scalar reference over widths that exercise the ragged tail. The running state
+// is finite (a later KV tile) so even a fully masked row keeps l_new > 0.
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
     SKIP_IF_NO_AVX2();
 
     const float scale = 0.125f;
     const float fill = -30.f;
-    for (bool fusiable : {false, true}) {
+    for (bool invert_select : {false, true}) {
         for (int seq_q : {1, 2, 3}) {
-            for (int w : {1, 5, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
-                softmax_ir_kernel_t kernel(
-                        build_softmax_tile_ir(seq_q, w, true, fusiable));
+            for (int w : {1, 5, 7, simd_w(), 9, 17, 4 * simd_w() - 1,
+                         4 * simd_w()}) {
+                softmax_tile_ir_kernel_t kernel(
+                        seq_q, w, true, invert_select, -1);
                 ASSERT_EQ(kernel.create_kernel(), dnnl_success)
-                        << "fusiable=" << fusiable << " seq_q=" << seq_q
-                        << " w=" << w;
+                        << "invert_select=" << invert_select
+                        << " seq_q=" << seq_q << " w=" << w;
 
                 std::vector<float> scores((size_t)seq_q * w);
                 std::vector<uint8_t> cond((size_t)seq_q * w);
@@ -305,7 +305,7 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
                     ref_l[i] = l[i];
                     ref_oc[i] = -12345.f;
                     ref_softmax_row_masked(ref[i], scale, refc[i], fill,
-                            fusiable, ref_m[i], ref_l[i], ref_oc[i]);
+                            invert_select, ref_m[i], ref_l[i], ref_oc[i]);
                 }
 
                 softmax_row_args_t args {scores.data(), &scale, m.data(),
@@ -315,21 +315,22 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
                 for (int i = 0; i < seq_q; i++) {
                     EXPECT_NEAR(
                             m[i], ref_m[i], 1e-5f * std::abs(ref_m[i]) + 1e-6f)
-                            << "fusiable=" << fusiable << " seq_q=" << seq_q
-                            << " w=" << w << " i=" << i;
+                            << "invert_select=" << invert_select
+                            << " seq_q=" << seq_q << " w=" << w << " i=" << i;
                     EXPECT_NEAR(
                             l[i], ref_l[i], 1e-4f * std::abs(ref_l[i]) + 1e-6f)
-                            << "fusiable=" << fusiable << " seq_q=" << seq_q
-                            << " w=" << w << " i=" << i;
+                            << "invert_select=" << invert_select
+                            << " seq_q=" << seq_q << " w=" << w << " i=" << i;
                     EXPECT_NEAR(oc[i], ref_oc[i],
                             1e-4f * std::abs(ref_oc[i]) + 1e-6f)
-                            << "fusiable=" << fusiable << " seq_q=" << seq_q
-                            << " w=" << w << " i=" << i;
+                            << "invert_select=" << invert_select
+                            << " seq_q=" << seq_q << " w=" << w << " i=" << i;
                     for (int j = 0; j < w; j++)
                         EXPECT_NEAR(scores[(size_t)i * w + j], ref[i][j],
                                 1e-4f * std::abs(ref[i][j]) + 1e-6f)
-                                << "fusiable=" << fusiable << " seq_q=" << seq_q
-                                << " w=" << w << " i=" << i << " j=" << j;
+                                << "invert_select=" << invert_select
+                                << " seq_q=" << seq_q << " w=" << w
+                                << " i=" << i << " j=" << j;
                 }
             }
         }
@@ -341,14 +342,14 @@ TEST(SdpFusedSoftmaxIr, SoftmaxOnlineTileSelect) {
 // advancing the acc/pv/old_coef pointers each iteration. Every row carries a
 // distinct old_coef and distinct data, so a wrong stride would bleed rows into
 // each other. Each row must match an independent scalar-reference update.
-TEST(SdpFusedSoftmaxIr, AccRenormTile) {
+TEST(SdpaOnlineSoftmaxIr, AccRenormTile) {
     SKIP_IF_NO_AVX2();
 
     for (int seq_q : {1, 2, 3, 5}) {
         // Head sizes span pure tails, exact multiples, and multiples plus a
         // ragged tail, so the masked-tail path runs.
-        for (int hs : {1, 7, simd_w, 9, 17, 4 * simd_w - 1, 4 * simd_w}) {
-            softmax_ir_kernel_t kernel(build_acc_renorm_ir(seq_q, hs));
+        for (int hs : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
+            acc_renorm_ir_kernel_t kernel(seq_q, hs);
             ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " hs=" << hs;
 
