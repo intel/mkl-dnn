@@ -51,6 +51,8 @@ struct ref_fwd_t : public primitive_t {
                     ": qry(%d) key(%d) val(%d) dst(%d) must be 4d",
                     desc()->qry_md()->ndims, desc()->key_md()->ndims,
                     desc()->val_md()->ndims, dst_md()->ndims);
+            VDISPATCH_SDPA(!with_select_mask(),
+                    "select attention mask is not supported");
             if (with_attn_mask()) {
                 VDISPATCH_SDPA(desc()->attn_mask_md()->ndims == 4,
                         VERBOSE_SHAPE_RESTRICTION ": attn_mask(%d) must be 4d",
