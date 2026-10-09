@@ -452,7 +452,6 @@ status_t create_kernels(const sdpa_full_softmax_conf_t &conf,
     auto &mm2_kernels_beta0_ = kernels.mm2_kernels_beta0;
     auto &softmax_pd_ = kernels.softmax_pd;
     auto &softmax_kernel_ = kernels.softmax_kernel;
-    bool &use_jit_softmax_ = kernels.use_jit_softmax;
     auto &select_kernel_ = kernels.select_kernel;
     bool &mm1_select_postop_ = kernels.mm1_select_postop;
     mm1_select_postop_ = conf.mm1_select_postop;
@@ -535,77 +534,79 @@ status_t create_kernels(const sdpa_full_softmax_conf_t &conf,
     }
 
     // Reuse the vectorized jit softmax kernel for the max/exp/normalize over
-    // the seq_kv axis. Build a plain 2D [q_block x seq_kv] f32 softmax pd
+    // the seq_kv axis: build a plain 2D [q_block x seq_kv] f32 softmax pd
     // (axis = 1, the contiguous seq_kv axis) and extract its jit kernel. The
     // kernel is per-row, so the same instance serves the query-tail block too.
-    // If no jit impl is selected (e.g. non-AVX2), fall back to scalar softmax.
     {
         memory_desc_t sm_md;
         dims_t sm_dims = {q_block_, seq_kv};
-        if (memory_desc_init_by_tag(
-                    sm_md, 2, sm_dims, data_type::f32, format_tag::ab)
-                == status::success) {
-            softmax_desc_t sd {};
-            sd.primitive_kind = primitive_kind::softmax;
-            sd.prop_kind = prop_kind::forward_inference;
-            // inf_as_zero: a fully-masked row (all -inf) must produce an
-            // all-zero row instead of NaN. The jit softmax kernel implements
-            // this natively for the softmax_accurate_inf_as_zero alg.
-            sd.alg_kind = p_.softmax_inf_as_zero
-                    ? alg_kind::softmax_accurate_inf_as_zero
-                    : alg_kind::softmax_accurate;
-            sd.src_desc = sm_md;
-            sd.dst_desc = sm_md;
-            sd.softmax_axis = 1;
+        CHECK(memory_desc_init_by_tag(
+                sm_md, 2, sm_dims, data_type::f32, format_tag::ab));
+        softmax_desc_t sd {};
+        sd.primitive_kind = primitive_kind::softmax;
+        sd.prop_kind = prop_kind::forward_inference;
+        // inf_as_zero: a fully-masked row (all -inf) must produce an
+        // all-zero row instead of NaN. The jit softmax kernel implements
+        // this natively for the softmax_accurate_inf_as_zero alg.
+        sd.alg_kind = p_.softmax_inf_as_zero
+                ? alg_kind::softmax_accurate_inf_as_zero
+                : alg_kind::softmax_accurate;
+        sd.src_desc = sm_md;
+        sd.dst_desc = sm_md;
+        sd.softmax_axis = 1;
 
-            primitive_attr_t attr;
-            primitive_desc_iterator_t it(engine,
-                    reinterpret_cast<const op_desc_t *>(&sd), &attr, nullptr);
-            if (it.is_initialized() && ++it != it.end()) {
+        primitive_attr_t attr;
+        primitive_desc_iterator_t it(engine,
+                reinterpret_cast<const op_desc_t *>(&sd), &attr, nullptr);
+        VCONDCHECK(primitive, create, dispatch, sdpa, it.is_initialized(),
+                status::unimplemented, VERBOSE_PRIMITIVE_CREATION_FAIL,
+                "softmax");
+        // Walk the dispatched impls (order-independent) for the jit softmax pd;
+        // its kernel is extracted below and called directly per row.
+        jit_uni_softmax_fwd_t::pd_t *jit_pd = nullptr;
+        while (++it != it.end()) {
+            if (auto *p = dynamic_cast<jit_uni_softmax_fwd_t::pd_t *>(
+                        (*it).get())) {
                 softmax_pd_ = *it;
-                auto *jit_pd = dynamic_cast<jit_uni_softmax_fwd_t::pd_t *>(
-                        softmax_pd_.get());
-                if (jit_pd) {
-                    softmax_impl::jit_softmax_kernel_base_t *k
-                            = softmax_impl::jit_softmax_kernel_base_t::create(
-                                    jit_pd, jit_pd->isa_,
-                                    jit_pd->axis_is_plain_and_strided_);
-                    if (k && k->create_kernel() == status::success) {
-                        softmax_kernel_.reset(k);
-                        use_jit_softmax_ = true;
-                    } else {
-                        delete k;
-                    }
-                }
+                jit_pd = p;
+                break;
             }
         }
+        VCONDCHECK(primitive, create, dispatch, sdpa, jit_pd != nullptr,
+                status::unimplemented, VERBOSE_PRIMITIVE_CREATION_FAIL,
+                "softmax");
+        softmax_impl::jit_softmax_kernel_base_t *k
+                = softmax_impl::jit_softmax_kernel_base_t::create(jit_pd,
+                        jit_pd->isa_, jit_pd->axis_is_plain_and_strided_);
+        if (!k) return status::unimplemented;
+        status_t st = k->create_kernel();
+        if (st != status::success) {
+            delete k;
+            return st;
+        }
+        softmax_kernel_.reset(k);
     }
 
     // Build the standalone select-mask pre-pass kernel when a select mask is
-    // present, is not already folded into mm1, the jit softmax path is used,
-    // and the condition is dense along seq_kv (column stride 1). Polarity, the
-    // seq_kv width, and the score/condition row strides are baked in; the row
-    // count is a runtime argument, so one instance serves both the full and
-    // query-tail tiles. When this stays null (a strided/broadcast condition
-    // column, no jit softmax, or compilation fails) execute() falls back to a
-    // scalar pre-pass.
-    if (use_jit_softmax_ && p_.has_select && !mm1_select_postop_) {
+    // present and is not already folded into mm1. Polarity, the seq_kv width,
+    // and the score/condition row strides are baked in; the row count is a
+    // runtime argument, so one instance serves both the full and query-tail
+    // tiles. The condition is dense along seq_kv (cond_col == 1) because the
+    // pd requires the key axis to be full and plain.
+    if (p_.has_select && !mm1_select_postop_) {
         const int ndims = p_.ndims;
         std::vector<dim_t> eff = p_.cond_strides;
         for (int d = 0; d < ndims; ++d)
             if (p_.cond_dims[d] == 1) eff[d] = 0;
-        const dim_t cond_col = eff[ndims - 1];
         const dim_t cond_row = eff[ndims - 2];
-        if (cond_col == 1) {
-            auto k = std::make_shared<
-                    sdpa_full_softmax_select_ir::select_ir_kernel_t>(
-                    /*wseq_kv=*/seq_kv,
-                    /*invert_select=*/p_.invert_select,
-                    /*scores_row_stride=*/seq_kv,
-                    /*cond_row_stride=*/cond_row);
-            if (k->create_kernel() == status::success)
-                select_kernel_ = std::move(k);
-        }
+        auto k = std::make_shared<
+                sdpa_full_softmax_select_ir::select_ir_kernel_t>(
+                /*wseq_kv=*/seq_kv,
+                /*invert_select=*/p_.invert_select,
+                /*scores_row_stride=*/seq_kv,
+                /*cond_row_stride=*/cond_row);
+        CHECK(k->create_kernel());
+        select_kernel_ = std::move(k);
     }
 
     return status::success;
@@ -633,7 +634,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const auto &mm1_kernels_ = kernels.mm1_kernels;
     const auto &mm2_kernels_ = kernels.mm2_kernels;
     const auto &mm2_kernels_beta0_ = kernels.mm2_kernels_beta0;
-    const bool use_jit_softmax_ = kernels.use_jit_softmax;
     const auto &softmax_kernel_ = kernels.softmax_kernel;
     const auto &select_kernel_ = kernels.select_kernel;
     const bool mm1_select_postop_ = kernels.mm1_select_postop;
@@ -646,12 +646,9 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const dim_t group = p_.group_head;
     const dim_t q_block = q_block_;
     const bool has_select = p_.has_select;
-    const bool invert_select = p_.invert_select;
-    const bool use_jit = use_jit_softmax_;
     const bool select_in_mm1 = mm1_select_postop_;
     const bool has_mm1_postops = !p_.mm1_post_ops.empty() || select_in_mm1;
     const float fill = args.fill;
-    constexpr float neg_inf = -std::numeric_limits<float>::infinity();
 
     auto *q_base = static_cast<const char *>(args.q);
     auto *k_base = static_cast<const char *>(args.k);
@@ -690,7 +687,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             if (p_.cond_dims[d] == 1) eff_cond_strides[d] = 0;
     }
     const dim_t cond_row = has_select ? eff_cond_strides[row_dim] : 0;
-    const dim_t cond_col = has_select ? eff_cond_strides[ndims - 1] : 0;
 
     const dim_t n_qblk = utils::div_up(seq_q, q_block);
     const size_t block_size = scratch_per_thread_;
@@ -951,98 +947,34 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         }
 
         // Full-axis softmax: scores[m, seq_kv] -> P[m, seq_kv], normalized
-        // over all keys independently for each query row.
-        // When the jit softmax kernel is available it does the max/exp/
-        // normalize; any scale/select not already folded into mm1 is
-        // applied in a cheap pre-pass (skipped when both are folded or
-        // absent). Otherwise fall back to a scalar two-pass softmax.
+        // over all keys independently for each query row. The jit softmax
+        // kernel does the max/exp/normalize; any select not already folded
+        // into mm1 is applied in a cheap IR pre-pass first.
         const bool prepass_select = has_select && !select_in_mm1;
-        if (use_jit) {
-            if (prepass_select) {
-                if (select_kernel_ && c_ptr) {
-                    // Standalone IR select kernel: dense condition (column
-                    // stride 1), both polarities and the broadcast-over-rows
-                    // (cond_row == 0) case baked in at build time.
-                    sdpa_full_softmax_select_ir::select_row_args_t sa;
-                    sa.scores = scores;
-                    sa.cond = c_ptr;
-                    sa.fill = &fill;
-                    sa.n_rows = m;
-                    (*select_kernel_)(&sa);
-                } else {
-                    // Scalar fallback: strided/broadcast condition column, or
-                    // the IR kernel was not built.
-                    for (dim_t i = 0; i < m; ++i) {
-                        float *srow = scores + i * seq_kv;
-                        const uint8_t *crow
-                                = c_ptr ? c_ptr + i * cond_row : nullptr;
-                        for (dim_t j = 0; j < seq_kv; ++j) {
-                            float v = srow[j];
-                            if (crow) {
-                                const bool cond = crow[j * cond_col] != 0;
-                                const bool keep = invert_select ? !cond : cond;
-                                if (!keep) v = fill;
-                            }
-                            srow[j] = v;
-                        }
-                    }
-                }
-            }
-            for (dim_t i = 0; i < m; ++i) {
-                float *srow = scores + i * seq_kv;
-                softmax_impl::jit_softmax_kernel_base_t::call_params_t sp;
-                sp.src = srow;
-                sp.dst = srow;
-                sp.diff_dst = nullptr;
-                sp.interim = nullptr;
-                sp.src_scales = nullptr;
-                sp.dst_scales = nullptr;
-                sp.process_n_elems = static_cast<size_t>(seq_kv);
-                sp.dst_orig = srow;
-                sp.post_ops_binary_rhs_arg_vec = nullptr;
-                (*softmax_kernel_)(&sp);
-            }
-        } else {
-            for (dim_t i = 0; i < m; ++i) {
-                float *srow = scores + i * seq_kv;
-                const uint8_t *crow = prepass_select && c_ptr
-                        ? c_ptr + i * cond_row
-                        : nullptr;
-
-                // Pass 1: optional select-mask, track the max (the QK
-                // scale and any other mm1 post-ops are already folded
-                // into the scores by the BRGEMM store).
-                float row_max = neg_inf;
-                for (dim_t j = 0; j < seq_kv; ++j) {
-                    float v = srow[j];
-                    if (crow) {
-                        const bool cond = crow[j * cond_col] != 0;
-                        const bool keep = invert_select ? !cond : cond;
-                        if (!keep) v = fill;
-                    }
-                    srow[j] = v;
-                    if (v > row_max) row_max = v;
-                }
-
-                // Pass 2: exponentiate around the max, accumulate sum.
-                float row_sum = 0.0f;
-                for (dim_t j = 0; j < seq_kv; ++j) {
-                    const float e = expf(srow[j] - row_max);
-                    srow[j] = e;
-                    row_sum += e;
-                }
-                // A fully-masked row (row_max == -inf) has row_sum == 0. Under
-                // inf_as_zero it becomes an all-zero row; otherwise standard
-                // softmax yields NaN. Any finite row_max gives row_sum >= 1.
-                const float inv = row_sum > 0.0f
-                        ? 1.0f / row_sum
-                        : (p_.softmax_inf_as_zero
-                                          ? 0.0f
-                                          : std::numeric_limits<
-                                                    float>::quiet_NaN());
-                for (dim_t j = 0; j < seq_kv; ++j)
-                    srow[j] *= inv;
-            }
+        if (prepass_select && c_ptr) {
+            // Standalone IR select kernel: dense condition (column stride 1),
+            // both polarities and the broadcast-over-rows (cond_row == 0) case
+            // baked in at build time.
+            sdpa_full_softmax_select_ir::select_row_args_t sa;
+            sa.scores = scores;
+            sa.cond = c_ptr;
+            sa.fill = &fill;
+            sa.n_rows = m;
+            (*select_kernel_)(&sa);
+        }
+        for (dim_t i = 0; i < m; ++i) {
+            float *srow = scores + i * seq_kv;
+            softmax_impl::jit_softmax_kernel_base_t::call_params_t sp;
+            sp.src = srow;
+            sp.dst = srow;
+            sp.diff_dst = nullptr;
+            sp.interim = nullptr;
+            sp.src_scales = nullptr;
+            sp.dst_scales = nullptr;
+            sp.process_n_elems = static_cast<size_t>(seq_kv);
+            sp.dst_orig = srow;
+            sp.post_ops_binary_rhs_arg_vec = nullptr;
+            (*softmax_kernel_)(&sp);
         }
 
         // mm2: out[m, hs_v] = P[m, seq_kv] * V[seq_kv, hs_v], tiled over the

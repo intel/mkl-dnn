@@ -46,9 +46,8 @@ class select_ir_kernel_t;
 //   scores = Q*K^T ; P = softmax(scale*scores [+ select-mask], over seq_kv)
 //   out = P*V
 // Block over seq_q into q_block tiles. Each tile computes scores for all seq_kv
-// keys, then applies softmax over that axis using the JIT softmax kernel when
-// available, with a scalar fallback. Parallelize over batch x num_head_q x
-// query-tiles.
+// keys, then applies softmax over that axis using the JIT softmax kernel.
+// Parallelize over batch x num_head_q x query-tiles.
 // -----------------------------------------------------------------------------
 // One mm1 (QK^T) post-op in chain order, folded into the BRGEMM store: binary
 // entries apply their algorithm to an RHS; eltwise entries apply an activation.
@@ -209,10 +208,9 @@ struct sdpa_full_softmax_kernels_t {
     brgemm_kernel_t *mm2_kernels_beta0[2] = {};
 
     // Vectorized JIT softmax kernel and its pd. execute() invokes the kernel
-    // for each score row, or uses a scalar fallback if it is unavailable.
+    // for each score row.
     std::shared_ptr<primitive_desc_t> softmax_pd;
     std::shared_ptr<softmax_impl::jit_softmax_kernel_base_t> softmax_kernel;
-    bool use_jit_softmax = false;
 
     // Final select-in-mm1 decision after kernel compilation (configure's
     // decision, possibly downgraded if the compiled ukernel rejects the
@@ -220,8 +218,8 @@ struct sdpa_full_softmax_kernels_t {
     bool mm1_select_postop = false;
 
     // Standalone JIT select-mask pre-pass kernel (null unless a select mask is
-    // present, not folded into mm1, jit softmax is used, and the condition is
-    // dense along seq_kv); execute falls back to a scalar pre-pass when null.
+    // present and not folded into mm1); the condition is dense along seq_kv
+    // (cond_col == 1, guaranteed by the pd).
     std::shared_ptr<sdpa_full_softmax_select_ir::select_ir_kernel_t>
             select_kernel;
 };

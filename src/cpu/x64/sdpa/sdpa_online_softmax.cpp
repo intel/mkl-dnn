@@ -208,38 +208,32 @@ status_t create_kernels(const sdpa_online_softmax_conf_t &conf,
             CHECK(create_tile_kernels(&kernels.mm1_kernel[qi][ki],
                     &kernels.mm2_kernel[qi][ki], q_rows[qi], kv_w[ki]));
 
-    // Build the JIT online-softmax epilogue (AVX2 IR). One softmax kernel per
+    // Build the JIT online-softmax epilogue: one softmax kernel per
     // (q full/tail, kv full/tail) combination, plus one acc-renormalization
-    // kernel per query-block row count. If AVX2 is unavailable the execute path
-    // falls back to the scalar epilogue.
-    if (mayiuse(avx2)) {
-        using namespace sdpa_softmax_ir;
-        // Condition tensor row stride in elements; columns are contiguous. A
-        // seq_q axis of extent 1 is a broadcast axis (meaningless stride), so
-        // every query row reads the same condition row -> stride 0.
-        const int cond_stride = p_.has_select && p_.cond_dims[row_dim] != 1
-                ? static_cast<int>(p_.cond_strides[row_dim])
-                : 0;
-        auto build_ir_kernel = [](std::unique_ptr<softmax_ir_kernel_t> &slot,
-                                       ir_t ir) -> status_t {
-            std::unique_ptr<softmax_ir_kernel_t> k(
-                    new softmax_ir_kernel_t(std::move(ir)));
-            CHECK(k->create_kernel());
-            slot = std::move(k);
-            return status::success;
-        };
-        status_t st = status::success;
-        for (int qi = 0; qi < n_qi && st == status::success; ++qi) {
-            const int m = static_cast<int>(q_rows[qi]);
-            for (int ki = 0; ki < n_ki && st == status::success; ++ki)
-                st = build_ir_kernel(kernels.softmax_ir_kernel[qi][ki],
-                        build_softmax_tile_ir(m, static_cast<int>(kv_w[ki]),
-                                p_.has_select, p_.invert_select, cond_stride));
-            if (st == status::success)
-                st = build_ir_kernel(kernels.acc_renorm_ir_kernel[qi],
-                        build_acc_renorm_ir(m, static_cast<int>(hs_v)));
-        }
-        kernels.use_ir_epilogue = st == status::success;
+    // kernel per query-block row count.
+    using namespace sdpa_softmax_ir;
+    // Condition tensor row stride in elements; columns are contiguous. A
+    // seq_q axis of extent 1 is a broadcast axis (meaningless stride), so
+    // every query row reads the same condition row -> stride 0.
+    const int cond_stride = p_.has_select && p_.cond_dims[row_dim] != 1
+            ? static_cast<int>(p_.cond_strides[row_dim])
+            : 0;
+    auto build_ir_kernel = [](std::unique_ptr<softmax_ir_kernel_t> &slot,
+                                   ir_t ir) -> status_t {
+        std::unique_ptr<softmax_ir_kernel_t> k(
+                new softmax_ir_kernel_t(std::move(ir)));
+        CHECK(k->create_kernel());
+        slot = std::move(k);
+        return status::success;
+    };
+    for (int qi = 0; qi < n_qi; ++qi) {
+        const int m = static_cast<int>(q_rows[qi]);
+        for (int ki = 0; ki < n_ki; ++ki)
+            CHECK(build_ir_kernel(kernels.softmax_ir_kernel[qi][ki],
+                    build_softmax_tile_ir(m, static_cast<int>(kv_w[ki]),
+                            p_.has_select, p_.invert_select, cond_stride)));
+        CHECK(build_ir_kernel(kernels.acc_renorm_ir_kernel[qi],
+                build_acc_renorm_ir(m, static_cast<int>(hs_v))));
     }
 
     return status::success;
@@ -259,7 +253,6 @@ status_t execute(const sdpa_online_softmax_conf_t &conf,
                  off_row_denom_ = conf.off_row_denom,
                  off_old_coef_ = conf.off_old_coef;
     const size_t scratch_per_thread_ = conf.scratch_per_thread;
-    const bool use_ir_epilogue_ = kernels.use_ir_epilogue;
 
     auto *q_base = static_cast<const char *>(args.q);
     auto *k_base = static_cast<const char *>(args.k);
@@ -381,63 +374,18 @@ status_t execute(const sdpa_online_softmax_conf_t &conf,
 
             // Online-softmax epilogue over this KV tile: apply scale + mask,
             // update the running max/denom, and form P_tile = exp(s - m_new).
-            if (use_ir_epilogue_) {
-                const auto &sm = kernels.softmax_ir_kernel[qi][ki];
-                sdpa_softmax_ir::softmax_row_args_t sargs;
-                sargs.scores = scores;
-                sargs.scale = &scale_val;
-                sargs.m = row_max;
-                sargs.l = row_denom;
-                sargs.old_coef = old_coef;
-                // cond points at this tile's first column (row 0); the kernel
-                // advances by the compiled cond row stride per row.
-                sargs.cond = c_ptr ? c_ptr + kv0 * cond_col : nullptr;
-                sargs.fill = &fill_val;
-                (*sm)(&sargs);
-            } else {
-                for (dim_t i = 0; i < m; ++i) {
-                    float *srow = scores + i * w;
-                    const uint8_t *crow
-                            = c_ptr ? c_ptr + i * cond_row : nullptr;
-                    float tile_max = neg_inf;
-                    for (dim_t j = 0; j < w; ++j) {
-                        float v = srow[j] * scale_val;
-                        if (crow) {
-                            const bool cond = crow[(kv0 + j) * cond_col] != 0;
-                            // Inverted: cond ? fill : scores.
-                            // Normal: cond ? scores : fill.
-                            const bool keep = p_.invert_select ? !cond : cond;
-                            if (!keep) v = fill_val;
-                        }
-                        srow[j] = v;
-                        if (v > tile_max) tile_max = v;
-                    }
-                    const float m_old = row_max[i];
-                    const float l_old = row_denom[i];
-                    const float m_new = nstl::max(m_old, tile_max);
-                    // corr rescales the old contributions to the new max; it is
-                    // 0 for the first (m_old == -inf) tile.
-                    const float corr
-                            = m_old == neg_inf ? 0.0f : expf(m_old - m_new);
-                    float tile_sum = 0.0f;
-                    for (dim_t j = 0; j < w; ++j) {
-                        const float e = expf(srow[j] - m_new);
-                        srow[j] = e;
-                        tile_sum += e;
-                    }
-                    const float l_new = l_old * corr + tile_sum;
-                    const float inv = l_new > 0.0f ? 1.0f / l_new : 0.0f;
-                    row_denom[i] = l_new;
-                    row_max[i] = m_new;
-                    // Pre-normalize P by the running denominator so mm2
-                    // accumulates O(1) magnitudes (matches the full-softmax path's
-                    // accuracy). acc then holds U/l; refresh it with old_coef =
-                    // corr*l_old/l_new.
-                    for (dim_t j = 0; j < w; ++j)
-                        srow[j] *= inv;
-                    old_coef[i] = corr * l_old * inv;
-                }
-            }
+            const auto &sm = kernels.softmax_ir_kernel[qi][ki];
+            sdpa_softmax_ir::softmax_row_args_t sargs;
+            sargs.scores = scores;
+            sargs.scale = &scale_val;
+            sargs.m = row_max;
+            sargs.l = row_denom;
+            sargs.old_coef = old_coef;
+            // cond points at this tile's first column (row 0); the kernel
+            // advances by the compiled cond row stride per row.
+            sargs.cond = c_ptr ? c_ptr + kv0 * cond_col : nullptr;
+            sargs.fill = &fill_val;
+            (*sm)(&sargs);
 
             // mm2: pv_tile[m, hs_v] = P_norm_tile[m, w] * V_tile[w, hs_v],
             // where V_tile spans keys [kv0, kv0 + w).
@@ -447,21 +395,11 @@ status_t execute(const sdpa_online_softmax_conf_t &conf,
             brgemm_kernel_execute(mm2, 1, &batch2, pv, nullptr);
 
             // Renormalize the running output: acc = old_coef*acc + pv.
-            if (use_ir_epilogue_) {
-                sdpa_softmax_ir::acc_renorm_args_t aargs;
-                aargs.acc = acc;
-                aargs.pv = pv;
-                aargs.old_coef = old_coef;
-                (*kernels.acc_renorm_ir_kernel[qi])(&aargs);
-            } else {
-                for (dim_t i = 0; i < m; ++i) {
-                    float *arow = acc + i * hs_v;
-                    const float *prow = pv + i * hs_v;
-                    const float a = old_coef[i];
-                    for (dim_t d = 0; d < hs_v; ++d)
-                        arow[d] = a * arow[d] + prow[d];
-                }
-            }
+            sdpa_softmax_ir::acc_renorm_args_t aargs;
+            aargs.acc = acc;
+            aargs.pv = pv;
+            aargs.old_coef = old_coef;
+            (*kernels.acc_renorm_ir_kernel[qi])(&aargs);
         }
 
         // acc already holds the normalized output; scatter to user output.

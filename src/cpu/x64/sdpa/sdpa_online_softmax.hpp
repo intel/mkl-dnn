@@ -116,8 +116,7 @@ struct sdpa_online_softmax_conf_t {
 
 // Compiled kernels for the online-softmax SDPA, owned by the primitive. The BRGEMM
 // kernels are raw handles freed in the destructor; the IR-softmax epilogue
-// kernels are held by unique_ptr. When use_ir_epilogue is false (no AVX2), the
-// execute path runs a scalar epilogue instead.
+// kernels are held by unique_ptr.
 struct sdpa_online_softmax_kernels_t {
     // Declared out-of-line (defined in sdpa_online_softmax.cpp): the unique_ptr members
     // hold a forward-declared IR kernel type, so construction/destruction must
@@ -145,7 +144,6 @@ struct sdpa_online_softmax_kernels_t {
                                                                            [2];
     std::unique_ptr<sdpa_softmax_ir::softmax_ir_kernel_t>
             acc_renorm_ir_kernel[2];
-    bool use_ir_epilogue = false;
 };
 
 // Online-softmax (flash) SDPA compute, folded into the CPU primitive:

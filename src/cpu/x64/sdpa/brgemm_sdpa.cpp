@@ -20,6 +20,7 @@
 #include "common/utils.hpp"
 #include "common/verbose.hpp"
 
+#include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/sdpa/brgemm_sdpa.hpp"
 
 namespace dnnl {
@@ -42,6 +43,10 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
     VDISPATCH_SDPA(desc()->prop_kind == prop_kind::forward_inference,
             "training-forward (softmax stats output) is not supported");
+
+    // Both strategies JIT a vectorized softmax epilogue and run BRGEMM, which
+    // need at least AVX2.
+    VDISPATCH_SDPA(mayiuse(avx2), VERBOSE_UNSUPPORTED_ISA);
 
     const memory_desc_wrapper qry_mdw(desc()->qry_md());
     const memory_desc_wrapper key_mdw(desc()->key_md());
