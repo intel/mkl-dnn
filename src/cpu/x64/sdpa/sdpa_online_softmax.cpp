@@ -66,7 +66,12 @@ status_t configure(const sdpa_online_softmax_params_t &params,
             = static_cast<dim_t>(3 * platform::get_per_core_cache_size(2) / 4);
 
     // KV tile width. Each KV tile runs mm1 -> softmax -> mm2 over a kv_blk-wide
-    // column slice. The two matmul B operands -- mm1's K panel [hs_qk x kv_blk]
+    // column slice. kv_blk is a single shared value, not one per matmul: it is
+    // the contraction link between the two brgemms -- mm1 emits scores[m, kv_blk]
+    // (kv_blk is mm1's N), softmax rewrites that same tile in place, and mm2
+    // contracts it as P[m, kv_blk] * V (kv_blk is mm2's K). So mm1's N *is*
+    // mm2's K by construction and the two cannot use different widths.
+    // The two matmul B operands -- mm1's K panel [hs_qk x kv_blk]
     // and mm2's V panel [kv_blk x hs_v] -- are each re-read once per q_blk
     // M-block of their brgemm, so they must stay L2-resident across those
     // re-reads or the inner loop goes memory-bound. Their footprint is
@@ -223,8 +228,7 @@ status_t create_kernels(const sdpa_online_softmax_conf_t &conf,
             for (int ki = 0; ki < n_ki && st == status::success; ++ki)
                 st = build_ir_kernel(kernels.softmax_ir_kernel[qi][ki],
                         build_softmax_tile_ir(m, static_cast<int>(kv_w[ki]),
-                                p_.has_select, p_.select_fusiable,
-                                cond_stride));
+                                p_.has_select, p_.invert_select, cond_stride));
             if (st == status::success)
                 st = build_ir_kernel(kernels.acc_renorm_ir_kernel[qi],
                         build_acc_renorm_ir(m, static_cast<int>(hs_v)));
@@ -361,7 +365,9 @@ status_t execute(const sdpa_online_softmax_conf_t &conf,
             const auto *mm1 = kernels.mm1_kernel[qi][ki];
             const auto *mm2 = kernels.mm2_kernel[qi][ki];
 
-            // mm1: scores_tile[m, w] = Q * K[:, kv0 : kv0 + w].
+            // mm1: scores_tile[m, w] = Q_tile[m, hs_qk] * K_tile[hs_qk, w],
+            // where Q_tile is this m-row query block and K_tile spans keys
+            // [kv0, kv0 + w).
             brgemm_batch_element_t batch1;
             batch1.ptr.A = q_ptr;
             batch1.ptr.B = k_ptr + kv0 * k_col;
@@ -392,9 +398,9 @@ status_t execute(const sdpa_online_softmax_conf_t &conf,
                         float v = srow[j] * scale_val;
                         if (crow) {
                             const bool cond = crow[(kv0 + j) * cond_col] != 0;
-                            // not-fusiable (p1): cond ? fill : scores
-                            // fusiable    (p2): cond ? scores : fill
-                            const bool keep = p_.select_fusiable ? cond : !cond;
+                            // Inverted: cond ? fill : scores.
+                            // Normal: cond ? scores : fill.
+                            const bool keep = p_.invert_select ? !cond : cond;
                             if (!keep) v = fill_val;
                         }
                         srow[j] = v;
@@ -427,7 +433,8 @@ status_t execute(const sdpa_online_softmax_conf_t &conf,
                 }
             }
 
-            // mm2: pv[m, hs_v] = P_norm_tile * V[kv0 : kv0 + w, :].
+            // mm2: pv_tile[m, hs_v] = P_norm_tile[m, w] * V_tile[w, hs_v],
+            // where V_tile spans keys [kv0, kv0 + w).
             brgemm_batch_element_t batch2;
             batch2.ptr.A = scores;
             batch2.ptr.B = v_ptr + kv0 * v_row;

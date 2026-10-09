@@ -210,10 +210,9 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t l2_budget_bytes
             = static_cast<dim_t>(3 * platform::get_per_core_cache_size(2) / 4);
 
-    // Choose the query block so the [q_block x seq_kv] fp32 score tile stays
-    // L2-resident across mm1 -> softmax -> mm2. Budget half of L2 for it; the
-    // other half leaves room for each matmul's weight panel (sized below) to
-    // stay resident alongside it.
+    // Choose the query block so the [q_block x seq_kv] fp32 score tile fits
+    // within its L2 budget across mm1 -> softmax -> mm2, while leaving capacity
+    // for each matmul's weight panel alongside it.
     const dim_t score_tile_budget_bytes = l2_budget_bytes / 2;
     const dim_t row_bytes = seq_kv * sizeof(float); // one score row
     const dim_t q_block = utils::saturate((dim_t)1, seq_q,
@@ -226,8 +225,9 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // (mm1's K slice [hs_qk x kv_block], mm2's V slice [kv_block x hs_v]) stays
     // L2-resident; an untiled matmul re-streams its whole panel per M-chunk and
     // turns memory-bound once that panel exceeds ~L2. Size kv_block so the wider
-    // panel fits an L2/8 budget, then round DOWN to a multiple of 64 (clean VNNI
-    // sub-panels, AMX-K-friendly). If that covers the whole axis (short context)
+    // panel fits within its L2 budget, then round DOWN to a multiple of 64
+    // (clean VNNI sub-panels, AMX-K-friendly). If that covers the whole axis
+    // (short context)
     // kv_block == seq_kv: one untiled block, no kv tail, and mm2 keeps beta = 0.
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
@@ -315,15 +315,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         return status::success;
     };
 
-    // The select-mask can be folded into mm1 as a binary_select post-op only
-    // when it is fusiable (keep-where-cond, not the inverted form) and the
-    // user condition tile is dense [m x seq_kv] -- the ukernel addresses the
-    // condition via the dst tile offsets, so its row stride must equal seq_kv
-    // and its column stride must be 1. Otherwise fall back to the pre-pass.
-    // A condition axis with extent 1 is a broadcast axis whose stride is
-    // meaningless (set to the collapsed extent), so it must
-    // contribute 0; a broadcast seq_q axis in particular makes the tile
-    // non-dense and disqualifies the post-op.
+    // Fold select into mm1 only when it is not inverted and its query/key axes
+    // are dense [m x seq_kv]. The injector indexes the condition through the
+    // destination offsets, so the row/column strides must be [seq_kv, 1]. A
+    // broadcast query or key axis has effective stride 0 and uses the pre-pass.
     const dim_t cond_row_stride = p_.has_select
             ? (p_.cond_dims[row_dim] == 1 ? 0 : p_.cond_strides[row_dim])
             : 0;
@@ -331,10 +326,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             ? (p_.cond_dims[p_.ndims - 1] == 1 ? 0
                                                : p_.cond_strides[p_.ndims - 1])
             : 0;
-    const bool want_select_postop = p_.has_select && p_.select_fusiable
+    const bool try_select_postop = p_.has_select && !p_.invert_select
             && cond_row_stride == seq_kv && cond_col_stride == 1;
 
-    conf.mm1_select_postop = want_select_postop;
+    conf.mm1_select_postop = try_select_postop;
 
     // Descriptor grid: [is_q_tail][is_kv_tail]. The query dimension splits into
     // q_block (+ q_tail); the key dimension into kv_block (+ kv_tail). Tail
@@ -369,7 +364,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         }
     };
 
-    if (build_all_descs(want_select_postop) != status::success) {
+    if (build_all_descs(try_select_postop) != status::success) {
         // A ukernel config may reject the select post-op at desc build; drop it
         // and let the pre-pass apply the mask instead. create_kernels() mirrors
         // this decision and additionally retries if the compiled kernel itself
@@ -603,8 +598,9 @@ status_t create_kernels(const sdpa_full_softmax_conf_t &conf,
         const dim_t cond_row = eff[ndims - 2];
         if (cond_col == 1) {
             auto k = std::make_shared<
-                    sdpa_full_softmax_select_ir::select_ir_kernel_t>(seq_kv,
-                    /*invert_select=*/!p_.select_fusiable,
+                    sdpa_full_softmax_select_ir::select_ir_kernel_t>(
+                    /*wseq_kv=*/seq_kv,
+                    /*invert_select=*/p_.invert_select,
                     /*scores_row_stride=*/seq_kv,
                     /*cond_row_stride=*/cond_row);
             if (k->create_kernel() == status::success)
@@ -650,7 +646,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const dim_t group = p_.group_head;
     const dim_t q_block = q_block_;
     const bool has_select = p_.has_select;
-    const bool select_fusiable = p_.select_fusiable;
+    const bool invert_select = p_.invert_select;
     const bool use_jit = use_jit_softmax_;
     const bool select_in_mm1 = mm1_select_postop_;
     const bool has_mm1_postops = !p_.mm1_post_ops.empty() || select_in_mm1;
@@ -793,6 +789,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         });
     }
 
+    // Each work item computes one query block across the full seq_kv axis,
+    // then writes its [m, hs_v] output block.
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
             [&](int tid, int, dim_t batch_idx, dim_t query_head_idx,
                     dim_t query_block_idx) {
@@ -850,9 +848,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         const dim_t n_kv_full = seq_kv / kv_block;
         const dim_t kv_tail = seq_kv - n_kv_full * kv_block;
 
-        // mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv], computed one
-        // kv_block-wide column slice at a time so each call's B panel
-        // [hs_qk, kv_block] is L2-resident.
+        // mm1: scores[m, seq_kv] = Q_tile[m, hs_qk] * K_tile[hs_qk, seq_kv].
+        // Each call fills one kv_block-wide slice of the full score tile.
         // For a transpose_b QK^T (or a bf16/f16 pack), K was materialised up
         // front into kt_all; point B at this (batch, kv_head)'s dense (VNNI)
         // [hs_qk, seq_kv] tile. Otherwise K is already [hs_qk, seq_kv] in place.
@@ -953,8 +950,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             run_mm1(mm1_kernels_[qi][1], n_kv_full * kv_block);
         }
 
-        // Softmax over the full seq_kv axis per row. Each query row
-        // sees every key, so the result is exact (no online recurrence).
+        // Full-axis softmax: scores[m, seq_kv] -> P[m, seq_kv], normalized
+        // over all keys independently for each query row.
         // When the jit softmax kernel is available it does the max/exp/
         // normalize; any scale/select not already folded into mm1 is
         // applied in a cheap pre-pass (skipped when both are folded or
@@ -983,8 +980,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                             float v = srow[j];
                             if (crow) {
                                 const bool cond = crow[j * cond_col] != 0;
-                                const bool keep
-                                        = select_fusiable ? cond : !cond;
+                                const bool keep = invert_select ? !cond : cond;
                                 if (!keep) v = fill;
                             }
                             srow[j] = v;
@@ -1021,7 +1017,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                     float v = srow[j];
                     if (crow) {
                         const bool cond = crow[j * cond_col] != 0;
-                        const bool keep = select_fusiable ? cond : !cond;
+                        const bool keep = invert_select ? !cond : cond;
                         if (!keep) v = fill;
                     }
                     srow[j] = v;

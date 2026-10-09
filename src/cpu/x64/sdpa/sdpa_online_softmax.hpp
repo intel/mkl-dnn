@@ -44,11 +44,11 @@ class softmax_ir_kernel_t;
 // Takes ONLY plain arguments (dims, strides in elements, raw pointers, scalar
 // scale/fill) over the pd's conf + the primitive's kernels.
 //
-// Contrast with the full-softmax strategy (query-axis blocked, plain two-pass
-// softmax): this never re-reads a full score row, trading that for a per-tile
-// rescale of the running accumulator. f32 compute only today (no bf16/f16/AMX
-// path, no attention-mask post-op); the full-softmax strategy covers those.
-// -----------------------------------------------------------------------------
+// Unlike the full-key-axis path, which computes each query tile's scores for
+// all seq_kv keys before softmax, this never materializes or re-reads a full
+// score row. It instead rescales the running accumulator per KV tile. f32
+// compute only today (no bf16/f16/AMX path, no attention-mask post-op); the
+// full-key-axis path supports those data types and the additive attention mask.
 // -----------------------------------------------------------------------------
 struct sdpa_online_softmax_params_t {
     int ndims = 0;
@@ -72,9 +72,8 @@ struct sdpa_online_softmax_params_t {
     std::vector<dim_t> cond_dims;
 
     bool has_select = false;
-    // Select semantics: fusiable (p2) keeps scores where cond != 0 and writes
-    // fill elsewhere; non-fusiable (p1) is the inverse.
-    bool select_fusiable = false;
+    // When true, keep scores where cond == 0; otherwise keep where cond != 0.
+    bool invert_select = false;
 };
 
 // Runtime pointers / scalars, resolved per execute call. No generic post-op

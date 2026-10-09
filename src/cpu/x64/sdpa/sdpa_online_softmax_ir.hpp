@@ -89,13 +89,13 @@ struct acc_renorm_args_t {
 
 // Builds the online-softmax epilogue for a tile of `seq_q` score rows, each of
 // width `w` (any w >= 1; the ragged tail beyond the last full simd_w block is
-// handled with masked loads/stores). Mirrors the per-row scalar epilogue in
-// sdpa_online_softmax_driver.cpp for a single KV tile. With `has_select`, each block also
+// handled with masked loads/stores). Implements the per-row online-softmax
+// update for one KV tile. With `has_select`, each block also
 // gets the attention select mask applied right after scaling: uint8 condition
 // bytes are widened and turned into a lane mask (vload_widen -> vcmp_ne_zero),
 // then vblend selects the broadcast `fill` scalar into the masked-out lanes.
-// Which lanes are masked out follows the online-softmax path: fusiable keeps the score
-// where cond != 0, non-fusiable where cond == 0.
+// With `invert_select` false, keep scores where `cond != 0`; with it true, keep
+// scores where `cond == 0`.
 // The rows are processed by a loop over seq_q; the score and per-row state
 // pointers advance one row per iteration. Per row the op chain is: scale ->
 // (select) -> running row max -> exp(scaled - m_new) -> running denominator ->
@@ -111,7 +111,7 @@ struct acc_renorm_args_t {
 // spilled). `cond_row_stride` is the condition tensor's row stride in elements;
 // < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
 inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
-        bool fusiable = true, int cond_row_stride = -1) {
+        bool invert_select = false, int cond_row_stride = -1) {
     const int n_blk = w / simd_w();
     const int tail = w % simd_w();
     const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
@@ -176,7 +176,7 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
             ir.vload_widen(cond, cond_ptr, cond_off, n, data_type::u8);
             const vreg_t cmask = ir.new_mask();
             ir.vcmp_ne_zero(cmask, cond);
-            if (fusiable) {
+            if (!invert_select) {
                 // Keep the score where cond != 0: cmask ? score : fill.
                 const vreg_t sel = ir.new_vec(data_type::f32);
                 ir.vbcast(sel, fill_bc);
@@ -339,7 +339,6 @@ inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
     auto row_body = [&]() {
         const vreg_t oc_bc = ir.new_vec(data_type::f32);
         ir.vload_bcast(oc_bc, oc_ptr, 0, data_type::f32);
-        //ir.vbcast(oc_bc, oc_bc);
 
         for (int b = 0; b < n_blk; b++) {
             const vreg_t acc = ir.new_vec(data_type::f32);

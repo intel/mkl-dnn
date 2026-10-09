@@ -33,11 +33,11 @@ namespace impl {
 namespace cpu {
 namespace x64 {
 
-// Two interchangeable compute strategies back brgemm_sdpa_fwd_t, both folded in
-// as free functions over the pd's conf + the primitive's kernels:
-// `full_softmax` (namespace sdpa_full_softmax -- query-axis blocked, two-pass
-// softmax; bf16/f16 and an additive attention mask) and `online_softmax`
-// (namespace sdpa_online_softmax -- online/flash softmax; f32-only).
+// brgemm_sdpa_fwd_t supports two interchangeable compute strategies, both
+// implemented as free functions operating on the pd's conf and primitive kernels:
+// `full_softmax` (namespace sdpa_full_softmax -- each query tile covers all keys
+// before softmax; f32/f16/bf16) and `online_softmax` (namespace sdpa_online_softmax
+// -- streams over KV tiles; f32-only).
 // pd_t::init() picks one by shape/dtype capability, or a forced choice via
 // ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto}.
 enum class sdpa_impl_kind_t { full_softmax, online_softmax };

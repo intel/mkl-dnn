@@ -165,7 +165,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         fp_.o_strides.assign(
                 dst_mdw.strides(), dst_mdw.strides() + sdpa_pd_t::ndims);
         fp_.has_select = with_select_mask();
-        fp_.select_fusiable = !desc()->invert_select;
+        fp_.invert_select = desc()->invert_select;
         if (with_select_mask()) {
             const memory_desc_wrapper cond_mdw(desc()->attn_mask_md());
             fp_.cond_strides.assign(
@@ -210,7 +210,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // "non-transposed" orientation the full-softmax path expects.
     bp_.mm1_transpose_b = false;
     bp_.has_select = with_select_mask();
-    bp_.select_fusiable = !desc()->invert_select;
+    bp_.invert_select = desc()->invert_select;
     if (with_select_mask()) {
         const memory_desc_wrapper cond_mdw(desc()->attn_mask_md());
         bp_.cond_strides.assign(
@@ -221,9 +221,6 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     bp_.softmax_inf_as_zero
             = desc()->softmax_alg == alg_kind::softmax_accurate_inf_as_zero;
 
-    // mm1 post-op chain: scale (binary-mul, scalar rhs) then the additive
-    // attention mask (binary-add, tensor rhs); soft-cap will be appended here
-    // once the pd gains support for it.
     if (with_attn_scale()) {
         sdpa_mm1_post_op_t sc;
         sc.alg = alg_kind::binary_mul;

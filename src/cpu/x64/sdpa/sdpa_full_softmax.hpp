@@ -42,25 +42,25 @@ class select_ir_kernel_t;
 } // namespace sdpa_full_softmax_select_ir
 
 // -----------------------------------------------------------------------------
-// Full-softmax SDPA compute (x64):
-//   scores = Q*K^T ; softmax(scale*scores [+ select-mask]) ; out = P*V
-// Block over seq_q into q_block tiles (each [q_block x seq_kv] score tile stays
-// L2-resident); per tile form the full scores, run an exact two-pass softmax
-// over seq_kv, then mm2. Parallelize over batch x num_head_q x query-tiles.
-// Two-pass rather than the online-softmax strategy because on CPU exp() is
-// compute-bound and re-reading the score tile is cheap.
+// SDPA with softmax over the complete key axis (x64):
+//   scores = Q*K^T ; P = softmax(scale*scores [+ select-mask], over seq_kv)
+//   out = P*V
+// Block over seq_q into q_block tiles. Each tile computes scores for all seq_kv
+// keys, then applies softmax over that axis using the JIT softmax kernel when
+// available, with a scalar fallback. Parallelize over batch x num_head_q x
+// query-tiles.
 // -----------------------------------------------------------------------------
-// One mm1 (QK^T) post-op in chain order, folded into the BRGEMM store: a binary
-// multiplies/adds a right-hand side (scale scalar, additive mask, soft-cap), an
-// eltwise applies an activation (soft-cap tanh).
+// One mm1 (QK^T) post-op in chain order, folded into the BRGEMM store: binary
+// entries apply their algorithm to an RHS; eltwise entries apply an activation.
 struct sdpa_mm1_post_op_t {
     dnnl::impl::alg_kind_t alg = dnnl::impl::alg_kind::undef;
     bool is_binary = false; // false => eltwise
     // Eltwise parameters (is_binary == false).
     float alpha = 0.0f;
     float beta = 0.0f;
-    // Binary rhs (is_binary == true): a scalar rhs (dims all 1) is a [1 x 1]
-    // broadcast never offset; otherwise a [seq_q x seq_kv] tile per query block.
+    // Binary rhs: a scalar uses a [1 x 1] descriptor and its pointer is not
+    // query-tile-offset. A tensor rhs uses a query-row by key-position tile;
+    // axes of extent 1 broadcast.
     bool rhs_is_scalar = true;
     dnnl::impl::data_type_t rhs_dt = dnnl::impl::data_type::f32;
     // Full user dims / strides of the rhs (length == ndims), to offset the base
@@ -89,15 +89,15 @@ struct sdpa_full_softmax_params_t {
 
     // User strides in elements. Q / output / select-condition carry the group
     // axis; K / V have group extent 1 (broadcast over the group).
-    std::vector<dim_t> q_strides, k_strides, v_strides, o_strides, cond_strides;
-    // Logical dims of the select-condition tensor; a dim of 1 is a broadcast
-    // broadcast axis whose (meaningless) stride must contribute 0.
+    std::vector<dim_t> q_strides, k_strides, v_strides, o_strides;
+    // Condition strides in elements. Effective strides are zeroed for axes
+    // whose extent is 1 in cond_dims.
+    std::vector<dim_t> cond_strides;
     std::vector<dim_t> cond_dims;
 
     bool has_select = false;
-    // Select semantics: fusiable (p2) keeps scores where cond != 0 and writes
-    // fill elsewhere; non-fusiable (p1) is the inverse.
-    bool select_fusiable = false;
+    // When true, keep scores where cond == 0; otherwise keep where cond != 0.
+    bool invert_select = false;
 
     // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
     // and the mm1 BRGEMM transposes it; otherwise K is [.., head_size, seq_kv].
@@ -108,11 +108,10 @@ struct sdpa_full_softmax_params_t {
     // alg_kind (softmax_accurate_inf_as_zero vs softmax_accurate).
     bool softmax_inf_as_zero = false;
 
-    // The currently supported mm1 (QK^T) post-op chain, carried from the graph
-    // in graph order (scale / attention-mask; the select is handled separately).
-    // Mirrors decomp's sub_matmul1_attr post-ops but sliced to the per-query-tile
-    // shape and folded into the BRGEMM store. Soft-cap is not yet wired to this
-    // path. Empty when mm1 has no post-ops.
+    // Supported mm1 (QK^T) post-ops, applied in order: scale then attention
+    // mask. Select is handled separately. These ops are sliced to the query-tile
+    // shape and folded into the BRGEMM store. Soft-cap is not wired into this path.
+    // Empty when mm1 has no post-ops.
     std::vector<sdpa_mm1_post_op_t> mm1_post_ops;
 };
 
@@ -160,8 +159,8 @@ struct sdpa_full_softmax_conf_t {
     dim_t b_k_pack = 1;
     bool mm1_transpose_k = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
-    // The (fusiable, dense-condition) select mask is folded into mm1 as a
-    // binary_select post-op; the descriptors are built accordingly.
+    // A non-inverted select mask with a dense condition is folded into mm1 as
+    // a binary_select post-op; the descriptors are built accordingly.
     bool mm1_select_postop = false;
     dim_t num_head_kv = 0;
     size_t amx_wsp_bytes = 0;
@@ -209,9 +208,8 @@ struct sdpa_full_softmax_kernels_t {
     brgemm_kernel_t *mm2_kernels[2][2] = {};
     brgemm_kernel_t *mm2_kernels_beta0[2] = {};
 
-    // Reused vectorized jit softmax (max/exp/normalize over seq_kv, per row)
-    // plus the pd it reads its config from; when use_jit_softmax is false the
-    // execute path runs a scalar two-pass softmax instead.
+    // Vectorized JIT softmax kernel and its pd. execute() invokes the kernel
+    // for each score row, or uses a scalar fallback if it is unavailable.
     std::shared_ptr<primitive_desc_t> softmax_pd;
     std::shared_ptr<softmax_impl::jit_softmax_kernel_base_t> softmax_kernel;
     bool use_jit_softmax = false;
@@ -228,8 +226,8 @@ struct sdpa_full_softmax_kernels_t {
             select_kernel;
 };
 
-// Query-axis blocked / two-pass-softmax SDPA compute, folded into the CPU
-// primitive: the primitive_desc owns the conf + descs (configure), the
+// Query-blocked SDPA with softmax over the complete key axis, folded into the
+// CPU primitive: the primitive_desc owns the conf + descs (configure), the
 // primitive owns the kernels (create_kernels) and drives the loop (execute).
 namespace sdpa_full_softmax {
 

@@ -74,10 +74,10 @@ void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
 
 // Scalar reference for one online-softmax row update with the select mask, as
 // in build_softmax_tile_ir(..., has_select=true). A lane is kept when cond != 0
-// (fusiable) or cond == 0 (non-fusiable); otherwise it takes `fill`.
+// unless `invert_select` is true, in which case it is kept when cond == 0.
 void ref_softmax_row_masked(std::vector<float> &scores, float scale,
-        const std::vector<uint8_t> &cond, float fill, bool fusiable, float &m,
-        float &l, float &old_coef) {
+        const std::vector<uint8_t> &cond, float fill, bool invert_select,
+        float &m, float &l, float &old_coef) {
     const int w = (int)scores.size();
     const float neg_inf = -std::numeric_limits<float>::infinity();
     const float m_old = m, l_old = l;
@@ -85,7 +85,7 @@ void ref_softmax_row_masked(std::vector<float> &scores, float scale,
     for (int j = 0; j < w; j++) {
         float v = scores[j] * scale;
         const bool c = cond[j] != 0;
-        const bool keep = fusiable ? c : !c;
+        const bool keep = invert_select ? !c : c;
         if (!keep) v = fill;
         scores[j] = v;
         m_new = std::max(m_new, v);
@@ -257,25 +257,24 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
 
 // Validates the select mask folded into pass 1 of the softmax tile epilogue:
 // uint8 condition bytes choose between the scaled score and the fill scalar
-// before the running max/denominator update, in both the fusiable (keep where
-// cond != 0) and non-fusiable (keep where cond == 0) senses. Each row runs the
-// full scale -> select -> softmax chain against an independent scalar reference
-// over widths that exercise the ragged tail. The running state is finite (a
-// later KV tile) so even a fully masked row keeps l_new > 0.
+// before the running max/denominator update, in both select polarities. Each
+// row runs the full scale -> select -> softmax chain against an independent
+// scalar reference over widths that exercise the ragged tail. The running state
+// is finite (a later KV tile) so even a fully masked row keeps l_new > 0.
 TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
     SKIP_IF_NO_AVX2();
 
     const float scale = 0.125f;
     const float fill = -30.f;
-    for (bool fusiable : {false, true}) {
+    for (bool invert_select : {false, true}) {
         for (int seq_q : {1, 2, 3}) {
             for (int w : {1, 5, 7, simd_w(), 9, 17, 4 * simd_w() - 1,
                          4 * simd_w()}) {
                 softmax_ir_kernel_t kernel(
-                        build_softmax_tile_ir(seq_q, w, true, fusiable));
+                        build_softmax_tile_ir(seq_q, w, true, invert_select));
                 ASSERT_EQ(kernel.create_kernel(), dnnl_success)
-                        << "fusiable=" << fusiable << " seq_q=" << seq_q
-                        << " w=" << w;
+                        << "invert_select=" << invert_select
+                        << " seq_q=" << seq_q << " w=" << w;
 
                 std::vector<float> scores((size_t)seq_q * w);
                 std::vector<uint8_t> cond((size_t)seq_q * w);
@@ -306,7 +305,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
                     ref_l[i] = l[i];
                     ref_oc[i] = -12345.f;
                     ref_softmax_row_masked(ref[i], scale, refc[i], fill,
-                            fusiable, ref_m[i], ref_l[i], ref_oc[i]);
+                            invert_select, ref_m[i], ref_l[i], ref_oc[i]);
                 }
 
                 softmax_row_args_t args {scores.data(), &scale, m.data(),
@@ -316,21 +315,22 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
                 for (int i = 0; i < seq_q; i++) {
                     EXPECT_NEAR(
                             m[i], ref_m[i], 1e-5f * std::abs(ref_m[i]) + 1e-6f)
-                            << "fusiable=" << fusiable << " seq_q=" << seq_q
-                            << " w=" << w << " i=" << i;
+                            << "invert_select=" << invert_select
+                            << " seq_q=" << seq_q << " w=" << w << " i=" << i;
                     EXPECT_NEAR(
                             l[i], ref_l[i], 1e-4f * std::abs(ref_l[i]) + 1e-6f)
-                            << "fusiable=" << fusiable << " seq_q=" << seq_q
-                            << " w=" << w << " i=" << i;
+                            << "invert_select=" << invert_select
+                            << " seq_q=" << seq_q << " w=" << w << " i=" << i;
                     EXPECT_NEAR(oc[i], ref_oc[i],
                             1e-4f * std::abs(ref_oc[i]) + 1e-6f)
-                            << "fusiable=" << fusiable << " seq_q=" << seq_q
-                            << " w=" << w << " i=" << i;
+                            << "invert_select=" << invert_select
+                            << " seq_q=" << seq_q << " w=" << w << " i=" << i;
                     for (int j = 0; j < w; j++)
                         EXPECT_NEAR(scores[(size_t)i * w + j], ref[i][j],
                                 1e-4f * std::abs(ref[i][j]) + 1e-6f)
-                                << "fusiable=" << fusiable << " seq_q=" << seq_q
-                                << " w=" << w << " i=" << i << " j=" << j;
+                                << "invert_select=" << invert_select
+                                << " seq_q=" << seq_q << " w=" << w
+                                << " i=" << i << " j=" << j;
                 }
             }
         }
