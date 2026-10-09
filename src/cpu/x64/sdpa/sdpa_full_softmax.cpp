@@ -225,21 +225,21 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // (mm1's K slice [hs_qk x kv_block], mm2's V slice [kv_block x hs_v]) stays
     // L2-resident; an untiled matmul re-streams its whole panel per M-chunk and
     // turns memory-bound once that panel exceeds ~L2. Size kv_block so the wider
-    // panel fits within its L2 budget, then round DOWN to a multiple of 64
-    // (clean VNNI sub-panels, AMX-K-friendly). If that covers the whole axis
-    // (short context)
-    // kv_block == seq_kv: one untiled block, no kv tail, and mm2 keeps beta = 0.
+    // panel fits within its L2 budget, then round DOWN to a column granule: a
+    // 64-wide block (clean VNNI sub-panels, AMX-K-friendly) when the budget
+    // allows, else 32, else a 16-column floor (still a multiple of the bf16/f16
+    // VNNI pack factor). A large head or a small L2 thus shrinks the block
+    // rather than collapsing it to the whole (untiled) axis. Clamp to seq_kv:
+    // short context runs as one untiled block (kv_block == seq_kv -> no kv tail,
+    // mm2 keeps beta = 0).
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
     dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
                                                 / (b_panel_rows * qk_dt_sz))
                                       : seq_kv;
-    kv_block = utils::rnd_dn(kv_block, 64);
-    // Too small to tile usefully (or hs so large a block barely fits): fall back
-    // to a single untiled block over the whole axis.
-    if (kv_block < 64) kv_block = seq_kv;
+    const dim_t granule = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : 16);
+    kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
-    kv_block = nstl::max<dim_t>(kv_block, 1);
     conf.kv_block = kv_block;
     const dim_t kv_tail = kv_block < seq_kv ? seq_kv % kv_block : 0;
     conf.kv_tail = kv_tail;

@@ -81,17 +81,23 @@ status_t configure(const sdpa_online_softmax_params_t &params,
     // the two panels together take ~L2/4 and leave ~3/4 L2 for the q_blk-scaled
     // state sized below. This 1/head-size law is empirically the per-head
     // optimum (hs 512 -> kv 64, hs 128 -> kv 384, hs 64 -> kv 768); at the small
-    // end the panel also drops into L1. Round DOWN to a 64-column granule (4
-    // AVX512 f32 vectors / cachelines; this path is always f32, never AMX); if
-    // one block already covers the axis (short context) run it untiled.
+    // end the panel also drops into L1. Round DOWN to a column granule that
+    // keeps clean AVX512 f32 vectorization (a multiple of the 16-lane vector;
+    // this path is always f32, never AMX): prefer a 64-wide block (4 zmm, best
+    // mm1 N-register use) when the budget allows it, else degrade to 32, else a
+    // 16-column floor -- so a large head or a small L2 shrinks the block rather
+    // than collapsing it to the whole (untiled) axis. Clamp to seq_kv (short
+    // context runs untiled).
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
     dim_t kv_block_width = b_panel_rows > 0
             ? static_cast<dim_t>(b_panel_budget_bytes
                       / (b_panel_rows * static_cast<dim_t>(sizeof(float))))
             : seq_kv;
-    kv_block_width = utils::rnd_dn(kv_block_width, (dim_t)64);
-    if (kv_block_width < 64) kv_block_width = seq_kv;
+    const dim_t granule
+            = kv_block_width >= 64 ? 64 : (kv_block_width >= 32 ? 32 : 16);
+    kv_block_width = nstl::max<dim_t>(
+            utils::rnd_dn(kv_block_width, granule), (dim_t)16);
     conf.kv_blk = nstl::min<dim_t>(seq_kv, kv_block_width);
 
     // Query block. Per KV tile mm1 re-reads the Q slice [q_blk x hs_qk] and the
