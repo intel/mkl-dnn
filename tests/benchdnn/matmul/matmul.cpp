@@ -33,6 +33,19 @@
 
 #include "matmul/matmul.hpp"
 
+#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL) \
+        && defined(DNNL_DEV_MODE)
+#define BENCHDNN_INTEL_GPU_KERNEL_OVERRIDE
+#endif
+
+#ifdef BENCHDNN_INTEL_GPU_KERNEL_OVERRIDE
+extern "C" dnnl_status_t DNNL_API dnnl_impl_gpu_intel_set_kernel_override(
+        dnnl_primitive_attr_t attr, const char *kernel);
+extern "C" dnnl_status_t DNNL_API dnnl_impl_gpu_intel_get_kernel_count(
+        const_dnnl_primitive_desc_t pd, int *count);
+#endif
+
 namespace matmul {
 
 // Helper to create grouped memory descriptor
@@ -242,6 +255,15 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     DNN_SAFE_STATUS(
             create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims));
 
+#ifdef BENCHDNN_INTEL_GPU_KERNEL_OVERRIDE
+    // GPU-only internal attribute; skipped for cpu (e.g. prim_ref) engines.
+    if (!prb->gpu_kernel.empty()
+            && query_engine_kind(init_pd_args.engine) == dnnl_gpu) {
+        DNN_SAFE_STATUS(dnnl_impl_gpu_intel_set_kernel_override(
+                dnnl_attr, prb->gpu_kernel.c_str()));
+    }
+#endif
+
     TIME_C_PD(DNN_SAFE_STATUS(dnnl_matmul_primitive_desc_create(
             &init_pd_args.pd, init_pd_args.engine,
             init_pd_args.src_md ? init_pd_args.src_md : src_d, wei_d, bia_d,
@@ -249,6 +271,26 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
 
     return dnnl_success;
 }
+
+#ifdef DNNL_DEV_MODE
+int query_gpu_kernel_count(const prb_t *prb) {
+    int count = -1;
+#ifdef BENCHDNN_INTEL_GPU_KERNEL_OVERRIDE
+    if (!is_gpu()) return count;
+    init_pd_args_t init_pd_args(
+            nullptr, get_test_engine(), prb, FLAG_FWD, nullptr, nullptr);
+    if (init_pd(init_pd_args) != dnnl_success) return count;
+    // Count the impl that `--impl`/`--skip-impl` would pick.
+    benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> pdw;
+    if (fetch_impl(pdw, init_pd_args, prb->impl_filter, nullptr, false) != OK
+            || !pdw)
+        return -1;
+    if (dnnl_impl_gpu_intel_get_kernel_count(pdw, &count) != dnnl_success)
+        return -1;
+#endif
+    return count;
+}
+#endif
 
 int init_prim_ref(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &prim_ref,
         const prb_t *prb, res_t *res) {

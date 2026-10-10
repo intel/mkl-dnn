@@ -18,6 +18,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <algorithm>
+#include <limits>
+
 #include "dnnl_common.hpp"
 #include "utils/parser.hpp"
 #include "utils/stringstream.hpp"
@@ -28,6 +31,53 @@
 namespace matmul {
 
 TASK_EXECUTOR_DECL_TYPES;
+
+#ifdef DNNL_DEV_MODE
+// Parses `A-B`; false for any other string.
+static bool parse_range(const std::string &v, int &beg, int &end) {
+    auto is_num = [](const std::string &s) {
+        return s.size() <= 9 && parser::utils::has_only_digits(s);
+    };
+    auto dash = v.find('-');
+    if (dash == std::string::npos || !is_num(v.substr(0, dash))
+            || !is_num(v.substr(dash + 1)))
+        return false;
+    beg = std::stoi(v.substr(0, dash));
+    end = std::stoi(v.substr(dash + 1));
+    return true;
+}
+
+// Expands `all`/`A-B` into the problem's valid ranks; no override if there is
+// no jit:gemm candidate count; no ranks if the range is empty.
+template <typename make_prb_t>
+static std::vector<std::string> expand_gpu_kernel(
+        const std::string &v, const make_prb_t &make_prb) {
+    if (!is_gpu()) return {""};
+    int beg = 0, end = std::numeric_limits<int>::max();
+    if (v != "all" && !parse_range(v, beg, end)) return {v};
+    auto prb = make_prb("");
+    int count = query_gpu_kernel_count(prb.get());
+    // Systolic takes no overrides, so a pinned rank reaches jit:gemm.
+    if (count < 0) count = query_gpu_kernel_count(make_prb("0").get());
+    if (count < 0) {
+        BENCHDNN_PRINT(1,
+                "Warning: matmul driver: --gpu-kernel=%s: no jit:gemm kernel "
+                "count, running without override: %s\n",
+                v.c_str(), prb->str());
+        return {""};
+    }
+    std::vector<std::string> ranks;
+    for (int r = beg; r <= std::min(end, count - 1); r++)
+        ranks.push_back(std::to_string(r));
+    if (ranks.empty()) {
+        BENCHDNN_PRINT(0,
+                "Warning: matmul driver: --gpu-kernel=%s: no jit:gemm "
+                "candidates in range (count: %d), skipping: %s\n",
+                v.c_str(), count, prb->str());
+    }
+    return ranks;
+}
+#endif // DNNL_DEV_MODE
 
 void check_correctness(
         const settings_t &s, driver_task_executor_t &task_executor) {
@@ -48,17 +98,29 @@ void check_correctness(
     for_(const auto &i_sparse_options : s.sparse_options)
     for_(const auto &i_strides : s.strides)
     for_(const auto &i_rt_dims_masks : s.rt_dims_masks)
+    for_(const auto &i_gpu_kernel : s.gpu_kernel)
     for_(const auto &i_attr : s.attributes)
     for_(const auto &i_ctx_init : s.ctx_init)
     for_(const auto &i_ctx_exe : s.ctx_exe)
     for (const auto &i_bia_cfg : bia_cfg) {
-        auto prb = std::make_shared<prb_t>(s.prb_vdims, i_dt, i_stag, i_wtag,
-                i_dtag, i_strides, i_bia_cfg.first, i_bia_cfg.second,
-                i_rt_dims_masks, i_sparse_options, i_attr, i_ctx_init,
-                i_ctx_exe, s.impl_filter);
-        if (s.pattern && !match_regex(prb->str(), s.pattern)) return;
+        auto make_prb = [&](const std::string &gpu_kernel) {
+            return std::make_shared<prb_t>(s.prb_vdims, i_dt, i_stag, i_wtag,
+                    i_dtag, i_strides, i_bia_cfg.first, i_bia_cfg.second,
+                    i_rt_dims_masks, i_sparse_options, i_attr, i_ctx_init,
+                    i_ctx_exe, s.impl_filter, gpu_kernel);
+        };
+        std::vector<std::string> gpu_kernels {i_gpu_kernel};
+#ifdef DNNL_DEV_MODE
+        // `all` and `A-B` depend on the problem's candidate count, so expand
+        // them per problem; make_prb builds the problem to query that count.
+        gpu_kernels = expand_gpu_kernel(i_gpu_kernel, make_prb);
+#endif
+        for (const auto &gpu_kernel : gpu_kernels) {
+            auto prb = make_prb(gpu_kernel);
+            if (s.pattern && !match_regex(prb->str(), s.pattern)) continue;
 
-        task_executor.submit(prb, s.perf_template, createit, checkit, doit);
+            task_executor.submit(prb, s.perf_template, createit, checkit, doit);
+        }
     }
 }
 
@@ -217,6 +279,38 @@ static const std::string help_runtime_dims_masks
           "For tensors with runtime dimensions specified a correspondent "
           "memory format must be specified, too.\n";
 
+#ifdef DNNL_DEV_MODE
+static const std::string help_gpu_kernel
+        = "STR    (Default: empty)\n    Specifies a GPU kernel override "
+          "passed via a primitive attribute. `N` runs the Nth candidate "
+          "after sort (rank); `A-B` and `all` run ranks `A` through `B` or "
+          "every rank, clamped to the problem's candidate count (a problem "
+          "with an empty range is skipped); problems with no jit:gemm "
+          "candidate count run without an override. Any other string is a "
+          "strategy override. An empty string means no override. Ignored on "
+          "non-GPU engines. Requires a dev-mode library "
+          "(ONEDNN_DEV_MODE=ON).\n";
+
+// Validates `A-B`; ranks are expanded per problem in check_correctness.
+static std::vector<std::string> str2gpu_kernel(const char *str) {
+    int beg = 0, end = 0;
+    if (parse_range(str, beg, end) && beg > end) {
+        BENCHDNN_PRINT(0, "Error: --gpu-kernel=%s: empty range.\n", str);
+        SAFE_V(FAIL);
+    }
+    std::string s(str);
+    if (s.find(',') != std::string::npos
+            && s.find_first_not_of("0123456789,") == std::string::npos) {
+        BENCHDNN_PRINT(0,
+                "Error: --gpu-kernel=%s: one value only; use A-B for several "
+                "ranks.\n",
+                str);
+        SAFE_V(FAIL);
+    }
+    return {str};
+}
+#endif // DNNL_DEV_MODE
+
 bool parse_legacy_dt(std::vector<dnnl_data_type_t> &dt,
         const std::vector<dnnl_data_type_t> &def_dt, const char *str,
         const std::string &option_name /* = "dt"*/) {
@@ -253,6 +347,11 @@ int bench(int argc, char **argv) {
                 || parse_multivector_option(s.rt_dims_masks, def.rt_dims_masks,
                         atoi, argv[0], "runtime_dims_masks",
                         help_runtime_dims_masks)
+#ifdef DNNL_DEV_MODE
+                // Single-value parse: kernel strings may contain commas.
+                || parse_single_value_option(s.gpu_kernel, def.gpu_kernel,
+                        str2gpu_kernel, argv[0], "gpu-kernel", help_gpu_kernel)
+#endif
                 || parse_driver_shared_settings(s, def, argv[0]);
         if (!parsed_options) {
             catch_unknown_options(argv[0]);

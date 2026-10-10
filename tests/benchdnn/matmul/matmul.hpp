@@ -50,6 +50,7 @@ struct settings_t : public base_settings_t {
     std::vector<dnnl_data_type_t> bia_dt {dnnl_data_type_undef};
     std::vector<int> bia_mask {2};
     std::vector<std::vector<dims_mask_t>> rt_dims_masks {{}};
+    std::vector<std::string> gpu_kernel {""};
 
     const char *perf_template_csv() const {
         static const std::string args = "%sdt%,%bia_dt%,%stag%,%wtag%,%dtag%";
@@ -62,6 +63,7 @@ struct settings_t : public base_settings_t {
         return dt.size() == 1 && stag.size() == 1 && wtag.size() == 1
                 && dtag.size() == 1 && strides.size() == 1 && bia_dt.size() == 1
                 && bia_mask.size() == 1 && rt_dims_masks.size() == 1
+                && gpu_kernel.size() == 1
                 && base_settings_t::has_single_setup();
     }
 };
@@ -72,7 +74,7 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
         : prb_t(s.prb_vdims, s.dt[0], s.stag[0], s.wtag[0], s.dtag[0],
                   s.strides[0], s.bia_dt[0], s.bia_mask[0], s.rt_dims_masks[0],
                   s.sparse_options[0], s.attributes.front(), s.ctx_init[0],
-                  s.ctx_exe[0], s.impl_filter) {
+                  s.ctx_exe[0], s.impl_filter, s.gpu_kernel[0]) {
         SAFE_V(s.has_single_setup() ? OK : FAIL);
     }
 
@@ -83,7 +85,8 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
             const std::vector<dims_mask_t> &rt_dims_masks,
             const sparse_options_t &sparse_options, const attr_t &attr,
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
-            const impl_filter_t &impl_filter)
+            const impl_filter_t &impl_filter,
+            const std::string &gpu_kernel = {})
         : prb_vdims_t(prb_vdims)
         , base_prb_t(FLAG_FWD, false, attr, ctx_init, ctx_exe, impl_filter)
         , dt(dt)
@@ -94,7 +97,8 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
         , bia_dt(bia_dt)
         , bia_mask(bia_mask)
         , rt_dims_masks(rt_dims_masks)
-        , sparse_options(sparse_options) {
+        , sparse_options(sparse_options)
+        , gpu_kernel(gpu_kernel) {
 
         // Broadcast data types if needed
         broadcast_vector(this->dt, dt[0], 3);
@@ -134,6 +138,7 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
     int bia_mask;
     std::vector<dims_mask_t> rt_dims_masks;
     sparse_options_t sparse_options;
+    std::string gpu_kernel;
     double ops;
 
     const dims_t &src_dims() const { return vdims[0]; }
@@ -269,6 +274,10 @@ inline int64_t dst_off_f(const prb_t *prb, int64_t mb, int64_t m, int64_t n) {
 }
 
 dnnl_status_t init_pd(init_pd_args_t &init_pd_args);
+#ifdef DNNL_DEV_MODE
+// Number of jit:gemm kernel candidates for `prb`, or -1 if unavailable.
+int query_gpu_kernel_count(const prb_t *prb);
+#endif
 void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,
         data_kind_t kind, const args_t &ref_args);
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,

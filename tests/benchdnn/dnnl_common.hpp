@@ -169,6 +169,12 @@ int check_caches(benchdnn_dnnl_wrapper_t<dnnl_primitive_t> &primw,
 int check_dnnl_status(
         dnnl_status_t status, const base_prb_t *base_prb, res_t *res);
 
+// Moves `init_pd_args.pd` into `pdw`, iterating to the impl `impl_filter`
+// picks; `pdw` is empty if every impl is skipped.
+int fetch_impl(benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> &pdw,
+        init_pd_args_t &init_pd_args, const impl_filter_t &impl_filter,
+        res_t *res, bool is_service_prim);
+
 // This is an internal to `init_prim` function that utilizes the logic of
 // creating a `pd` and `prim` and assign them to input wrappers. It allows to
 // remove code duplication and keep all the logic in a single place.

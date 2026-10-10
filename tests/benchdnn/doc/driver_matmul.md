@@ -75,6 +75,18 @@ where *matmul-knobs* are:
             Note: a binary post-op with `mask = 0` (e.g.
             `--attr-post-ops=mul:f32:0`) is applied per group (`[G, 1]`,
             e.g. NVFP4 global scale), not a whole-tensor.
+ - `--gpu-kernel=STR` -- GPU kernel override, passed via a primitive
+            attribute. `N` runs the Nth candidate after sort (rank); `A-B` and
+            `all` run ranks `A` through `B` or every rank, clamped to the
+            problem's candidate count (a problem with an empty range is
+            skipped); problems with no jit:gemm candidate count run without
+            an override. Any other string is a strategy override; quote it (e.g.
+            `--gpu-kernel="gemm ..."`) on the command line and in batch files;
+            in batch files, a `\` line break inside the quotes joins the
+            lines without a space, so put a space before `\` between words.
+            Empty by default (no override). Requires `ONEDNN_DEV_MODE=ON`;
+            ignored on non-GPU engines. `ONEDNN_VERBOSE=xe=info` prints the
+            deployed kernel.
  - `--match=REGEX` -- skip problems not matching the regular expression in
             `REGEX`. By default no pattern is applied (run everything).
             Note: Windows may interpret only string arguments surrounded by

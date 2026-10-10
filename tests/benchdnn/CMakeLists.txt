@@ -36,6 +36,10 @@ if(BENCHDNN_USE_RDPMC)
     add_definitions_with_host_compiler(-DBENCHDNN_USE_RDPMC)
 endif()
 
+if(DNNL_DEV_MODE)
+    add_definitions_with_host_compiler(-DDNNL_DEV_MODE)
+endif()
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
     append_if(WIN32 CMAKE_CXX_FLAGS "-Qprec-div -Qprec-sqrt")
     append_if(UNIX  CMAKE_CXX_FLAGS "-prec-div -prec-sqrt -fp-model precise")
