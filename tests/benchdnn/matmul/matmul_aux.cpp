@@ -94,6 +94,13 @@ std::string prb_t::set_repro_line() {
             s << "--bia_mask=" << bia_mask << " ";
     }
 
+    if (!gpu_kernel.empty()) {
+        // Quote strategy strings (they contain spaces) so the repro round-trips.
+        bool q = gpu_kernel.find(' ') != std::string::npos;
+        s << "--gpu-kernel=" << (q ? "\"" : "") << gpu_kernel << (q ? "\"" : "")
+          << " ";
+    }
+
     s << attr;
     if (canonical || ctx_init != def.ctx_init[0])
         s << "--ctx-init=" << ctx_init << " ";

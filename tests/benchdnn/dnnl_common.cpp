@@ -59,7 +59,6 @@
 
 #include "tests/test_thread_decl.hpp"
 
-namespace {
 // `fetch_impl` is responsible to provide a valid `pd` under certain conditions:
 // 1. Either valid `pd` or `pd_it` were provided.
 // 2a. It's a service primitive (fwd-for-bwd or cpu-for-gpu or
@@ -116,6 +115,7 @@ int fetch_impl(benchdnn_dnnl_wrapper_t<dnnl_primitive_desc_t> &pdw,
     return FAIL;
 }
 
+namespace {
 int check_pd_w_and_wo_attr(dnnl_engine_t engine,
         const init_pd_func_t &init_pd_func, const base_prb_t *base_prb,
         res_t *res, dir_t dir, const_dnnl_primitive_desc_t hint) {
