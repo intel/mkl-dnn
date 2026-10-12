@@ -165,10 +165,11 @@ when the primitive is created, and can be added later without changing the API.
 | Argument                     | `DNNL_ARG_WEIGHTS`                                                                                | source, destination, other weights arguments                                                    |
 | Weights data type            | `u4`, `s4`, `u8`                                                                                  | others                                                                                           |
 | Activations                  | `f16`, `bf16`                                                                                     | `f32`; integer activations (integer computation)                                                 |
-| Scales and zero points       | `f16` or `bf16`, the same type for both                                                           | `f32`; integer zero points; different types                                                     |
+| Destination                  | `f16`, `bf16`, `f32`                                                                              | integer destinations                                                                             |
+| Scales and zero points       | the activations' type (`f16` or `bf16`), the same for both                                        | `f32`; integer zero points; a type different from the activations or from each other            |
 | Granularity                  | both grouped along K with the same groups ($G > 1$, $K$ divisible by $G$, at least two groups) | common, per-channel, a single group, different groups for scales and zero points, host scalars |
 | Presence                     | scales and zero points both set, both in `static_sbzp`                                            | only one of them set, or modes that differ                                                      |
-| Other attributes             | post-ops; `fpmath` mode with `apply_to_int`, as weights decompression already requires          | source scales or zero points, precomputed reductions                                             |
+| Other attributes             | post-ops; destination scales; `fpmath` mode with `apply_to_int`, as weights decompression already requires | source scales or zero points, precomputed reductions                              |
 | Implementations              | Intel GPU `jit:gemm` (optimized); CPU and GPU reference matmul (functional, same scope)           | all others return `unimplemented`                                                               |
 | Graph API                    | unchanged                                                                                         |                                                                                                  |
 
@@ -189,7 +190,7 @@ be added later (as a post-op on the result, or a single fused multiply-add).
 ## Implementation
 
 The prototype is a single commit on oneDNN main (`2dd09b52c`, October 12,
-2026) and changes 36 files (668 lines added, 75 removed), including tests and
+2026) and changes 36 files (686 lines added, 75 removed), including tests and
 documentation.
 
 ### Attributes and checks
@@ -253,7 +254,11 @@ don't support it.
 
 Tested with the prototype as described (scale and zero point in one fused
 multiply-add) on two GPU generations: an Intel Arc B390 (Xe3, integrated) and
-an Intel Arc B580 (Xe2, discrete), with the B580 on the rebased commit.
+an Intel Arc B580 (Xe2, discrete). The B580 results are for the final commit.
+The B390 results are for the same change on an older main, before two checks
+were added that reject configurations only the reference implementations ran
+(scales and zero points of a type different from the activations, and integer
+destinations); every configuration tested there is still accepted.
 
 | Test                                        | Arc B390                                       | Arc B580                       |
 | ------------------------------------------- | ---------------------------------------------- | ------------------------------ |
@@ -447,14 +452,14 @@ order of operations is missing.
 
 ## Open questions
 
-1. **Name:** `static_sbzp` mirrors `static_sazp`. Is that acceptable?
-2. **Scales and zero-point data types:** the scope requires the same type for
-   both. Is there a need for mixed types (for example, `f16` scales with `bf16`
-   zero points)?
-3. **Validation on other GPUs:** the prototype is tested on Intel Arc B390
+1. **Scales and zero-point data types:** the scope requires the scales and
+   zero points to have the activations' data type. Is there a need for other
+   combinations (for example, `bf16` activations with `f16` scales and zero
+   points)?
+2. **Validation on other GPUs:** the prototype is tested on Intel Arc B390
    (Xe3) and B580 (Xe2) GPUs. We would like the oneDNN team's help to cover
    other generations (for example Xe-LPG, Xe-HPG and Xe-HPC).
-4. **Integer activations:** frameworks can quantize activations to `s8` at run
+3. **Integer activations:** frameworks can quantize activations to `s8` at run
    time (OpenVINO's dynamic quantization for compressed weights). With
    `static_sbzp` weights, the zero point term of each group becomes
    $zp \times \sum x$ without the weights scale, so it needs per-group sums of
