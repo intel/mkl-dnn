@@ -63,6 +63,11 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
                     val_mdw.is_plain(), dst_mdw.is_plain()),
             VERBOSE_UNSUPPORTED_TAG);
 
+    VDISPATCH_SDPA(qry_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
+            "the query head-size axis must be contiguous");
+    VDISPATCH_SDPA(val_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
+            "the value head-size axis must be contiguous");
+
     const data_type_t dt = qry_mdw.data_type();
     VDISPATCH_SDPA(utils::one_of(dt, f32, bf16, f16), VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_SDPA(key_mdw.data_type() == dt && val_mdw.data_type() == dt
@@ -102,6 +107,9 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         if (with_select_mask()) {
             VDISPATCH_SDPA(utils::one_of(mask_mdw.data_type(), s8, u8),
                     "the select condition data type must be s8 or u8");
+            VDISPATCH_SDPA(mask_mdw.dims()[mask_k_index] == 1
+                            || mask_mdw.strides()[mask_k_index] == 1,
+                    "the select condition key axis must be contiguous");
 
             const memory_desc_wrapper fill_mdw(desc()->fill_md());
             VDISPATCH_SDPA(fill_mdw.ndims() == 1 && fill_mdw.dims()[0] == 1
@@ -129,7 +137,11 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // online-softmax whenever the shapes/dtypes allow it, unless overridden for
     // debugging/perf comparisons via ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto}
     // (auto, the default, is the capability-based choice above).
-    const bool online_capable = dt == f32 && !with_buffer_mask();
+    // The online mm1 reads K in place (no transpose), so its keys axis must be
+    // unit-stride; full-softmax materialises a transpose for a strided keys
+    // axis, so route those cases to full rather than rejecting them.
+    const bool online_capable = dt == f32 && !with_buffer_mask()
+            && key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1;
     const std::string forced = getenv_string_user("SDPA_IMPL");
     VDISPATCH_SDPA(
             utils::one_of(forced, std::string(), std::string("auto"),
