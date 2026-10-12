@@ -245,6 +245,8 @@ void ir_t::vhreduce(vreg_t dst, vreg_t workspace) {
 }
 
 void ir_t::vhreduce_max(vreg_t dst, vreg_t workspace) {
+    assert(dst != workspace && "vhreduce_max: workspace must differ from dst");
+
     op_t op;
     op.kind = op_kind_t::vhreduce_max;
     op.dst = dst;
