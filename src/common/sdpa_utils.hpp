@@ -79,7 +79,10 @@ static inline status_t sdpa_desc_check(const memory_desc_t *q_desc,
                              q_desc, k_desc, v_desc, dst_desc, attn_mask_md),
             VERBOSE_UNSUPPORTED_FORMAT_KIND);
 
-    if (attn_mask_md != nullptr && attn_mask_type == attn_mask_type::select) {
+    if (attn_mask_type == attn_mask_type::select) {
+        VCHECK_SDPA_COND(attn_mask_md != nullptr
+                        && attn_mask_md->data_type != data_type::undef,
+                "select attention mask requires a condition tensor");
         VCHECK_SDPA_COND(fill_desc != nullptr && fill_desc->ndims == 1
                         && fill_desc->dims[0] == 1,
                 "select attention mask fill must be a scalar");
