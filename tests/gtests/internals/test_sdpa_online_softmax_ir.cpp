@@ -126,7 +126,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileRow) {
     // ragged tail, so the masked-tail path and its lane neutralization run.
     for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
                  4 * simd_w() - 1, 4 * simd_w()}) {
-        softmax_ir_kernel_t kernel(build_softmax_tile_ir(1, w));
+        softmax_tile_ir_kernel_t kernel(1, w, false, false, -1);
         ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
 
         std::vector<float> scores(w), ref(w);
@@ -164,7 +164,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineFirstTile) {
     const float neg_inf = -std::numeric_limits<float>::infinity();
     for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
                  4 * simd_w() - 1, 4 * simd_w()}) {
-        softmax_ir_kernel_t kernel(build_softmax_tile_ir(1, w));
+        softmax_tile_ir_kernel_t kernel(1, w, false, false, -1);
         ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
 
         const float scale = 0.125f;
@@ -208,7 +208,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     const float scale = 0.125f;
     for (int seq_q : {2, 3, 5}) {
         for (int w : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
-            softmax_ir_kernel_t kernel(build_softmax_tile_ir(seq_q, w));
+            softmax_tile_ir_kernel_t kernel(seq_q, w, false, false, -1);
             ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " w=" << w;
 
@@ -270,8 +270,8 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
         for (int seq_q : {1, 2, 3}) {
             for (int w : {1, 5, 7, simd_w(), 9, 17, 4 * simd_w() - 1,
                          4 * simd_w()}) {
-                softmax_ir_kernel_t kernel(
-                        build_softmax_tile_ir(seq_q, w, true, invert_select));
+                softmax_tile_ir_kernel_t kernel(
+                        seq_q, w, true, invert_select, -1);
                 ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                         << "invert_select=" << invert_select
                         << " seq_q=" << seq_q << " w=" << w;
@@ -349,7 +349,7 @@ TEST(SdpaOnlineSoftmaxIr, AccRenormTile) {
         // Head sizes span pure tails, exact multiples, and multiples plus a
         // ragged tail, so the masked-tail path runs.
         for (int hs : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
-            softmax_ir_kernel_t kernel(build_acc_renorm_ir(seq_q, hs));
+            acc_renorm_ir_kernel_t kernel(seq_q, hs);
             ASSERT_EQ(kernel.create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " hs=" << hs;
 
