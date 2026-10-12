@@ -218,22 +218,19 @@ status_t create_kernels(const sdpa_online_softmax_conf_t &conf,
     const int cond_stride = p_.has_select && p_.cond_dims[row_dim] != 1
             ? static_cast<int>(p_.cond_strides[row_dim])
             : 0;
-    auto build_ir_kernel = [](std::unique_ptr<softmax_ir_kernel_t> &slot,
-                                   ir_t ir) -> status_t {
-        std::unique_ptr<softmax_ir_kernel_t> k(
-                new softmax_ir_kernel_t(std::move(ir)));
-        CHECK(k->create_kernel());
-        slot = std::move(k);
-        return status::success;
-    };
     for (int qi = 0; qi < n_qi; ++qi) {
         const int m = static_cast<int>(q_rows[qi]);
-        for (int ki = 0; ki < n_ki; ++ki)
-            CHECK(build_ir_kernel(kernels.softmax_ir_kernel[qi][ki],
-                    build_softmax_tile_ir(m, static_cast<int>(kv_w[ki]),
-                            p_.has_select, p_.invert_select, cond_stride)));
-        CHECK(build_ir_kernel(kernels.acc_renorm_ir_kernel[qi],
-                build_acc_renorm_ir(m, static_cast<int>(hs_v))));
+        for (int ki = 0; ki < n_ki; ++ki) {
+            std::unique_ptr<softmax_tile_ir_kernel_t> k(
+                    new softmax_tile_ir_kernel_t(m, static_cast<int>(kv_w[ki]),
+                            p_.has_select, p_.invert_select, cond_stride));
+            CHECK(k->create_kernel());
+            kernels.softmax_ir_kernel[qi][ki] = std::move(k);
+        }
+        std::unique_ptr<acc_renorm_ir_kernel_t> ak(
+                new acc_renorm_ir_kernel_t(m, static_cast<int>(hs_v)));
+        CHECK(ak->create_kernel());
+        kernels.acc_renorm_ir_kernel[qi] = std::move(ak);
     }
 
     return status::success;

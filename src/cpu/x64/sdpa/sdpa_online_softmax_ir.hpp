@@ -47,8 +47,6 @@ namespace cpu {
 namespace x64 {
 namespace sdpa_softmax_ir {
 
-using namespace dnnl::impl::cpu::x64::ir;
-
 inline cpu_isa_t isa() {
     return mayiuse(avx512_core) ? avx512_core : avx2;
 }
@@ -110,8 +108,10 @@ struct acc_renorm_args_t {
 // once; the mask vreg stays live across all rows (masked ops assert it is never
 // spilled). `cond_row_stride` is the condition tensor's row stride in elements;
 // < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
-inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
+inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         bool invert_select = false, int cond_row_stride = -1) {
+    using namespace ir;
+
     const int n_blk = w / simd_w();
     const int tail = w % simd_w();
     const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
@@ -311,7 +311,9 @@ inline ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
 // row per iteration. old_coef is broadcast so the per-row scalar reuses the
 // vector ops; no reduction is needed, so the tail needs no lane neutralization
 // (masked ld/st touch only the active columns).
-inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
+inline ir::ir_t build_acc_renorm_ir(int seq_q, int hs) {
+    using namespace ir;
+
     const int n_blk = hs / simd_w();
     const int tail = hs % simd_w();
     const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
@@ -372,20 +374,32 @@ inline ir_t build_acc_renorm_ir(int seq_q, int hs) {
     return ir;
 }
 
-// JIT kernel that runs the full IR pipeline for an epilogue IR: allocate
-// registers, wire an eltwise injector per algorithm the IR uses (softmax needs
-// exp), emit code, and finalize. Construct with an IR from one of the builders
-// above, call create_kernel(), then invoke via operator()(const args_t *).
-class softmax_ir_kernel_t : public jit_generator_t {
+// JIT kernel for the online-softmax tile epilogue. Construct with its
+// build-time shape/strides, call create_kernel(), then invoke via
+// operator()(const softmax_row_args_t *). generate() builds the IR and runs the
+// register-allocation + emission pipeline, wiring an eltwise injector for the
+// exp the softmax uses.
+class softmax_tile_ir_kernel_t : public jit_generator_t {
 public:
-    softmax_ir_kernel_t(ir_t ir)
-        : jit_generator_t("sdpa_softmax_ir", isa()), ir_(std::move(ir)) {}
+    softmax_tile_ir_kernel_t(int seq_q, int w, bool has_select,
+            bool invert_select, int cond_row_stride)
+        : jit_generator_t("sdpa_softmax_tile_ir", isa())
+        , seq_q_(seq_q)
+        , w_(w)
+        , cond_row_stride_(cond_row_stride)
+        , has_select_(has_select)
+        , invert_select_(invert_select) {}
 
-    const char *name() const override { return "sdpa_softmax_ir_kernel"; }
+    const char *name() const override { return "sdpa_softmax_tile_ir_kernel"; }
     const char *source_file() const override { return __FILE__; }
 
 protected:
     void generate() override {
+        using namespace ir;
+
+        ir_t ir = build_softmax_tile_ir(
+                seq_q_, w_, has_select_, invert_select_, cond_row_stride_);
+
         const int rsp_idx = Xbyak::Operand::RSP;
         const int param_idx = abi_param1.getIdx();
 
@@ -396,7 +410,7 @@ protected:
         const reg_config_t reg_cfg
                 = make_reg_config(isa(), param_idx, rsp_idx, {exp_opmask});
 
-        const reg_alloc_result_t alloc = allocate_registers(ir_, reg_cfg.pools);
+        const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
 
         // One eltwise injector per algorithm the IR uses, discovered by
         // scanning the veltwise ops. Each one saves and restores every register
@@ -404,7 +418,7 @@ protected:
         // single generic callback dispatches by algorithm.
         std::map<alg_kind_t, std::unique_ptr<eltwise_injector_t>>
                 eltwise_injectors;
-        for (const auto &op : ir_.ops()) {
+        for (const auto &op : ir.ops()) {
             if (op.kind != op_kind_t::veltwise) continue;
             const auto alg = (alg_kind_t)op.imm;
             if (eltwise_injectors.count(alg)) continue;
@@ -427,9 +441,9 @@ protected:
         if (frame > 0) sub(rsp, frame);
 
         // This epilogue has no attribute post-ops, so no post-ops injector.
-        postops_injector_t *emit_injector = nullptr;
         data_section_t data;
-        emit(*this, ir_, alloc, reg_cfg, data, emit_injector, emit_eltwise);
+        emit(*this, ir, alloc, reg_cfg, data, /*postops=*/nullptr,
+                emit_eltwise);
 
         if (frame > 0) add(rsp, frame);
 
@@ -443,7 +457,60 @@ protected:
     }
 
 private:
-    ir_t ir_;
+    int seq_q_;
+    int w_;
+    int cond_row_stride_;
+    bool has_select_;
+    bool invert_select_;
+};
+
+// JIT kernel for the accumulator renormalization epilogue. Construct with its
+// build-time shape, call create_kernel(), then invoke via operator()(const
+// acc_renorm_args_t *). generate() builds the IR and runs the
+// register-allocation + emission pipeline (no eltwise, no post-ops).
+class acc_renorm_ir_kernel_t : public jit_generator_t {
+public:
+    acc_renorm_ir_kernel_t(int seq_q, int hs)
+        : jit_generator_t("sdpa_acc_renorm_ir", isa())
+        , seq_q_(seq_q)
+        , hs_(hs) {}
+
+    const char *name() const override { return "sdpa_acc_renorm_ir_kernel"; }
+    const char *source_file() const override { return __FILE__; }
+
+protected:
+    void generate() override {
+        using namespace ir;
+
+        ir_t ir = build_acc_renorm_ir(seq_q_, hs_);
+
+        const int rsp_idx = Xbyak::Operand::RSP;
+        const int param_idx = abi_param1.getIdx();
+
+        // No post-ops or eltwise injector here, so no opmask is reserved.
+        const reg_config_t reg_cfg = make_reg_config(
+                isa(), param_idx, rsp_idx, /*reserved_masks=*/ {});
+
+        const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
+
+        preamble();
+
+        const int frame = (int)utils::rnd_up(alloc.frame_bytes, 16);
+        if (frame > 0) sub(rsp, frame);
+
+        data_section_t data;
+        emit(*this, ir, alloc, reg_cfg, data, /*postops=*/nullptr);
+
+        if (frame > 0) add(rsp, frame);
+
+        postamble();
+
+        emit_data_section(*this, data);
+    }
+
+private:
+    int seq_q_;
+    int hs_;
 };
 
 } // namespace sdpa_softmax_ir

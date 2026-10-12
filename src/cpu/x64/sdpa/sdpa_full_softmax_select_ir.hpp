@@ -44,8 +44,6 @@ namespace cpu {
 namespace x64 {
 namespace sdpa_full_softmax_select_ir {
 
-using namespace dnnl::impl::cpu::x64::ir;
-
 inline cpu_isa_t isa() {
     return mayiuse(avx512_core) ? avx512_core : avx2;
 }
@@ -79,8 +77,10 @@ struct select_row_args_t {
 // (vload_widen -> vcmp_ne_zero) -> vblend the broadcast `fill` into the masked-out
 // lanes -> store scores. With `invert_select` false, keep scores where
 // `cond != 0`; with it true, keep scores where `cond == 0`.
-inline ir_t build_select_ir(dim_t w, bool invert_select,
+inline ir::ir_t build_select_ir(dim_t w, bool invert_select,
         dim_t scores_row_stride, dim_t cond_row_stride) {
+    using namespace ir;
+
     ir_t ir;
 
     // Row pointers: advanced one row per loop iteration.
@@ -182,6 +182,8 @@ public:
 
 protected:
     void generate() override {
+        using namespace ir;
+
         ir_t ir = build_select_ir(
                 w_, invert_select_, scores_row_stride_, cond_row_stride_);
 
