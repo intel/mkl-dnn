@@ -1807,22 +1807,27 @@ status_t layout_propagator_for_sdpa(std::shared_ptr<op_t> &op,
         expected_md = make_dnnl_memory_desc(out_lt);
     }
     status_t status = fill_layout_info(dst_val, expected_md);
+    VCHECK_LAYOUT_PROPAGATOR(status == status::success, status,
+            "failed to fill layout info for sdpa dst");
 
-    // Size the scratchpad output from the sdpa primitive descriptor (built here
-    // and discarded) so memory planning reserves a real buffer before
-    // compile_ops creates the executable. GPU micro-SDPA needs no user
-    // scratchpad, but the CPU BRGEMM primitive does.
-    value_ptr scratchpad_val = op->get_output_value(output_idx++);
-    memory::desc scratchpad_desc;
+    // fill scratchpads dimensions and data type to scratchpad value_t
     std::unique_ptr<dnnl_primitive_desc, pd_deleter_t> sdpa_pd;
-    if (create_sdpa_pd(sdpa_pd, op, p_engine, fpmath) == status::success) {
-        const_dnnl_memory_desc_t c_scratchpad_md = dnnl_primitive_desc_query_md(
-                sdpa_pd.get(), dnnl_query_scratchpad_md, 0);
-        dnnl_memory_desc_t cloned_md = nullptr;
-        dnnl_memory_desc_clone(&cloned_md, c_scratchpad_md);
-        scratchpad_desc = memory::desc(cloned_md);
-    }
+    status = create_sdpa_pd(sdpa_pd, op, p_engine, fpmath);
+    VCHECK_LAYOUT_PROPAGATOR(status == status::success, status,
+            "failed to create pd for sdpa_fwd scratchpad");
+    const_dnnl_memory_desc_t c_scratchpad_md = dnnl_primitive_desc_query_md(
+            sdpa_pd.get(), dnnl_query_scratchpad_md, 0);
+    VCHECK_LAYOUT_PROPAGATOR(c_scratchpad_md != nullptr, status::runtime_error,
+            "failed to query SDPA scratchpad memory descriptor");
+    dnnl_memory_desc_t cloned_md = nullptr;
+    status = dnnl_memory_desc_clone(&cloned_md, c_scratchpad_md);
+    assert(status == dnnl_success);
+    memory::desc scratchpad_desc;
+    scratchpad_desc.reset(cloned_md);
+    value_ptr scratchpad_val = op->get_output_value(output_idx++);
     status = fill_layout_info(scratchpad_val, scratchpad_desc);
+    VCHECK_LAYOUT_PROPAGATOR(status == status::success, status,
+            "failed to fill layout info for sdpa scratchpad");
 
     if (op->get_attr<bool>(op_attr::is_training)) {
         value_ptr stats_val = op->get_output_value(output_idx);

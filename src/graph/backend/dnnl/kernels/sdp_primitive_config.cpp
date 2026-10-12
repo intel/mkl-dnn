@@ -149,6 +149,11 @@ status_t sdp_primitive_config_t::initial_check(
                     const bool then_is_score
                             = post_op->get_input_value(1) == score_val;
 
+                    VCHECK_SDP_PRIMITIVE(then_is_score
+                                    || post_op->get_input_value(2) == score_val,
+                            status::unimplemented,
+                            "Select score input is not a value branch");
+
                     const auto &fill_lt = then_is_score
                             ? post_op->get_input_logical_tensor(2)
                             : post_op->get_input_logical_tensor(1);
