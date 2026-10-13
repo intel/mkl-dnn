@@ -21,3 +21,11 @@
 --stag=aBCde2c4b2c 4x16x16x3x3 2x16x6x3x2 2x2x10x2x3
 --stag=aBCde4b8c2b 4x16x16x3x3 2x16x6x3x2 2x2x10x2x3
 --stag=aBCde4c8b2c 4x16x16x3x3 2x16x6x3x2 2x2x10x2x3
+
+# BF16 weight packing and unpacking for both output-channel tile widths.
+--reset --sdt=bf16 --ddt=bf16 --stag=abcd --dtag=OhwI2i16o4i,OhwI2i32o4i 64x64x3x3
+--reset --sdt=bf16 --ddt=bf16 --stag=OhwI2i16o4i,OhwI2i32o4i --dtag=abcd 64x64x3x3
+
+# Weight packing and unpacking with input/output-channel tails.
+--reset --sdt=f32 --ddt=f32 --stag=abcd --dtag=OhwI2i16o4i,OhwI2i32o4i 33x17x3x3
+--reset --sdt=f32 --ddt=f32 --stag=OhwI2i16o4i,OhwI2i32o4i --dtag=abcd 33x17x3x3

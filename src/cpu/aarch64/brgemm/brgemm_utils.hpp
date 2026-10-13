@@ -86,6 +86,7 @@ inline constexpr int mmla_bd_blk() {
 inline constexpr int mmla_ld_blk() {
     return 2;
 }
+// BFMMLA consumes K4 chunks of 8 bytes; two chunks form a K8 block.
 inline constexpr int mmla_rd_chunk_bytes() {
     return 8;
 }
@@ -99,6 +100,21 @@ inline constexpr int mmla_rd_chunk_elems(int dt_a_sz) {
 inline constexpr int mmla_rd_chunks_per_block(int dt_a_sz) {
     return mmla_rd_block() / mmla_rd_chunk_elems(dt_a_sz);
 }
+
+// Four f32 output vectors per row x six rows = 24 accumulator registers.
+inline constexpr int mmla_ld_block2() {
+    return 4;
+}
+inline constexpr int mmla_max_native_bd_block() {
+    return 6;
+}
+inline int mmla_n_block(cpu_isa_t isa) {
+    return mmla_ld_block2() * simd_elems(data_type::f32, isa);
+}
+
+status_t init_mmla_wei_md(memory_desc_t &md, int k_dim, int n_dim, int n_block);
+
+void set_mmla_attr(brgemm_attr_t &attr, dim_t M);
 
 status_t validate_mmla_compute(const brgemm_desc_t &brg);
 

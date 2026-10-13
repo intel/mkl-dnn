@@ -86,6 +86,36 @@ void init_common_conf(brgemm_desc_t *brg, brgemm_batch_kind_t type, float alpha,
 
 namespace brgemm_utils {
 
+status_t init_mmla_wei_md(
+        memory_desc_t &md, int k_dim, int n_dim, int n_block) {
+    const int dt_sz = types::data_type_size(md.data_type);
+    if (k_dim < 0 || k_dim >= md.ndims || n_dim < 0 || n_dim >= md.ndims
+            || k_dim == n_dim || n_block <= 0 || dt_sz <= 0
+            || mmla_rd_chunk_bytes() % dt_sz != 0)
+        return status::invalid_arguments;
+
+    blocking_desc_t blk {};
+    // memory_desc_init_by_blocking_desc interprets strides as ordering ranks.
+    int order = md.ndims;
+    for (int d = 0; d < md.ndims; ++d)
+        if (d != k_dim) blk.strides[d] = order--;
+    blk.strides[k_dim] = order;
+    blk.inner_nblks = 3;
+    blk.inner_blks[0] = mmla_rd_chunks_per_block(dt_sz);
+    blk.inner_idxs[0] = k_dim;
+    blk.inner_blks[1] = n_block;
+    blk.inner_idxs[1] = n_dim;
+    blk.inner_blks[2] = mmla_rd_chunk_elems(dt_sz);
+    blk.inner_idxs[2] = k_dim;
+    return memory_desc_init_by_blocking_desc(md, blk);
+}
+
+void set_mmla_attr(brgemm_attr_t &attr, dim_t M) {
+    attr.use_mmla = true;
+    attr.hint_ld_block2 = mmla_ld_block2();
+    attr.hint_bd_block = nstl::min<dim_t>(mmla_max_native_bd_block(), M);
+}
+
 bool can_dispatch_uker(const brgemm_desc_t *brg) {
     return false;
 }

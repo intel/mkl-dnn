@@ -668,6 +668,7 @@ struct jit_brgemm_conv_conf_t {
     bool brgemm_bd_loop_innermost;
 
     bool use_uker;
+    bool use_mmla {false};
     bool var_bs {false};
     bool use_interleave_stores;
     brgemm_kernel_prefetching_t hint_prefetching;

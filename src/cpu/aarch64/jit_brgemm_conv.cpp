@@ -262,6 +262,7 @@ status_t brgemm_convolution_fwd_t<isa>::pd_t::add_brg_descriptor(int vM,
     // remove the dead code.
     brgattr.use_uker = jcp_.use_uker;
     brgattr.use_interleave_stores = jcp_.use_interleave_stores;
+    if (jcp_.use_mmla) brgemm_utils::set_mmla_attr(brgattr, vbrgM);
     brgattr.hint_prefetching = jcp_.hint_prefetching;
     brgattr.max_bs = bs;
     brgattr.hint_ununroll_bd_loop = jcp_.ununroll_bd_loop;

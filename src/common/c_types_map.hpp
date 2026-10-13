@@ -1119,6 +1119,8 @@ const format_tag_t BA4b8a = dnnl_BA4b8a;
 const format_tag_t aCB4c8b = dnnl_aCB4c8b;
 const format_tag_t abDC4d8c = dnnl_abDC4d8c;
 const format_tag_t AB2a4b = dnnl_AB2a4b;
+const format_tag_t AcdB2b16a4b = dnnl_AcdB2b16a4b;
+const format_tag_t AcdB2b32a4b = dnnl_AcdB2b32a4b;
 
 const format_tag_t last = dnnl_format_tag_last;
 
@@ -1681,6 +1683,7 @@ const format_tag_t OwI16i16o2i = dnnl_OwI16i16o2i;
 const format_tag_t OwI16i16o4i = dnnl_OwI16i16o4i;
 const format_tag_t OhwI16i16o2i = dnnl_OhwI16i16o2i;
 const format_tag_t OhwI16i16o4i = dnnl_OhwI16i16o4i;
+const format_tag_t OhwI2i16o4i = dnnl_OhwI2i16o4i;
 const format_tag_t OdhwI16i16o2i = dnnl_OdhwI16i16o2i;
 const format_tag_t OdhwI16i16o4i = dnnl_OdhwI16i16o4i;
 const format_tag_t gOwI16i16o2i = dnnl_gOwI16i16o2i;
@@ -1697,6 +1700,7 @@ const format_tag_t OwI16i64o2i = dnnl_OwI16i64o2i;
 const format_tag_t OwI16i64o4i = dnnl_OwI16i64o4i;
 const format_tag_t OhwI16i32o2i = dnnl_OhwI16i32o2i;
 const format_tag_t OhwI16i32o4i = dnnl_OhwI16i32o4i;
+const format_tag_t OhwI2i32o4i = dnnl_OhwI2i32o4i;
 const format_tag_t OhwI16i48o2i = dnnl_OhwI16i48o2i;
 const format_tag_t OhwI16i48o4i = dnnl_OhwI16i48o4i;
 const format_tag_t OhwI16i64o2i = dnnl_OhwI16i64o2i;
