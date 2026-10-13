@@ -325,7 +325,10 @@ static inline void parallel(int nthr, const std::function<void(int, int)> &f) {
         }
         threadpool_utils::activate_threadpool(tp);
     } else {
-        tp->parallel_for(nthr, [=](int ithr, int nthr) {
+        // Pass `f` by reference to avoid copy of the std::function. Pass rest
+        // by copy to satisfy asynchronous threadpool runtime since it's cheap.
+        auto itt_body = [=](int ithr, int nthr,
+                                const std::function<void(int, int)> &fn) {
             bool is_master = threadpool_utils::get_active_threadpool() == tp;
             if (!is_master && itt_enable) {
                 itt::primitive_task_start(
@@ -333,11 +336,22 @@ static inline void parallel(int nthr, const std::function<void(int, int)> &f) {
                 itt::primitive_add_metadata_and_id(task_primitive_info,
                         task_primitive_log_kind, task_primitive_itt_id);
             }
-            f(ithr, nthr);
+            fn(ithr, nthr);
             if (!is_master && itt_enable) {
                 itt::primitive_task_end(task_primitive_log_kind);
             }
-        });
+        };
+        // Asynchronous threadpools may outlive this stack frame, so `f` must be
+        // captured by copy. Synchronous ones block inside `parallel_for`, so
+        // capturing by reference avoids copying the std::function.
+        const bool is_async = tp->get_flags()
+                & dnnl::threadpool_interop::threadpool_iface::ASYNCHRONOUS;
+        if (is_async)
+            tp->parallel_for(
+                    nthr, [=](int ithr, int nthr) { itt_body(ithr, nthr, f); });
+        else
+            tp->parallel_for(
+                    nthr, [&](int ithr, int nthr) { itt_body(ithr, nthr, f); });
     }
 #endif
 #endif
