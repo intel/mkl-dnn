@@ -73,3 +73,16 @@
 --reset --dt=s8:u4:f16 --stag=ab --wtag=ba --dtag=ab --attr-scales=wei:per_ocic:f16:64x1 --attr-zero-points=wei:per_ocic:u8:64x1 16x64:64x1
 # int4 weights decompression with 1 row and n > 65536: blocked launches must address grouped scales/zero points with the full problem size
 --reset --dt=f16:u4:f16 --stag=ab --wtag=ba --dtag=ab --attr-fpmath=f16:true --attr-scales=wei:per_ocic:f16:128x1 --attr-zero-points=,wei:common:8:u8,wei:per_oc:u8,wei:per_ocic:u8:128x1 1x256:256x65537
+
+# Large-K input.
+--reset --impl=brg:sve_ --dt=bf16:bf16:f32 --stag=ab --wtag=any --dtag=ab 17x2184:2184x64_n"bf16_large_k"
+
+# Batched inputs with per-batch and broadcast weights.
+--reset --impl=brg:sve_ --dt=bf16:bf16:f32 --stag=abc --wtag=any --dtag=abc 2x17x64:2x64x64_n"bf16_batched_weights"
+--reset --impl=brg:sve_ --dt=bf16:bf16:f32 --stag=abc --wtag=any --dtag=abc 2x17x64:1x64x64_n"bf16_broadcast_weights"
+
+# Broadcast across different batch axes with packed weights.
+--reset --impl=brg:sve_ --dt=bf16:bf16:f32 --stag=abcd --wtag=any --dtag=abcd 2x1x5x16:1x3x16x32_n"bf16_4d_broadcast_weights"
+
+# BF16 destination with bias, sum, and eltwise.
+--reset --impl=brg:sve_ --dt=bf16:bf16:bf16 --bia-dt=bf16 --stag=ab --wtag=any --dtag=ab --attr-post-ops=sum:1+relu 31x72:72x128_n"bf16_epilogue"
