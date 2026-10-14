@@ -2157,6 +2157,7 @@ private:
             return is_a ? cfg_.prefetch().a() : cfg_.prefetch().b();
         }
         if (cfg_.hw() < ngen::HW::XeHPC) return false;
+        if (cfg_.hw() == ngen::HW::Xe3p && is_a && (prb.ksp > 1)) return false;
         if (!cfg_.is_dpas_or_dpasw_fma()) return false;
         if (is_a && !prb.is_bwd_d && !prb.ab_swap_transpose && is_small_ic(prb)
                 && cfg_.is_dp_fma())
