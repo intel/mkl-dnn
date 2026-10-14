@@ -15,6 +15,9 @@
 *******************************************************************************/
 
 
+#include <functional>
+#include <vector>
+
 #include "alloc_utils.hpp"
 #include "gemmstone/generator.hpp"
 #include "layout_utils.hpp"
@@ -109,6 +112,21 @@ void Generator<hw>::accumulateSum(bool column,
     RegisterRange temp, tempF;
     Subregister imm;
 
+    // Staging buffers for operands that cannot be swizzled in place (Xe3p+).
+    // Each copy feeds exactly one dp4a. To hide the copy latency, dp4a
+    // emission is deferred: up to nBatch copies are issued back-to-back into
+    // distinct buffers, followed by their dp4a's. A depth of 4 is enough to
+    // saturate on Xe3p; 2 recovers only 70-90% of the gain.
+    constexpr int nBatch = 4;
+    std::vector<GRFRange> stage;
+    int nStaged = 0;
+    std::vector<std::function<void()>> pending;
+    auto flush = [&]() {
+        for (auto &f : pending) f();
+        pending.clear();
+        nStaged = 0;
+    };
+
     for (int y = y0; y < y1; y += yinc) {
         for (int x = x0; x < x1; ) {
             int isrc, jsrc, idst, jdst, nsrc, ndst;
@@ -140,17 +158,22 @@ void Generator<hw>::accumulateSum(bool column,
                 hsMatch = (src.getHS() == 1) && (dst.getHS() == 1);
 
             if (!canSwizzle(hw, Tsrc) && ne > 1 && (srcBase.getOffset() != dstBase.getOffset() || !hsMatch)) {
-                if (temp.isInvalid()) {
-                    temp = state.ra.alloc_range(2);
+                if (nStaged == int(stage.size())) {
+                    if (int(stage.size()) < nBatch) {
+                        auto r = stage.empty() ? state.ra.alloc_range(2) : state.ra.try_alloc_range(2);
+                        if (r.isValid()) stage.push_back(r);
+                    }
+                    if (nStaged == int(stage.size())) flush();
                 }
+                auto st = stage[nStaged++];
                 auto srcI = src;
                 int tmpHS = std::max<int>(1, ((blockDst->crosspack * Tdst) / Tsrc) / reduce);
                 if (Tsrc == Type::bf16 && Tdst == Type::f32)
                     tmpHS = blockDst->crosspack;
                 // A unit-stride copy covers exactly what the consumer reads.
                 // Only a strided one leaves holes that must be zeroed first.
-                if (tmpHS > 1) zeroMatrix(temp, strategy);
-                auto tmpBase = temp[0].sub(dst.getByteOffset() / Tsrc.real(), src.getType());
+                if (tmpHS > 1) zeroMatrix(st, strategy);
+                auto tmpBase = st[0].sub(dst.getByteOffset() / Tsrc.real(), src.getType());
                 auto tmp = tmpBase(tmpHS);
                 auto tmpI = tmp;
                 moveToIntPipe(ne, srcI);
@@ -160,70 +183,85 @@ void Generator<hw>::accumulateSum(bool column,
                 srcBase = tmpBase;
             }
 
-            if (Tsrc == Type::f16 && Tdst == Type::f32) {
-                if (temp.isInvalid()) temp = state.ra.alloc_range(2);
-                if (src.getHS() < 2) stub();
-                auto tmpF = temp[0].sub(src.getByteOffset() / Type::f32, DataType::f)(src.getHS() / 2);
-                mov(ne, tmpF, src);
-                src = tmpF;
-            }
+            if (canDP4A && !hReduce && blockSrc->crosspack == 4)
+                yinc = std::min(y1 - y, 4);
+            int yincL = yinc;
 
-            // Xe3p rejects packed bf16 in mixed add; convert to f32 first.
-            if (Tsrc == Type::bf16 && Tdst == Type::f32) {
-                if (tempF.isInvalid()) tempF = state.ra.alloc_range(2);
-                if ((dst.getOffset() + ne * dst.getHS()) * Tdst > 2 * GRF::bytes(hw)) stub();
-                auto tmpF = tempF[0].sub(dst.getOffset(), DataType::f)(dst.getHS());
-                mov(ne, tmpF, src);
-                src = tmpF;
-            }
-
-            if (canDP4A) {
-                auto srcDP4A = Tsrc.isSigned() ? srcBase.d()(1) : srcBase.ud()(1);
-                if (!hReduce && blockSrc->crosspack == 4) {
-                    yinc = std::min(y1 - y, 4);
-                    if (yinc == 4)
-                        dp4a(ne, dst, dst, srcDP4A, state.all1s);
-                    else if (yinc == 1)
-                        add(ne, dst, srcBase(4), dst);
-                    else if (hw == HW::XeHPC) {
-                        // Workaround, some issue with dp4a with immediates
-                        // TODO: hoist immediate out of inner-loop
-                        if (imm.isInvalid()) imm = state.ra.alloc_sub(Tdst.ngen());
-                        mov(1, imm, 0x01010101 & ((1 << (yinc * 8)) - 1));
-                        dp4a(ne, dst, dst, srcDP4A, imm);
-                    } else
-                        dp4a(ne, dst, dst, srcDP4A, 0x01010101 & ((1 << (yinc * 8)) - 1));
-                } else if (hReduce && blockSrc->crosspack == 1) {
-                    if (Tsrc.isSigned())
-                        dp4a(ne, dst, dst, srcDP4A, state.all1s);
-                    else {
-                        // Workaround for suspected HW issue.
-                        dst.setType(DataType::ud);
-                        dp4a(ne, dst, dst, srcDP4A, state.all1s.ud());
-                    }
-                }
-            } else {
-                if (one_of(src.getType(), {DataType::b, DataType::ub}) && Tdst.isFP() != Tsrc.isFP()) {
-                    // all ISAs reject eadd(fp, fp, int8); int8 -> int32 -> fp:
-                    if (Tdst != Type::f32) stub();
+            auto emit = [=, this, &state, &strategy, &imm, &temp, &tempF]() mutable {
+                if (Tsrc == Type::f16 && Tdst == Type::f32) {
                     if (temp.isInvalid()) temp = state.ra.alloc_range(2);
-                    Type Td = (Tsrc.isSigned()) ? Type::s32 : Type::u32;
-                    auto src_d = temp[0].sub(0, Td.ngen())(1);
-                    auto src_fp = temp[1].sub(0, Tdst.ngen())(1);
-                    mov(ne, src_d, src);
-                    mov(ne, src_fp, src_d);
-                    src = src_fp;
+                    if (src.getHS() < 2) stub();
+                    auto tmpF = temp[0].sub(src.getByteOffset() / Type::f32, DataType::f)(src.getHS() / 2);
+                    mov(ne, tmpF, src);
+                    src = tmpF;
                 }
-                // src0: src1 rejects bytes and (Xe3p) non-flat regions.
-                eadd(ne, dst, src, dst, strategy, state);
+
+                // Xe3p rejects packed bf16 in mixed add; convert to f32 first.
+                if (Tsrc == Type::bf16 && Tdst == Type::f32) {
+                    if (tempF.isInvalid()) tempF = state.ra.alloc_range(2);
+                    if ((dst.getOffset() + ne * dst.getHS()) * Tdst > 2 * GRF::bytes(hw)) stub();
+                    auto tmpF = tempF[0].sub(dst.getOffset(), DataType::f)(dst.getHS());
+                    mov(ne, tmpF, src);
+                    src = tmpF;
+                }
+
+                if (canDP4A) {
+                    auto srcDP4A = Tsrc.isSigned() ? srcBase.d()(1) : srcBase.ud()(1);
+                    if (!hReduce && blockSrc->crosspack == 4) {
+                        if (yincL == 4)
+                            dp4a(ne, dst, dst, srcDP4A, state.all1s);
+                        else if (yincL == 1)
+                            add(ne, dst, srcBase(4), dst);
+                        else if (hw == HW::XeHPC) {
+                            // Workaround, some issue with dp4a with immediates
+                            // TODO: hoist immediate out of inner-loop
+                            if (imm.isInvalid()) imm = state.ra.alloc_sub(Tdst.ngen());
+                            mov(1, imm, 0x01010101 & ((1 << (yincL * 8)) - 1));
+                            dp4a(ne, dst, dst, srcDP4A, imm);
+                        } else
+                            dp4a(ne, dst, dst, srcDP4A, 0x01010101 & ((1 << (yincL * 8)) - 1));
+                    } else if (hReduce && blockSrc->crosspack == 1) {
+                        if (Tsrc.isSigned())
+                            dp4a(ne, dst, dst, srcDP4A, state.all1s);
+                        else {
+                            // Workaround for suspected HW issue.
+                            dst.setType(DataType::ud);
+                            dp4a(ne, dst, dst, srcDP4A, state.all1s.ud());
+                        }
+                    }
+                } else {
+                    if (one_of(src.getType(), {DataType::b, DataType::ub}) && Tdst.isFP() != Tsrc.isFP()) {
+                        // all ISAs reject eadd(fp, fp, int8); int8 -> int32 -> fp:
+                        if (Tdst != Type::f32) stub();
+                        if (temp.isInvalid()) temp = state.ra.alloc_range(2);
+                        Type Td = (Tsrc.isSigned()) ? Type::s32 : Type::u32;
+                        auto src_d = temp[0].sub(0, Td.ngen())(1);
+                        auto src_fp = temp[1].sub(0, Tdst.ngen())(1);
+                        mov(ne, src_d, src);
+                        mov(ne, src_fp, src_d);
+                        src = src_fp;
+                    }
+                    // src0: src1 rejects bytes and (Xe3p) non-flat regions.
+                    eadd(ne, dst, src, dst, strategy, state);
+                }
+            };
+            if (canDP4A) {
+                pending.push_back(emit);
+                if (int(pending.size()) >= nBatch) flush();
+            } else {
+                flush();
+                emit();
             }
 
             x += ne * reduce;
         }
     }
 
+    flush();
     state.ra.safeRelease(temp);
     state.ra.safeRelease(tempF);
+    for (auto &st : stage)
+        state.ra.safeRelease(st);
     state.ra.safeRelease(imm);
 }
 
