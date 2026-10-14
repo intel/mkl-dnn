@@ -456,12 +456,12 @@ status_t create_kernels(const sdpa_full_softmax_conf_t &conf,
         for (int d = 0; d < ndims; ++d)
             if (p_.cond_dims[d] == 1) eff[d] = 0;
         const dim_t cond_row = eff[ndims - 2];
-        auto k = std::make_shared<
-                sdpa_full_softmax_select_ir::select_ir_kernel_t>(
-                /*wseq_kv=*/seq_kv,
-                /*invert_select=*/p_.invert_select,
-                /*scores_row_stride=*/seq_kv,
-                /*cond_row_stride=*/cond_row);
+        std::shared_ptr<jit_generator_t> k(
+                sdpa_full_softmax_select_ir::create_select_ir_kernel(
+                        /*wseq_kv=*/seq_kv,
+                        /*invert_select=*/p_.invert_select,
+                        /*scores_row_stride=*/seq_kv,
+                        /*cond_row_stride=*/cond_row));
         CHECK(k->create_kernel());
         select_kernel_ = std::move(k);
     }

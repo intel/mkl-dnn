@@ -221,14 +221,16 @@ status_t create_kernels(const sdpa_online_softmax_conf_t &conf,
     for (int qi = 0; qi < n_qi; ++qi) {
         const int m = static_cast<int>(q_rows[qi]);
         for (int ki = 0; ki < n_ki; ++ki) {
-            std::unique_ptr<softmax_tile_ir_kernel_t> k(
-                    new softmax_tile_ir_kernel_t(m, static_cast<int>(kv_w[ki]),
-                            p_.has_select, p_.invert_select, cond_stride));
+            std::unique_ptr<jit_generator_t> k(
+                    sdpa_softmax_ir::create_softmax_tile_ir_kernel(m,
+                            static_cast<int>(kv_w[ki]), p_.has_select,
+                            p_.invert_select, cond_stride));
             CHECK(k->create_kernel());
             kernels.softmax_ir_kernel[qi][ki] = std::move(k);
         }
-        std::unique_ptr<acc_renorm_ir_kernel_t> ak(
-                new acc_renorm_ir_kernel_t(m, static_cast<int>(hs_v)));
+        std::unique_ptr<jit_generator_t> ak(
+                sdpa_softmax_ir::create_acc_renorm_ir_kernel(
+                        m, static_cast<int>(hs_v)));
         CHECK(ak->create_kernel());
         kernels.acc_renorm_ir_kernel[qi] = std::move(ak);
     }

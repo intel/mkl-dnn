@@ -29,10 +29,7 @@ namespace cpu {
 namespace x64 {
 
 struct brgemm_kernel_t;
-namespace sdpa_softmax_ir {
-class softmax_tile_ir_kernel_t;
-class acc_renorm_ir_kernel_t;
-} // namespace sdpa_softmax_ir
+class jit_generator_t;
 
 // -----------------------------------------------------------------------------
 // Online/flash-softmax SDPA compute (x64), folded into the CPU primitive.
@@ -141,10 +138,8 @@ struct sdpa_online_softmax_kernels_t {
     // (row count baked from q_blk/q_tail, width from kv_blk/kv_tail); acc_renorm
     // rescales the running output by old_coef and adds the tile's P*V and
     // depends only on the query-block row count ([q_tail?]).
-    std::unique_ptr<sdpa_softmax_ir::softmax_tile_ir_kernel_t>
-            softmax_ir_kernel[2][2];
-    std::unique_ptr<sdpa_softmax_ir::acc_renorm_ir_kernel_t>
-            acc_renorm_ir_kernel[2];
+    std::unique_ptr<jit_generator_t> softmax_ir_kernel[2][2];
+    std::unique_ptr<jit_generator_t> acc_renorm_ir_kernel[2];
 };
 
 // Online-softmax (flash) SDPA compute, folded into the CPU primitive:
