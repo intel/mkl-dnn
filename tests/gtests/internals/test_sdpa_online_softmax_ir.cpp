@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -126,8 +127,9 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileRow) {
     // ragged tail, so the masked-tail path and its lane neutralization run.
     for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
                  4 * simd_w() - 1, 4 * simd_w()}) {
-        softmax_tile_ir_kernel_t kernel(1, w, false, false, -1);
-        ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
+        std::unique_ptr<jit_generator_t> kernel(
+                create_softmax_tile_ir_kernel(1, w, false, false, -1));
+        ASSERT_EQ(kernel->create_kernel(), dnnl_success) << "w=" << w;
 
         std::vector<float> scores(w), ref(w);
         for (int j = 0; j < w; j++) {
@@ -142,7 +144,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileRow) {
 
         float oc = -12345.f;
         softmax_row_args_t args {scores.data(), &scale, &m, &l, &oc};
-        kernel(&args);
+        (*kernel)(&args);
 
         EXPECT_NEAR(m, ref_m, 1e-5f * std::abs(ref_m) + 1e-6f) << "w=" << w;
         EXPECT_NEAR(l, ref_l, 1e-4f * std::abs(ref_l) + 1e-6f) << "w=" << w;
@@ -164,8 +166,9 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineFirstTile) {
     const float neg_inf = -std::numeric_limits<float>::infinity();
     for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
                  4 * simd_w() - 1, 4 * simd_w()}) {
-        softmax_tile_ir_kernel_t kernel(1, w, false, false, -1);
-        ASSERT_EQ(kernel.create_kernel(), dnnl_success) << "w=" << w;
+        std::unique_ptr<jit_generator_t> kernel(
+                create_softmax_tile_ir_kernel(1, w, false, false, -1));
+        ASSERT_EQ(kernel->create_kernel(), dnnl_success) << "w=" << w;
 
         const float scale = 0.125f;
         // Two KV tiles of `w` scores, threaded through one running state that
@@ -182,7 +185,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineFirstTile) {
             ref_softmax_row(ref, scale, ref_m, ref_l, ref_oc);
 
             softmax_row_args_t args {scores.data(), &scale, &m, &l, &oc};
-            kernel(&args);
+            (*kernel)(&args);
 
             EXPECT_NEAR(m, ref_m, 1e-5f * std::abs(ref_m) + 1e-6f)
                     << "w=" << w << " tile=" << tile;
@@ -208,8 +211,9 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     const float scale = 0.125f;
     for (int seq_q : {2, 3, 5}) {
         for (int w : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
-            softmax_tile_ir_kernel_t kernel(seq_q, w, false, false, -1);
-            ASSERT_EQ(kernel.create_kernel(), dnnl_success)
+            std::unique_ptr<jit_generator_t> kernel(
+                    create_softmax_tile_ir_kernel(seq_q, w, false, false, -1));
+            ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " w=" << w;
 
             std::vector<float> scores((size_t)seq_q * w);
@@ -235,7 +239,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
 
             softmax_row_args_t args {
                     scores.data(), &scale, m.data(), l.data(), oc.data()};
-            kernel(&args);
+            (*kernel)(&args);
 
             for (int i = 0; i < seq_q; i++) {
                 EXPECT_NEAR(m[i], ref_m[i], 1e-5f * std::abs(ref_m[i]) + 1e-6f)
@@ -270,9 +274,10 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
         for (int seq_q : {1, 2, 3}) {
             for (int w : {1, 5, 7, simd_w(), 9, 17, 4 * simd_w() - 1,
                          4 * simd_w()}) {
-                softmax_tile_ir_kernel_t kernel(
-                        seq_q, w, true, invert_select, -1);
-                ASSERT_EQ(kernel.create_kernel(), dnnl_success)
+                std::unique_ptr<jit_generator_t> kernel(
+                        create_softmax_tile_ir_kernel(
+                                seq_q, w, true, invert_select, -1));
+                ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                         << "invert_select=" << invert_select
                         << " seq_q=" << seq_q << " w=" << w;
 
@@ -310,7 +315,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
 
                 softmax_row_args_t args {scores.data(), &scale, m.data(),
                         l.data(), oc.data(), cond.data(), &fill};
-                kernel(&args);
+                (*kernel)(&args);
 
                 for (int i = 0; i < seq_q; i++) {
                     EXPECT_NEAR(
@@ -349,8 +354,9 @@ TEST(SdpaOnlineSoftmaxIr, AccRenormTile) {
         // Head sizes span pure tails, exact multiples, and multiples plus a
         // ragged tail, so the masked-tail path runs.
         for (int hs : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
-            acc_renorm_ir_kernel_t kernel(seq_q, hs);
-            ASSERT_EQ(kernel.create_kernel(), dnnl_success)
+            std::unique_ptr<jit_generator_t> kernel(
+                    create_acc_renorm_ir_kernel(seq_q, hs));
+            ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " hs=" << hs;
 
             std::vector<float> acc((size_t)seq_q * hs);
@@ -377,7 +383,7 @@ TEST(SdpaOnlineSoftmaxIr, AccRenormTile) {
             }
 
             acc_renorm_args_t args {acc.data(), pv.data(), oc.data()};
-            kernel(&args);
+            (*kernel)(&args);
 
             for (int i = 0; i < seq_q; i++)
                 for (int j = 0; j < hs; j++)
