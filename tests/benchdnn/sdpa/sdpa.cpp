@@ -221,6 +221,17 @@ void prb_t::skip_unimplemented(res_t *res) const {
     skip_unimplemented_data_type(
             {prb->q_dt(), prb->k_dt(), prb->v_dt(), prb->dst_dt()}, prb->dir,
             res);
+
+    // SDPA is currently only implemented for GPU.
+    if (is_cpu()) {
+        res->state = SKIPPED;
+        res->reason = reason_t::skip_not_supported;
+        return;
+    }
+
+    // No fallback implementation: skip cases the device does not support
+    res->state = SKIPPED;
+    res->reason = reason_t::skip_not_supported;
 }
 
 void prb_t::skip_invalid(res_t *res) const {
