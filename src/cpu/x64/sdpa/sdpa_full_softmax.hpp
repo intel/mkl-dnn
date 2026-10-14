@@ -34,12 +34,10 @@ namespace cpu {
 namespace x64 {
 
 struct brgemm_kernel_t;
+class jit_generator_t;
 namespace softmax_impl {
 struct jit_softmax_kernel_base_t;
 } // namespace softmax_impl
-namespace sdpa_full_softmax_select_ir {
-class select_ir_kernel_t;
-} // namespace sdpa_full_softmax_select_ir
 
 // -----------------------------------------------------------------------------
 // SDPA with softmax over the complete key axis (x64):
@@ -220,8 +218,7 @@ struct sdpa_full_softmax_kernels_t {
     // Standalone JIT select-mask pre-pass kernel (null unless a select mask is
     // present and not folded into mm1); the condition is dense along seq_kv
     // (cond_col == 1, guaranteed by the pd).
-    std::shared_ptr<sdpa_full_softmax_select_ir::select_ir_kernel_t>
-            select_kernel;
+    std::shared_ptr<jit_generator_t> select_kernel;
 };
 
 // Query-blocked SDPA with softmax over the complete key axis, folded into the
