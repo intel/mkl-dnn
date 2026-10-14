@@ -150,6 +150,30 @@ void Generator<hw>::accumulateSum(bool column,
                 neMax /= 2;
             auto ne = std::min({nsrc / reduce, ndst, neMax});
 
+            // With hReduce, dp4a accumulates partial sums that are all added
+            // together later (horizontalAdd), so any partial slot of the same
+            // row/column will do. Where src1 cannot be shifted relative to dst
+            // (Xe3p), pick a slot whose offset matches the source; this
+            // avoids the staging copy.
+            bool dp4aDirect = canDP4A && hReduce && !canSwizzle(hw, Tsrc) && ne > 1
+                    && blockSrc->crosspack == 1 && blockDst->crosspack == 1;
+            if (dp4aDirect && srcBase.getByteOffset() != dstBase.getByteOffset()) {
+                int np = cm ? dstLayout.rows() : dstLayout.cols();
+                for (int p = 0; p + ne <= np; p++) {
+                    int nalt;
+                    const RegisterBlock *blockAlt;
+                    auto alt = dstLayout.find(cm ? p : idst, cm ? jdst : p, dstRegs, &nalt, &blockAlt);
+                    if (nalt >= ne && blockAlt->crosspack == 1
+                            && alt.getByteOffset() == srcBase.getByteOffset()) {
+                        dstBase = alt;
+                        blockDst = blockAlt;
+                        break;
+                    }
+                }
+            }
+
+            dp4aDirect = dp4aDirect && (srcBase.getByteOffset() == dstBase.getByteOffset());
+
             auto src = srcBase(blockSrc->crosspack);
             auto dst = dstBase(blockDst->crosspack);
 
@@ -157,7 +181,7 @@ void Generator<hw>::accumulateSum(bool column,
             if (Tsrc == Type::bf16 && Tdst == Type::f32)
                 hsMatch = (src.getHS() == 1) && (dst.getHS() == 1);
 
-            if (!canSwizzle(hw, Tsrc) && ne > 1 && (srcBase.getOffset() != dstBase.getOffset() || !hsMatch)) {
+            if (!canSwizzle(hw, Tsrc) && !dp4aDirect && ne > 1 && (srcBase.getOffset() != dstBase.getOffset() || !hsMatch)) {
                 if (nStaged == int(stage.size())) {
                     if (int(stage.size()) < nBatch) {
                         auto r = stage.empty() ? state.ra.alloc_range(2) : state.ra.try_alloc_range(2);
