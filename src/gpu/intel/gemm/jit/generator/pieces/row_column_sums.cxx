@@ -121,8 +121,12 @@ void Generator<hw>::accumulateSum(bool column,
     std::vector<GRFRange> stage;
     int nStaged = 0;
     std::vector<std::function<void()>> pending;
+    // dp4a accumulations commute. Emit even entries first, then odd ones, to
+    // spread out consecutive updates of the same partial-sum register.
     auto flush = [&]() {
-        for (auto &f : pending) f();
+        for (int par = 0; par < 2; par++)
+            for (size_t i = par; i < pending.size(); i += 2)
+                pending[i]();
         pending.clear();
         nStaged = 0;
     };
@@ -271,7 +275,7 @@ void Generator<hw>::accumulateSum(bool column,
             };
             if (canDP4A) {
                 pending.push_back(emit);
-                if (int(pending.size()) >= nBatch) flush();
+                if (int(pending.size()) >= 2 * nBatch) flush();
             } else {
                 flush();
                 emit();
