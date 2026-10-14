@@ -143,11 +143,13 @@ void Generator<hw>::accumulateSum(bool column,
                 if (temp.isInvalid()) {
                     temp = state.ra.alloc_range(2);
                 }
-                zeroMatrix(temp, strategy);
                 auto srcI = src;
                 int tmpHS = std::max<int>(1, ((blockDst->crosspack * Tdst) / Tsrc) / reduce);
                 if (Tsrc == Type::bf16 && Tdst == Type::f32)
                     tmpHS = blockDst->crosspack;
+                // A unit-stride copy covers exactly what the consumer reads.
+                // Only a strided one leaves holes that must be zeroed first.
+                if (tmpHS > 1) zeroMatrix(temp, strategy);
                 auto tmpBase = temp[0].sub(dst.getByteOffset() / Tsrc.real(), src.getType());
                 auto tmp = tmpBase(tmpHS);
                 auto tmpI = tmp;
