@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include "gpu/intel/gemm/config.hpp"
+#include "gpu/intel/primitive_attr.hpp"
 #include "gpu/intel/primitive_conf.hpp"
 
 namespace dnnl {
@@ -28,6 +29,17 @@ int append_post_ops_to_arg_list(const exec_args_t &args,
         const post_ops_t &post_ops, memory_desc_wrapper dst_mdw) {
     return intel::append_post_ops_to_arg_list_base(
             args, arg_list, post_op_idx, post_ops, dst_mdw);
+}
+
+int kernel_rank(const primitive_attr_t *attr) {
+    auto *gpu_attr = utils::downcast<const gpu_primitive_attr_t *>(
+            attr->gpu_attr_.get());
+    if (!gpu_attr) return -1;
+    const auto &s = gpu_attr->kernel_override();
+    // <=9 digits always fit int, so std::stoi cannot overflow.
+    bool is_rank = !s.empty() && s.size() <= 9
+            && s.find_first_not_of("0123456789") == std::string::npos;
+    return is_rank ? std::stoi(s) : -1;
 }
 
 } // namespace gemm

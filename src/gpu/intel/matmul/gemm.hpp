@@ -391,6 +391,12 @@ struct gemm_t : public primitive_t {
             return status::success;
         }
 
+        status_t query(query_t what, int idx, void *result) const override {
+            if (what == query::gpu_kernel_count && gemm_pd_)
+                return gemm_pd_->query(what, idx, result);
+            return matmul::pd_t::query(what, idx, result);
+        }
+
         std::shared_ptr<primitive_desc_t> gemm_pd_;
         sum_ab_t sum_ab_ = sum_ab::sum_none;
         data_type_t sum_ab_type_ = data_type::undef;

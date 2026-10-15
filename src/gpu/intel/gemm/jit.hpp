@@ -322,10 +322,22 @@ struct gen_t : public primitive_t {
                 kernel_desc_.set_efficient_64b(dev_info_->is_efficient_64bit());
 
             bool kernel_success = false;
+            // Kernel override: bare int = Nth candidate after sort (rank);
+            // else strategy string.
+            int index = -1;
             if (is_dev_mode() && attr()->gpu_attr_) {
                 auto *gpu_attr = utils::downcast<gpu_primitive_attr_t *>(
                         attr()->gpu_attr_.get());
-                kernel_desc_.set_kernel_override(gpu_attr->kernel_override());
+                // GEMM_KERNEL would replace the attribute override.
+                bool has_env
+                        = !gpu_utils::dev_getenv("GEMM_KERNEL", std::string())
+                                   .empty();
+                VDISPATCH_GEMM(!has_env || gpu_attr->kernel_override().empty(),
+                        "kernel override conflicts with GEMM_KERNEL");
+                index = kernel_rank(attr());
+                if (index < 0)
+                    kernel_desc_.set_kernel_override(
+                            gpu_attr->kernel_override());
             }
             auto lda = ld(DNNL_ARG_A);
             auto ldb = ld(DNNL_ARG_B);
@@ -333,11 +345,17 @@ struct gen_t : public primitive_t {
             auto entries = kernel_desc_.select_kernel(*dev_info_, mode, problem,
                     alpha(), beta(), m, n, d->k(), lda, ldb, d->ldc(),
                     d->batch());
+            kernel_count_ = (int)entries.size();
+
+            if (index >= 0)
+                VDISPATCH_GEMM(index < (int)entries.size(),
+                        "kernel index out of range");
 
             for (size_t entry_idx = 0; entry_idx < entries.size();
                     entry_idx++) {
                 auto *entry = entries[entry_idx];
                 int g = (int)(entry - jit::catalog().entries);
+                if (index >= 0 && (int)entry_idx != index) continue;
                 auto skip = [&](const char *why) {
                     gpu_debug() << "[" << lpad(g, 4) << "] skip " << entry_idx
                                 << "/" << entries.size() << " " << entry->str()
@@ -420,7 +438,8 @@ struct gen_t : public primitive_t {
                         if (kernel_desc_.has_entry())
                             gpu_info() << "[" << lpad(g, 4) << "] use "
                                        << entry_idx << "/" << entries.size()
-                                       << " " << kernel_desc_.str();
+                                       << (index >= 0 ? " pin" : "") << " "
+                                       << kernel_desc_.str();
                         else
                             gpu_info()
                                     << "[override] use " << kernel_desc_.str();
@@ -443,6 +462,10 @@ struct gen_t : public primitive_t {
             switch ((int)what) {
                 case (int)query::preferred_gpu_grf_per_thread: {
                     *(int *)result = kernel_desc_.driver_info()->grfCount;
+                    break;
+                }
+                case (int)query::gpu_kernel_count: {
+                    *(int *)result = kernel_count_;
                     break;
                 }
                 default: return gemm::pd_t::query(what, idx, result);
@@ -631,6 +654,7 @@ struct gen_t : public primitive_t {
         compute::gpu_arch_t arch_ = compute::gpu_arch_t::unknown;
 
         kernel_desc_t kernel_desc_;
+        int kernel_count_ = 0;
     };
 
     gen_t(const pd_t *apd) : primitive_t(apd) {}

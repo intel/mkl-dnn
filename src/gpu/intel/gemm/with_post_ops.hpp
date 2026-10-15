@@ -44,7 +44,9 @@ struct with_post_ops_t : public primitive_t {
             return use_scratchpad_with_post_op_worker;
         }
         status_t query(query_t what, int idx, void *result) const override {
-            if (!pd_) return gemm::pd_t::query(what, idx, result);
+            // Ranks are rejected here, so do not report the nested count.
+            if (!pd_ || what == query::gpu_kernel_count)
+                return gemm::pd_t::query(what, idx, result);
             return pd_->query(what, idx, result);
         }
 

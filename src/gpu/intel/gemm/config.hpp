@@ -34,6 +34,9 @@ int append_post_ops_to_arg_list(const impl::exec_args_t &args,
         compute::kernel_arg_list_t &arg_list, int post_op_idx,
         const post_ops_t &post_ops, memory_desc_wrapper dst_mdw);
 
+// Candidate rank if the kernel override is a bare integer, else -1.
+int kernel_rank(const primitive_attr_t *attr);
+
 } // namespace gemm
 } // namespace intel
 } // namespace gpu
