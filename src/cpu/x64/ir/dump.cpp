@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iomanip>
+#include <limits>
 #include <vector>
 
 #include "oneapi/dnnl/dnnl_debug.h"
@@ -57,6 +58,7 @@ const char *kind_name(op_kind_t kind) {
         case op_kind_t::vcmp_ne_zero: return "vcmp_ne_zero";
         case op_kind_t::vblend: return "vblend";
         case op_kind_t::vbcast: return "vbcast";
+        case op_kind_t::vbcast_imm: return "vbcast_imm";
         case op_kind_t::vhreduce: return "vhreduce";
         case op_kind_t::vhreduce_max: return "vhreduce_max";
         case op_kind_t::veltwise: return "veltwise";
@@ -229,6 +231,25 @@ std::string postops_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
     return s;
 }
 
+// Formats a vbcast_imm immediate as a concise value plus its raw bit pattern.
+std::string vbcast_imm_str(const ir_t &ir, const op_t &op) {
+    ostringstream_t ss;
+    const auto dt = ir.vreg_info()[(int)op.dst].dt;
+    if (dt == data_type::f32) {
+        const int imm = (int)op.imm;
+        ss << std::defaultfloat
+           << std::setprecision(std::numeric_limits<float>::max_digits10)
+           << int2float(imm) << " (0x" << std::hex << std::setw(8)
+           << std::setfill('0') << (uint32_t)imm << ")";
+    } else {
+        // Add other data types here if needed.
+        ss << op.imm;
+        ss << " (0x" << std::hex << std::setw(2 * (int)sizeof(op.imm))
+           << std::setfill('0') << op.imm << ")";
+    }
+    return ss.str();
+}
+
 // Returns the text of one operation, without index or indentation. Every kind
 // prints as its name followed by its operands, except the control-flow
 // markers. A loop or a conditional prints as an opening and a closing brace,
@@ -258,6 +279,8 @@ std::string op_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
         case op_kind_t::vcmp_ne_zero:
         case op_kind_t::vhreduce:
         case op_kind_t::vhreduce_max: return k + r(op.dst) + ", " + r(op.s0);
+        case op_kind_t::vbcast_imm:
+            return k + r(op.dst) + ", " + vbcast_imm_str(ir, op);
         case op_kind_t::load: return k + r(op.dst) + ", " + mem(vreg_t::none);
         case op_kind_t::vzero:
         case op_kind_t::veltwise: return k + r(op.dst);

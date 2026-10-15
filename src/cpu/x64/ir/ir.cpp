@@ -19,6 +19,8 @@
 
 #include "common/z_magic.hpp"
 
+#include "common/utils.hpp"
+
 #include "cpu/x64/ir/ir.hpp"
 
 namespace dnnl {
@@ -231,6 +233,14 @@ void ir_t::vbcast(vreg_t dst, vreg_t src) {
     op.kind = op_kind_t::vbcast;
     op.dst = dst;
     op.s0 = src;
+    ops_.push_back(op);
+}
+
+void ir_t::vbcast_imm(vreg_t dst, float value) {
+    op_t op;
+    op.kind = op_kind_t::vbcast_imm;
+    op.dst = dst;
+    op.imm = float2int(value);
     ops_.push_back(op);
 }
 
@@ -514,6 +524,7 @@ void ir_t::def_use(
             u(op.s0);
             d(op.dst);
             break;
+        case op_kind_t::vbcast_imm: d(op.dst); break;
         case op_kind_t::vhreduce: // the workspace is only written
         case op_kind_t::vhreduce_max:
             u(op.dst);

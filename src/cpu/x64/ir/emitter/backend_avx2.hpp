@@ -188,6 +188,15 @@ struct avx2_backend_t {
         else { JIT_ASSERT(!"vbcast: dtype not implemented"); }
     }
 
+    // Broadcast a constant written into the data section.
+    void vbcast_imm(int d, uint32_t bits, data_section_t &data) {
+        std::vector<unsigned char> bytes(sizeof(bits));
+        std::memcpy(bytes.data(), &bits, sizeof(bits));
+        data.constants.emplace_back(std::move(bytes), Xbyak::Label());
+        Xbyak::Label &lbl = data.constants.back().second;
+        gen().vbroadcastss(Xbyak::Ymm(d), gen().ptr[gen().rip + lbl]);
+    }
+
     // dst += a * b. The multiplicand dtype `src_dt` selects the instruction.
     // f32 inputs use `vfmadd231ps`. The accumulator (dst) is always f32.
     void vdot(int d, int a, int b, data_type_t src_dt) {
