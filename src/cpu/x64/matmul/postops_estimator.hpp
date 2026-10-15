@@ -55,6 +55,8 @@ public:
 
 private:
     using po_injector_t = injector::jit_uni_postops_injector_t<Xbyak::Zmm>;
+    std::unique_ptr<fp8_conversion_e5m2_t> f8_e5m2_cvt_;
+    std::unique_ptr<fp8_conversion_e4m3_t> f8_e4m3_cvt_;
     std::unique_ptr<po_injector_t> postops_injector_;
     static constexpr size_t mean_none_vec_code_bytes = 8;
     static constexpr size_t mean_vec_inst_bytes = 7;
@@ -63,6 +65,16 @@ private:
         : jit_generator_t("dummy_generator",
                   impl::cpu::x64::cpu_isa_t::avx512_core_amx) {
         auto dsc = memory_desc_wrapper(dst_md);
+
+        // Binary post-ops with fp8 src1 require converters. Their lookup
+        // tables are not emitted since the generated code is never executed.
+        f8_e5m2_cvt_ = utils::make_unique<fp8_conversion_e5m2_t>(this,
+                Xbyak::Zmm(31), Xbyak::Zmm(30), Xbyak::Zmm(29),
+                Xbyak::Opmask(2), this->r12);
+        f8_e4m3_cvt_ = utils::make_unique<fp8_conversion_e4m3_t>(this,
+                Xbyak::Zmm(31), Xbyak::Zmm(30), Xbyak::Zmm(29), Xbyak::Zmm(28),
+                Xbyak::Zmm(27), this->r12);
+
         const dnnl::impl::cpu::x64::binary_injector::rhs_arg_static_params_t
                 rhs_sp(Xbyak::Zmm(1).getIdx(), this->r14, this->r15, this->r13,
                         false, false, static_cast<size_t>(0),
@@ -73,7 +85,7 @@ private:
                 this->param1,
                 dnnl::impl::cpu::x64::binary_injector::
                         get_all_strategies_supported_by_injector(),
-                rhs_sp, nullptr, nullptr);
+                rhs_sp, f8_e5m2_cvt_.get(), f8_e4m3_cvt_.get());
 
         dnnl::impl::cpu::x64::eltwise_injector::static_params_t esp;
         esp.preserve_vmm = false;

@@ -193,6 +193,9 @@ struct fp8_conversion_e4m3_t : public fp8_conversion_base_t {
             const Xbyak::Reg64 &reg_data_in, const Xbyak::Reg64 &reg_stride_in,
             const Xbyak::Reg64 &reg_data_out) override;
 
+    void bcst_f8_to_f32(
+            const Xbyak::Xmm &xmm_out, const Xbyak::Operand &op_in) override;
+
 private:
     // Load table values from 128 consecutive bytes at given address.
     // Input Zmm register holds table lookup indices.

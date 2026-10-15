@@ -526,6 +526,19 @@ void fp8_conversion_e4m3_t::vcvt_f8_to_f32(
     host_->vcvtph2psx(zmm_out, ymm_out);
 }
 
+void fp8_conversion_e4m3_t::bcst_f8_to_f32(
+        const Xbyak::Xmm &xmm_out, const Xbyak::Operand &op_in) {
+    if (is_fp8_native()) {
+        fp8_conversion_base_t::bcst_f8_to_f32(xmm_out, op_in);
+        return;
+    }
+    // The output may alias an aux register, which the emulation overwrites
+    // before reading its input. Broadcast into the register the memory
+    // operand path loads into instead.
+    host_->vpbroadcastb(xmm_aux3_, op_in);
+    vcvt_f8_to_f32(xmm_out, xmm_aux3_);
+}
+
 void fp8_conversion_e4m3_t::vcvt_f8_to_bf16_vnni_block(int num_rows,
         const Xbyak::Reg64 &reg_data_in, const Xbyak::Reg64 &reg_stride_in,
         const Xbyak::Reg64 &reg_data_out) {
