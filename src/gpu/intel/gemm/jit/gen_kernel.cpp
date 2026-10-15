@@ -202,9 +202,8 @@ status_t gen_desc_t::apply_kernel_override(
                             int(utils::div_up(k_, aux_params_.k0))));
         }
     } catch (const std::exception &e) {
-        gpu_error_not_expected()
-                << "jit::gemm kernel override rejected: " << e.what() << ","
-                << ovr_strategy;
+        gpu_warning() << "jit::gemm kernel override rejected: " << e.what()
+                      << "," << ovr_strategy;
         return status::unimplemented;
     }
     return status::success;
