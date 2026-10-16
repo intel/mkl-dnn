@@ -272,12 +272,17 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 }
 
 status_t brgemm_sdpa_fwd_t::init(engine_t *engine) {
+    const auto isa = mayiuse(avx512_core) ? avx512_core : avx2;
+
     if (pd()->impl_kind() == sdpa_impl_kind_t::online_softmax) {
         return sdpa_online_softmax::create_kernels(
-                pd()->online_softmax_conf(), engine, online_kernels_);
+                isa, pd()->online_softmax_conf(), engine, online_kernels_);
+    } else {
+        return sdpa_full_softmax::create_kernels(isa, pd()->full_softmax_conf(),
+                pd()->full_softmax_descs(), engine, full_kernels_);
     }
-    return sdpa_full_softmax::create_kernels(pd()->full_softmax_conf(),
-            pd()->full_softmax_descs(), engine, full_kernels_);
+    assert(!"Unknown SDPA implementation kind");
+    return status::unimplemented;
 }
 
 status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
