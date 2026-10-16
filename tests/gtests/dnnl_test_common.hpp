@@ -738,12 +738,19 @@ bool catch_expected_failures(const F &f, bool expect_to_fail,
         // Rethrow the exception if it is not expected or the error status did
         // not match.
         if (!(expect_to_fail) || e.status != (expected_status)) {
-            // Ignore unimplemented
-            if (ignore_unimplemented && (e.status == dnnl_unimplemented)) {
-                // Print unimplemented but do not treat as error
-                std::cout << "(" << filename << ":" << line_num << ") "
-                          << "[  UNIMPL  ] " << "Implementation not found"
-                          << std::endl;
+            // Ignore unimplemented and unsupported data type
+            if (ignore_unimplemented
+                    && (e.status == dnnl_unimplemented
+                            || e.status == dnnl_unsupported_data_type)) {
+                // Print the reason but do not treat as error
+                std::cout
+                        << "(" << filename << ":" << line_num << ") "
+                        << "[  UNIMPL  ] "
+                        << (e.status == dnnl_unsupported_data_type
+                                           ? "Data type not supported on this "
+                                             "platform"
+                                           : "Implementation not found")
+                        << std::endl;
                 reset_failed_malloc_counter();
                 return true;
             } else if (test_out_of_memory()
