@@ -65,6 +65,8 @@ typedef enum {
     dnnl_invalid_shape = 9,
     /// The data type cannot be inferred or compiled
     dnnl_invalid_data_type = 10,
+    /// The data type is not supported by the hardware
+    dnnl_unsupported_data_type = 11,
 } dnnl_status_t;
 
 /// @} dnnl_api_utils

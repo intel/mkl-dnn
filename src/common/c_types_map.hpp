@@ -50,6 +50,7 @@ const status_t unimplemented = dnnl_unimplemented;
 const status_t last_impl_reached = dnnl_last_impl_reached;
 const status_t runtime_error = dnnl_runtime_error;
 const status_t not_required = dnnl_not_required;
+const status_t unsupported_data_type = dnnl_unsupported_data_type;
 } // namespace status
 
 using prop_kind_t = dnnl_prop_kind_t;

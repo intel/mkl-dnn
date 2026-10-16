@@ -153,6 +153,8 @@ enum class status {
     invalid_shape = dnnl_invalid_shape,
     /// The data type cannot be inferred or compiled
     invalid_data_type = dnnl_invalid_data_type,
+    /// The data type is not supported by the hardware
+    unsupported_data_type = dnnl_unsupported_data_type,
 };
 
 /// @} dnnl_graph_api_status

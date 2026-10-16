@@ -49,6 +49,7 @@ const status_t invalid_graph = dnnl_invalid_graph;
 const status_t invalid_graph_op = dnnl_invalid_graph_op;
 const status_t invalid_shape = dnnl_invalid_shape;
 const status_t invalid_data_type = dnnl_invalid_data_type;
+const status_t unsupported_data_type = dnnl_unsupported_data_type;
 } // namespace status
 
 using data_type_t = dnnl_data_type_t;
