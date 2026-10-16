@@ -156,7 +156,7 @@ status_t configure(const sdpa_online_softmax_params_t &params,
 // JIT-compile the BRGEMM + IR-softmax kernels from a conf produced by
 // configure(), into `kernels`. The engine is unused today (kept for interface
 // parity with the full-softmax path / future engine-dependent kernel selection).
-status_t create_kernels(const sdpa_online_softmax_conf_t &conf,
+status_t create_kernels(cpu_isa_t isa, const sdpa_online_softmax_conf_t &conf,
         engine_t *engine, sdpa_online_softmax_kernels_t &kernels);
 
 // Run the online-softmax SDPA. scratch_base points at a buffer of at least

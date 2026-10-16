@@ -36,14 +36,6 @@ namespace cpu {
 namespace x64 {
 namespace sdpa_softmax_ir {
 
-inline cpu_isa_t isa() {
-    return mayiuse(avx512_core) ? avx512_core : avx2;
-}
-
-inline int simd_w() {
-    return isa_max_vlen(isa()) / (int)sizeof(float);
-}
-
 // Arguments for the online-softmax tile epilogue kernel. A tile of `seq_q`
 // score rows of `w` elements each is updated in place; per row, the running
 // max/denominator and the tile's renormalization coefficient are read and
@@ -80,13 +72,15 @@ struct acc_renorm_args_t {
 // create_kernel() on the result, then invoke via operator()(const
 // softmax_row_args_t *). Returns the generic jit_generator_t base so the
 // concrete kernel stays private to the .cpp (mirroring brgemm_ir.cpp).
-DNNL_API jit_generator_t *create_softmax_tile_ir_kernel(int seq_q, int w,
-        bool has_select, bool invert_select, int cond_row_stride);
+DNNL_API jit_generator_t *create_softmax_tile_ir_kernel(cpu_isa_t isa,
+        int seq_q, int w, bool has_select, bool invert_select,
+        int cond_row_stride);
 
 // Creates the accumulator renormalization kernel (acc = old_coef*acc + pv) for
 // a tile of `seq_q` rows of head size `hs`. Call create_kernel(), then invoke
 // via operator()(const acc_renorm_args_t *).
-DNNL_API jit_generator_t *create_acc_renorm_ir_kernel(int seq_q, int hs);
+DNNL_API jit_generator_t *create_acc_renorm_ir_kernel(
+        cpu_isa_t isa, int seq_q, int hs);
 
 } // namespace sdpa_softmax_ir
 } // namespace x64

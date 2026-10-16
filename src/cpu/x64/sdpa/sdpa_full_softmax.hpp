@@ -203,7 +203,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 // JIT-compile the BRGEMM + softmax kernels from a conf + descs produced by
 // configure(), into `kernels`. The engine instantiates the reused jit softmax
 // kernel; the execute path stays engine-free.
-status_t create_kernels(const sdpa_full_softmax_conf_t &conf,
+status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_descs_t &descs, engine_t *engine,
         sdpa_full_softmax_kernels_t &kernels);
 

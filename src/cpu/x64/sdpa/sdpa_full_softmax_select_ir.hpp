@@ -37,14 +37,6 @@ namespace cpu {
 namespace x64 {
 namespace sdpa_full_softmax_select_ir {
 
-inline cpu_isa_t isa() {
-    return mayiuse(avx512_core) ? avx512_core : avx2;
-}
-
-inline int simd_w() {
-    return isa_max_vlen(isa()) / (int)sizeof(float);
-}
-
 // Arguments for the select pre-pass kernel. A tile of `n_rows` score rows of
 // `w` elements each (the kernel bakes `w`) is updated in place; a masked-out
 // key's score is replaced with `fill`. `scores` points at query 0, key 0.
@@ -67,8 +59,8 @@ struct select_row_args_t {
 // cond == 0. Call create_kernel() on the result, then invoke via
 // operator()(const select_row_args_t *). Returns the generic jit_generator_t
 // base so the concrete kernel stays private to the .cpp (mirroring brgemm_ir.cpp).
-jit_generator_t *create_select_ir_kernel(dim_t w, bool invert_select,
-        dim_t scores_row_stride, dim_t cond_row_stride);
+jit_generator_t *create_select_ir_kernel(cpu_isa_t isa, dim_t w,
+        bool invert_select, dim_t scores_row_stride, dim_t cond_row_stride);
 
 } // namespace sdpa_full_softmax_select_ir
 } // namespace x64

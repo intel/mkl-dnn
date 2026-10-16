@@ -46,9 +46,11 @@ namespace {
 // (vload_widen -> vcmp_ne_zero) -> vblend the broadcast `fill` into the masked-out
 // lanes -> store scores. With `invert_select` false, keep scores where
 // `cond != 0`; with it true, keep scores where `cond == 0`.
-inline ir::ir_t build_select_ir(dim_t w, bool invert_select,
+ir::ir_t build_select_ir(cpu_isa_t isa, dim_t w, bool invert_select,
         dim_t scores_row_stride, dim_t cond_row_stride) {
     using namespace ir;
+
+    const int simd_w = isa_max_vlen(isa) / (int)sizeof(float);
 
     ir_t ir;
 
@@ -64,8 +66,8 @@ inline ir::ir_t build_select_ir(dim_t w, bool invert_select,
     const vreg_t rows = ir.new_gpr();
     ir.load_param(rows, offsetof(select_row_args_t, n_rows));
 
-    const dim_t n_blk = w / simd_w();
-    const int tail = static_cast<int>(w % simd_w());
+    const dim_t n_blk = w / simd_w;
+    const int tail = static_cast<int>(w % simd_w);
     // One mask, reused by every masked tail op and every row, active for `tail`.
     vreg_t mask = vreg_t::none;
     if (tail) {
@@ -73,7 +75,7 @@ inline ir::ir_t build_select_ir(dim_t w, bool invert_select,
         ir.set_mask_imm(mask, tail);
     }
 
-    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
     const dim_t tail_off = n_blk * vbytes;
 
     // Apply the select mask to the single row at the current pointers.
@@ -116,8 +118,8 @@ inline ir::ir_t build_select_ir(dim_t w, bool invert_select,
         };
 
         for (dim_t b = 0; b < n_blk; ++b)
-            apply_block(b * vbytes, b * simd_w(), simd_w(), vreg_t::none);
-        if (tail) apply_block(tail_off, (dim_t)n_blk * simd_w(), tail, mask);
+            apply_block(b * vbytes, b * simd_w, simd_w, vreg_t::none);
+        if (tail) apply_block(tail_off, (dim_t)n_blk * simd_w, tail, mask);
 
         // Advance to the next row. The last iteration's advance is harmless
         // (the pointers are not read again).
@@ -136,9 +138,10 @@ inline ir::ir_t build_select_ir(dim_t w, bool invert_select,
 // allocation and emission pipeline.
 class select_ir_kernel_t : public jit_generator_t {
 public:
-    select_ir_kernel_t(dim_t w, bool invert_select, dim_t scores_row_stride,
-            dim_t cond_row_stride)
-        : jit_generator_t("sdpa_full_softmax_select_ir", isa())
+    select_ir_kernel_t(cpu_isa_t isa, dim_t w, bool invert_select,
+            dim_t scores_row_stride, dim_t cond_row_stride)
+        : jit_generator_t("sdpa_full_softmax_select_ir", isa)
+        , isa_(isa)
         , w_(w)
         , scores_row_stride_(scores_row_stride)
         , cond_row_stride_(cond_row_stride)
@@ -152,11 +155,12 @@ public:
 protected:
     void generate() override {
         auto ir = build_select_ir(
-                w_, invert_select_, scores_row_stride_, cond_row_stride_);
+                isa_, w_, invert_select_, scores_row_stride_, cond_row_stride_);
         generate_kernel(*this, ir);
     }
 
 private:
+    cpu_isa_t isa_;
     dim_t w_;
     dim_t scores_row_stride_;
     dim_t cond_row_stride_;
@@ -165,10 +169,10 @@ private:
 
 } // namespace
 
-jit_generator_t *create_select_ir_kernel(dim_t w, bool invert_select,
-        dim_t scores_row_stride, dim_t cond_row_stride) {
+jit_generator_t *create_select_ir_kernel(cpu_isa_t isa, dim_t w,
+        bool invert_select, dim_t scores_row_stride, dim_t cond_row_stride) {
     return new select_ir_kernel_t(
-            w, invert_select, scores_row_stride, cond_row_stride);
+            isa, w, invert_select, scores_row_stride, cond_row_stride);
 }
 
 } // namespace sdpa_full_softmax_select_ir

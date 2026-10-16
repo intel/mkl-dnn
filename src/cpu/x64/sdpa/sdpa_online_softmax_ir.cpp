@@ -74,13 +74,15 @@ namespace {
 // once; the mask vreg stays live across all rows (masked ops assert it is never
 // spilled). `cond_row_stride` is the condition tensor's row stride in elements;
 // < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
-inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
-        bool invert_select = false, int cond_row_stride = -1) {
+ir::ir_t build_softmax_tile_ir(cpu_isa_t isa, int seq_q, int w,
+        bool has_select = false, bool invert_select = false,
+        int cond_row_stride = -1) {
     using namespace ir;
 
-    const int n_blk = w / simd_w();
-    const int tail = w % simd_w();
-    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
+    const int simd_w = isa_max_vlen(isa) / (int)sizeof(float);
+    const int n_blk = w / simd_w;
+    const int tail = w % simd_w;
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
     const dim_t tail_off = n_blk * vbytes;
     const dim_t fsz = (dim_t)sizeof(float);
     const dim_t cond_stride = cond_row_stride < 0 ? w : cond_row_stride;
@@ -177,7 +179,7 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
             vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
             ir.vmul(blk, scale_bc);
-            blk = apply_select(blk, (dim_t)b * simd_w(), simd_w());
+            blk = apply_select(blk, (dim_t)b * simd_w, simd_w);
             ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
             ir.vmax(rmax, blk);
         }
@@ -185,7 +187,7 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
             vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
             ir.vmul(blk, scale_bc);
-            blk = apply_select(blk, (dim_t)n_blk * simd_w(), tail);
+            blk = apply_select(blk, (dim_t)n_blk * simd_w, tail);
             ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
             // Unused lanes take m_old so they never win the max.
             const vreg_t tmax = ir.new_vec(data_type::f32);
@@ -306,12 +308,13 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
 // row per iteration. old_coef is broadcast so the per-row scalar reuses the
 // vector ops; no reduction is needed, so the tail needs no lane neutralization
 // (masked ld/st touch only the active columns).
-inline ir::ir_t build_acc_renorm_ir(int seq_q, int hs) {
+ir::ir_t build_acc_renorm_ir(cpu_isa_t isa, int seq_q, int hs) {
     using namespace ir;
 
-    const int n_blk = hs / simd_w();
-    const int tail = hs % simd_w();
-    const dim_t vbytes = simd_w() * (dim_t)sizeof(float);
+    const int simd_w = isa_max_vlen(isa) / (int)sizeof(float);
+    const int n_blk = hs / simd_w;
+    const int tail = hs % simd_w;
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
     const dim_t tail_off = n_blk * vbytes;
     const dim_t fsz = (dim_t)sizeof(float);
 
@@ -376,9 +379,10 @@ inline ir::ir_t build_acc_renorm_ir(int seq_q, int hs) {
 // exp the softmax uses.
 class softmax_tile_ir_kernel_t : public jit_generator_t {
 public:
-    softmax_tile_ir_kernel_t(int seq_q, int w, bool has_select,
+    softmax_tile_ir_kernel_t(cpu_isa_t isa, int seq_q, int w, bool has_select,
             bool invert_select, int cond_row_stride)
-        : jit_generator_t("sdpa_softmax_tile_ir", isa())
+        : jit_generator_t("sdpa_softmax_tile_ir", isa)
+        , isa_(isa)
         , seq_q_(seq_q)
         , w_(w)
         , cond_row_stride_(cond_row_stride)
@@ -392,8 +396,8 @@ protected:
     void generate() override {
         using namespace ir;
 
-        ir_t ir = build_softmax_tile_ir(
-                seq_q_, w_, has_select_, invert_select_, cond_row_stride_);
+        ir_t ir = build_softmax_tile_ir(isa_, seq_q_, w_, has_select_,
+                invert_select_, cond_row_stride_);
 
         const int rsp_idx = Xbyak::Operand::RSP;
         const int param_idx = abi_param1.getIdx();
@@ -403,7 +407,7 @@ protected:
         const int exp_opmask = 1;
 
         const reg_config_t reg_cfg
-                = make_reg_config(isa(), param_idx, rsp_idx, {exp_opmask});
+                = make_reg_config(isa_, param_idx, rsp_idx, {exp_opmask});
 
         const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
 
@@ -419,7 +423,7 @@ protected:
             if (eltwise_injectors.count(alg)) continue;
             eltwise_injectors.emplace(alg,
                     std::unique_ptr<eltwise_injector_t>(
-                            new eltwise_injector_t(*this, isa(), alg,
+                            new eltwise_injector_t(*this, isa_, alg,
                                     /* alpha = */ 0.f, /* beta = */ 0.f,
                                     /* scale = */ 1.f)));
         }
@@ -454,6 +458,7 @@ protected:
     }
 
 private:
+    cpu_isa_t isa_;
     int seq_q_;
     int w_;
     int cond_row_stride_;
@@ -467,8 +472,9 @@ private:
 // register-allocation + emission pipeline (no eltwise, no post-ops).
 class acc_renorm_ir_kernel_t : public jit_generator_t {
 public:
-    acc_renorm_ir_kernel_t(int seq_q, int hs)
-        : jit_generator_t("sdpa_acc_renorm_ir", isa())
+    acc_renorm_ir_kernel_t(cpu_isa_t isa, int seq_q, int hs)
+        : jit_generator_t("sdpa_acc_renorm_ir", isa)
+        , isa_(isa)
         , seq_q_(seq_q)
         , hs_(hs) {}
 
@@ -477,25 +483,26 @@ public:
 
 protected:
     void generate() override {
-        auto ir = build_acc_renorm_ir(seq_q_, hs_);
+        auto ir = build_acc_renorm_ir(isa_, seq_q_, hs_);
         generate_kernel(*this, ir);
     }
 
 private:
+    cpu_isa_t isa_;
     int seq_q_;
     int hs_;
 };
 
 } // namespace
 
-jit_generator_t *create_softmax_tile_ir_kernel(int seq_q, int w,
+jit_generator_t *create_softmax_tile_ir_kernel(cpu_isa_t isa, int seq_q, int w,
         bool has_select, bool invert_select, int cond_row_stride) {
     return new softmax_tile_ir_kernel_t(
-            seq_q, w, has_select, invert_select, cond_row_stride);
+            isa, seq_q, w, has_select, invert_select, cond_row_stride);
 }
 
-jit_generator_t *create_acc_renorm_ir_kernel(int seq_q, int hs) {
-    return new acc_renorm_ir_kernel_t(seq_q, hs);
+jit_generator_t *create_acc_renorm_ir_kernel(cpu_isa_t isa, int seq_q, int hs) {
+    return new acc_renorm_ir_kernel_t(isa, seq_q, hs);
 }
 
 } // namespace sdpa_softmax_ir
