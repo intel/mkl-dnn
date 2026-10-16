@@ -342,6 +342,109 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
     }
 }
 
+// Validates the empty-tile guard against NaN poisoning: a leading KV tile that
+// is fully masked out with a -inf fill must not corrupt the row. Every lane of
+// the first tile is masked (cond == 0, keep-on-nonzero), so m_new == -inf and
+// l_new == 0; the exp subtraction (-inf - -inf) and the normalizing divide
+// (0 / 0) would both be NaN without the softmax floors. The kernel must instead
+// leave the running max/denom at their -inf/0 seeds, emit zero probabilities,
+// and leave every output finite. A following all-kept tile then behaves as the
+// real first tile, so the row recovers exactly as if the masked tile never ran.
+TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineMaskedFirstTile) {
+    SKIP_IF_NO_AVX2();
+
+    const float neg_inf = -std::numeric_limits<float>::infinity();
+    const float scale = 0.125f;
+    const float fill = neg_inf;
+    for (int seq_q : {1, 3}) {
+        for (int w : {1, 5, simd_w(), 9, 4 * simd_w() - 1}) {
+            std::unique_ptr<jit_generator_t> kernel(
+                    create_softmax_tile_ir_kernel(seq_q, w, true, false, -1));
+            ASSERT_EQ(kernel->create_kernel(), dnnl_success)
+                    << "seq_q=" << seq_q << " w=" << w;
+
+            // Running state starts at the first-tile seed and is threaded
+            // through both tiles.
+            std::vector<float> m(seq_q, neg_inf), l(seq_q, 0.f),
+                    oc(seq_q, -12345.f);
+
+            // Tile 0: every lane masked out (cond == 0) -> filled with -inf.
+            {
+                std::vector<float> scores((size_t)seq_q * w);
+                std::vector<uint8_t> cond((size_t)seq_q * w, 0);
+                for (size_t k = 0; k < scores.size(); k++)
+                    scores[k] = (float)((k * 5) % 13) * 0.5f - 3.f;
+
+                softmax_row_args_t args {scores.data(), &scale, m.data(),
+                        l.data(), oc.data(), cond.data(), &fill};
+                (*kernel)(&args);
+
+                for (int i = 0; i < seq_q; i++) {
+                    // The empty tile leaves the running state untouched.
+                    EXPECT_EQ(m[i], neg_inf)
+                            << "seq_q=" << seq_q << " w=" << w << " i=" << i;
+                    EXPECT_EQ(l[i], 0.f)
+                            << "seq_q=" << seq_q << " w=" << w << " i=" << i;
+                    EXPECT_EQ(oc[i], 0.f)
+                            << "seq_q=" << seq_q << " w=" << w << " i=" << i;
+                }
+                // Probabilities are a finite zero, never NaN.
+                for (size_t k = 0; k < scores.size(); k++) {
+                    EXPECT_TRUE(std::isfinite(scores[k]))
+                            << "seq_q=" << seq_q << " w=" << w << " k=" << k;
+                    EXPECT_EQ(scores[k], 0.f)
+                            << "seq_q=" << seq_q << " w=" << w << " k=" << k;
+                }
+            }
+
+            // Tile 1: all lanes kept (cond != 0); the row now behaves as the
+            // real first tile, so it must match the first-tile reference fed
+            // the -inf/0 state that tile 0 left behind.
+            {
+                std::vector<float> scores((size_t)seq_q * w);
+                std::vector<std::vector<float>> ref(
+                        seq_q, std::vector<float>(w));
+                std::vector<float> ref_m(seq_q, neg_inf), ref_l(seq_q, 0.f),
+                        ref_oc(seq_q, -12345.f);
+                std::vector<uint8_t> cond((size_t)seq_q * w, 1);
+                for (int i = 0; i < seq_q; i++) {
+                    std::vector<uint8_t> refc(w, 1);
+                    for (int j = 0; j < w; j++) {
+                        const float v
+                                = (float)(((i + 1) * j * 7 + i * 2) % 13) * 0.5f
+                                - 3.f;
+                        scores[(size_t)i * w + j] = v;
+                        ref[i][j] = v;
+                    }
+                    ref_softmax_row_masked(ref[i], scale, refc, fill, false,
+                            ref_m[i], ref_l[i], ref_oc[i]);
+                }
+
+                softmax_row_args_t args {scores.data(), &scale, m.data(),
+                        l.data(), oc.data(), cond.data(), &fill};
+                (*kernel)(&args);
+
+                for (int i = 0; i < seq_q; i++) {
+                    EXPECT_NEAR(
+                            m[i], ref_m[i], 1e-5f * std::abs(ref_m[i]) + 1e-6f)
+                            << "seq_q=" << seq_q << " w=" << w << " i=" << i;
+                    EXPECT_NEAR(
+                            l[i], ref_l[i], 1e-4f * std::abs(ref_l[i]) + 1e-6f)
+                            << "seq_q=" << seq_q << " w=" << w << " i=" << i;
+                    EXPECT_NEAR(oc[i], ref_oc[i],
+                            1e-4f * std::abs(ref_oc[i]) + 1e-6f)
+                            << "seq_q=" << seq_q << " w=" << w << " i=" << i;
+                    for (int j = 0; j < w; j++)
+                        EXPECT_NEAR(scores[(size_t)i * w + j], ref[i][j],
+                                1e-4f * std::abs(ref[i][j]) + 1e-6f)
+                                << "seq_q=" << seq_q << " w=" << w << " i=" << i
+                                << " j=" << j;
+                }
+            }
+        }
+    }
+}
+
 // Validates the accumulator renormalization tile epilogue: one kernel rescales
 // seq_q accumulator rows (acc = old_coef*acc + pv) with a runtime loop,
 // advancing the acc/pv/old_coef pointers each iteration. Every row carries a

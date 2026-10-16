@@ -328,6 +328,15 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 if (spilled(op.dst)) spill_store(op.dst, d);
                 break;
             }
+            case op_kind_t::vbcast_imm: { // overwrites dst
+                JIT_ASSERT(
+                        types::data_type_size(dt_of(op.dst)) == sizeof(uint32_t)
+                        && "vbcast_imm: only 32-bit element types supported");
+                int d = reg_of(op.dst);
+                be.vbcast_imm(d, (uint32_t)op.imm, data);
+                if (spilled(op.dst)) spill_store(op.dst, d);
+                break;
+            }
             case op_kind_t::vcmp_ne_zero: { // writes the mask dst, reads s0
                 JIT_ASSERT(!spilled(op.dst) && "vcmp_ne_zero: mask spilled");
                 int s = vec_use(op.s0);

@@ -215,6 +215,15 @@ struct avx512_backend_t {
         else { JIT_ASSERT(!"vbcast: dtype not implemented"); }
     }
 
+    // Broadcast a constant written into the data section.
+    void vbcast_imm(int d, uint32_t bits, data_section_t &data) {
+        std::vector<unsigned char> bytes(sizeof(bits));
+        std::memcpy(bytes.data(), &bits, sizeof(bits));
+        data.constants.emplace_back(std::move(bytes), Xbyak::Label());
+        Xbyak::Label &lbl = data.constants.back().second;
+        gen().vbroadcastss(Xbyak::Zmm(d), gen().ptr[gen().rip + lbl]);
+    }
+
     // dst += a * b. The multiplicand dtype `src_dt` selects the instruction.
     // The accumulator (dst) is always f32. An f16 multiplicand, and a bf16 one
     // that is not consumed by `vdpbf16ps`, arrives here as f32, widened by the

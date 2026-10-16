@@ -64,7 +64,13 @@ namespace {
 // running max, 0 for the sum so they add nothing). The first KV tile (m_old ==
 // -inf, l_old == 0) needs no explicit guard: the eltwise exp saturates -inf to
 // exactly 0, so corr == 0 and clo == l_old*corr == 0 fall out, and m_new is
-// just the tile max. The scale, fill and tail mask are loop invariant, set up
+// just the tile max. A *fully masked* tile while the row is still empty (every
+// lane filled with -inf, so m_new == -inf and l_new == 0) is the one case
+// that  would produce NaN (m_old - m_new == -inf - -inf, and 0 / 0): two
+// build-time floors replace m_new / l_new only inside the exp subtractions and
+// normalizing divides, so such a tile yields zero probabilities and leaves
+// m == -inf / l == 0 unchanged, letting a later valid tile recover the row as
+// if it were the first. The scale, fill and tail mask are loop invariant, set up
 // once; the mask vreg stays live across all rows (masked ops assert it is never
 // spilled). `cond_row_stride` is the condition tensor's row stride in elements;
 // < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
@@ -111,6 +117,15 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         mask = ir.new_mask();
         ir.set_mask_imm(mask, tail);
     }
+
+    // The two softmax floors are loop invariant. m_floor floors m_new in the
+    // exp subtractions and l_floor floors l_new in the normalizing divides,
+    // keeping a fully -inf-masked tile finite instead of NaN (see m_sub and
+    // l_div below).
+    const vreg_t m_floor = ir.new_vec(data_type::f32);
+    ir.vbcast_imm(m_floor, -std::numeric_limits<float>::max());
+    const vreg_t l_floor = ir.new_vec(data_type::f32);
+    ir.vbcast_imm(l_floor, std::numeric_limits<float>::min());
 
     // Online-softmax epilogue for the single row at the current pointers.
     auto row_body = [&]() {
@@ -181,11 +196,19 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         ir.vhreduce_max(rmax, ws); // rmax lane 0 = m_new
         const vreg_t m_new = ir.new_vec(data_type::f32);
         ir.vbcast(m_new, rmax);
+        // m_sub is m_new floored at m_floor, used only in the exp subtractions:
+        // an all-masked tile has m_new == -inf, so x - m_new = -inf - -inf =
+        // NaN; the floor makes it finite so exp saturates to 0. A real tile has
+        // finite m_new >= m_floor, so m_sub == m_new. m_new is written back
+        // unchanged.
+        const vreg_t m_sub = ir.new_vec(data_type::f32);
+        ir.vbcast(m_sub, m_new);
+        ir.vmax(m_sub, m_floor);
 
         // corr = exp(m_old - m_new): rescales previous tiles' contributions.
         const vreg_t corr = ir.new_vec(data_type::f32);
         ir.vbcast(corr, m_old);
-        ir.vsub(corr, m_new);
+        ir.vsub(corr, m_sub);
         ir.vexp(corr);
 
         // Pass 2: P_unnorm = exp(scaled - m_new); accumulate the tile denom.
@@ -194,7 +217,7 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         for (int b = 0; b < n_blk; b++) {
             const vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
-            ir.vsub(blk, m_new);
+            ir.vsub(blk, m_sub);
             ir.vexp(blk);
             ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
             ir.vadd(rsum, blk);
@@ -202,7 +225,7 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         if (tail) {
             const vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
-            ir.vsub(blk, m_new);
+            ir.vsub(blk, m_sub);
             ir.vexp(blk);
             ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
             // Unused lanes take 0 so they add nothing to the denominator.
@@ -223,22 +246,34 @@ inline ir::ir_t build_softmax_tile_ir(int seq_q, int w, bool has_select = false,
         const vreg_t l_new = ir.new_vec(data_type::f32);
         ir.vbcast(l_new, clo);
         ir.vadd(l_new, tile_sum);
+        // l_div floors l_new at l_floor only for the normalizing divides
+        // below: a fully -inf-masked tile has tile_sum == 0 and (first tile)
+        // clo == 0, so l_new == 0 and old_coef / P would divide 0/0 = NaN;
+        // l_div makes the denominator l_floor so both yield 0. Once the row has
+        // a real lane l_new >= 1 (the running max's own lane adds exp(0) == 1,
+        // in tile_sum when this tile sets m_new, else carried in clo since
+        // corr == 1), well above l_floor, so l_div == l_new. l_new is written
+        // back unchanged (the running denom stays 0 for an all-masked row, so a
+        // later valid tile recovers it as a first tile).
+        const vreg_t l_div = ir.new_vec(data_type::f32);
+        ir.vbcast(l_div, l_new);
+        ir.vmax(l_div, l_floor);
 
         const vreg_t old_coef = ir.new_vec(data_type::f32);
         ir.vbcast(old_coef, clo);
-        ir.vdiv(old_coef, l_new);
+        ir.vdiv(old_coef, l_div);
 
         // Pass 3: normalize P by the running denominator.
         for (int b = 0; b < n_blk; b++) {
             const vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
-            ir.vdiv(blk, l_new);
+            ir.vdiv(blk, l_div);
             ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
         }
         if (tail) {
             const vreg_t blk = ir.new_vec(data_type::f32);
             ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
-            ir.vdiv(blk, l_new);
+            ir.vdiv(blk, l_div);
             ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
         }
 

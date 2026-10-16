@@ -134,6 +134,9 @@ enum class op_kind_t {
     vblend,
     // dst = broadcast of s0's element 0 across all lanes (overwrites dst)
     vbcast,
+    // dst = broadcast of a constant whose bit pattern is held in `imm` across
+    // all lanes.
+    vbcast_imm,
     // horizontal reduction of dst; result in element 0. s0 is scratch
     // (overwritten).
     vhreduce,
@@ -223,6 +226,7 @@ struct mem_t {
 //         * mov_imm        -> literal constant
 //         * loop_begin     -> loop trip count
 //         * set_mask_imm   -> active element count
+//         * vbcast_imm     -> bit pattern
 //         * vload_widen / vload_masked / vstore_masked -> active element count
 //         * veltwise       -> eltwise algorithm (alg_kind_t)
 //         * inject_postops -> index into inject_postops_args()
@@ -355,6 +359,9 @@ struct DNNL_API ir_t {
     // `mask` is a mask vreg from set_mask_imm or vcmp_ne_zero.
     void vblend(vreg_t dst, vreg_t src, vreg_t mask);
     void vbcast(vreg_t dst, vreg_t src);
+    // Broadcast a constant across `dst`.
+    // Add an overload per element type as needed.
+    void vbcast_imm(vreg_t dst, float value);
     // `workspace` is scratch. It is overwritten by this call, so pass a vreg
     // whose value is not needed afterwards.
     void vhreduce(vreg_t dst, vreg_t workspace);
