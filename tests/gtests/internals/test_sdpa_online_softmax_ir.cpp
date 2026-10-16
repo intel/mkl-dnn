@@ -45,6 +45,18 @@ using namespace dnnl::impl::cpu::x64::sdpa_softmax_ir;
         if (!mayiuse(avx2)) GTEST_SKIP() << "IR emitter require AVX2"; \
     } while (0)
 
+// ISA the kernel tests generate for. The emitter needs AVX2 as a floor, so the
+// tests run on AVX-512 wherever the machine has it and fall back to AVX2
+// otherwise.
+cpu_isa_t test_isa() {
+    return mayiuse(avx512_core) ? avx512_core : avx2;
+}
+
+// Vector width in f32 elements on `test_isa()`. Online-softmax uses f32 data.
+int simd_w() {
+    return isa_max_vlen(test_isa()) / (int)sizeof(float);
+}
+
 // Scalar reference for one online-softmax row update, matching one row of
 // build_softmax_tile_ir (no select mask).
 void ref_softmax_row(std::vector<float> &scores, float scale, float &m,
@@ -127,8 +139,8 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileRow) {
     // ragged tail, so the masked-tail path and its lane neutralization run.
     for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
                  4 * simd_w() - 1, 4 * simd_w()}) {
-        std::unique_ptr<jit_generator_t> kernel(
-                create_softmax_tile_ir_kernel(1, w, false, false, -1));
+        std::unique_ptr<jit_generator_t> kernel(create_softmax_tile_ir_kernel(
+                test_isa(), 1, w, false, false, -1));
         ASSERT_EQ(kernel->create_kernel(), dnnl_success) << "w=" << w;
 
         std::vector<float> scores(w), ref(w);
@@ -166,8 +178,8 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineFirstTile) {
     const float neg_inf = -std::numeric_limits<float>::infinity();
     for (int w : {1, 5, 7, simd_w(), 9, 15, 2 * simd_w(), 17, 23,
                  4 * simd_w() - 1, 4 * simd_w()}) {
-        std::unique_ptr<jit_generator_t> kernel(
-                create_softmax_tile_ir_kernel(1, w, false, false, -1));
+        std::unique_ptr<jit_generator_t> kernel(create_softmax_tile_ir_kernel(
+                test_isa(), 1, w, false, false, -1));
         ASSERT_EQ(kernel->create_kernel(), dnnl_success) << "w=" << w;
 
         const float scale = 0.125f;
@@ -212,7 +224,8 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileMultiRow) {
     for (int seq_q : {2, 3, 5}) {
         for (int w : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
             std::unique_ptr<jit_generator_t> kernel(
-                    create_softmax_tile_ir_kernel(seq_q, w, false, false, -1));
+                    create_softmax_tile_ir_kernel(
+                            test_isa(), seq_q, w, false, false, -1));
             ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " w=" << w;
 
@@ -276,7 +289,7 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineTileSelect) {
                          4 * simd_w()}) {
                 std::unique_ptr<jit_generator_t> kernel(
                         create_softmax_tile_ir_kernel(
-                                seq_q, w, true, invert_select, -1));
+                                test_isa(), seq_q, w, true, invert_select, -1));
                 ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                         << "invert_select=" << invert_select
                         << " seq_q=" << seq_q << " w=" << w;
@@ -359,7 +372,8 @@ TEST(SdpaOnlineSoftmaxIr, SoftmaxOnlineMaskedFirstTile) {
     for (int seq_q : {1, 3}) {
         for (int w : {1, 5, simd_w(), 9, 4 * simd_w() - 1}) {
             std::unique_ptr<jit_generator_t> kernel(
-                    create_softmax_tile_ir_kernel(seq_q, w, true, false, -1));
+                    create_softmax_tile_ir_kernel(
+                            test_isa(), seq_q, w, true, false, -1));
             ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " w=" << w;
 
@@ -458,7 +472,7 @@ TEST(SdpaOnlineSoftmaxIr, AccRenormTile) {
         // ragged tail, so the masked-tail path runs.
         for (int hs : {1, 7, simd_w(), 9, 17, 4 * simd_w() - 1, 4 * simd_w()}) {
             std::unique_ptr<jit_generator_t> kernel(
-                    create_acc_renorm_ir_kernel(seq_q, hs));
+                    create_acc_renorm_ir_kernel(test_isa(), seq_q, hs));
             ASSERT_EQ(kernel->create_kernel(), dnnl_success)
                     << "seq_q=" << seq_q << " hs=" << hs;
 
