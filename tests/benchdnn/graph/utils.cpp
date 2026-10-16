@@ -51,6 +51,7 @@ bdnn_state_t convert_state(const dnnl_status_t &s) {
         case dnnl_status_t::dnnl_invalid_shape:
             return bdnn_state_t {res_state_t::SKIPPED, reason_t::invalid};
         case dnnl_status_t::dnnl_invalid_data_type:
+        case dnnl_status_t::dnnl_unsupported_data_type:
             return bdnn_state_t {
                     res_state_t::SKIPPED, reason_t::skip_data_type};
         default: assert(!"dnnl state is not found!"); return bdnn_state_t {};
