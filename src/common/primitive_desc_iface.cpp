@@ -86,7 +86,8 @@ status_t dnnl_primitive_desc::init() {
     if (!pd_iterator_->is_initialized()) return out_of_memory;
 
     ++(*pd_iterator_);
-    if (*pd_iterator_ == pd_iterator_->end()) return unimplemented;
+    if (*pd_iterator_ == pd_iterator_->end())
+        return pd_iterator_->no_impl_status();
 
     pd_ = *(*pd_iterator_);
     engine_ = pd_iterator_->engine();

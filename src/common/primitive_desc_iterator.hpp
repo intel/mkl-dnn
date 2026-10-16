@@ -92,6 +92,7 @@ struct primitive_desc_iterator_t {
                 pd_.reset(candidate_pd);
                 break;
             }
+            if (s == status::unsupported_data_type) has_unsupported_dt_ = true;
         }
         return *this;
     }
@@ -103,6 +104,14 @@ struct primitive_desc_iterator_t {
     // The iterator is only usable if the attributes it copied were allocated
     // successfully; delegate the check to the copied attributes.
     bool is_initialized() const { return attr_.is_initialized(); }
+
+    // Status to report when no implementation was found. Unsupported data
+    // type is a platform-wide limitation, so a single implementation
+    // reporting it is enough.
+    status_t no_impl_status() const {
+        return has_unsupported_dt_ ? status::unsupported_data_type
+                                   : status::unimplemented;
+    }
 
 protected:
     int idx_;
@@ -117,6 +126,7 @@ protected:
     int offset_;
     const engine_t *src_engine_;
     const engine_t *dst_engine_;
+    bool has_unsupported_dt_ = false;
 
 private:
     primitive_desc_iterator_t(const engine_t *engine, int last_idx)
@@ -141,7 +151,8 @@ private:
         , skip_idx_(other.skip_idx_)
         , offset_(other.offset_)
         , src_engine_(other.src_engine_)
-        , dst_engine_(other.dst_engine_) {}
+        , dst_engine_(other.dst_engine_)
+        , has_unsupported_dt_(other.has_unsupported_dt_) {}
 
     DNNL_DISALLOW_COPY_AND_ASSIGN(primitive_desc_iterator_t);
 };
