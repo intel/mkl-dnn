@@ -168,6 +168,10 @@ cold_cache_t::cold_cache_t(
         const auto &orig_mem = dnnl_args[idx].memory;
         // Empty memories don't get their cold cache entry.
         if (!orig_mem) continue;
+        // Host scalars carry no buffer to thrash and can't be replicated.
+        if (query_md_format_kind(query_md(orig_mem))
+                == dnnl_format_kind_host_scalar)
+            continue;
 
         auto &cc_entry = cache_[arg];
         cc_entry.resize(n_buffers_);
