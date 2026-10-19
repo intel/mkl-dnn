@@ -187,6 +187,31 @@ be added later (as a post-op on the result, or a single fused multiply-add).
   gives the `s4` value $q - 8$; scale $= scale$, zero point $= -zero$, both
   `bf16` with PyTorch's group size.
 
+### GGUF K-quants: two-level scales
+
+A Q4_K block of 256 weights has an `f16` super-scale $d$ and super-min
+$d_{min}$, and 12 bytes that pack a 6-bit sub-scale $sc_j$ and a 6-bit sub-min
+$mn_j$ for each of its 8 groups of 32 weights. Group $j$ dequantizes as
+$w = (d \times sc_j) \times q - (d_{min} \times mn_j)$.
+
+oneDNN doesn't need to know about the two levels. The framework multiplies
+them out once, when it loads or converts the model, and passes the products as
+ordinary per-group values: scale $= d \times sc_j$ and zero point
+$= d_{min} \times mn_j$, both `f16`, with groups of 32. oneDNN applies them as
+any other `static_sbzp` scales and zero points, so no API for two-level scales
+is needed. `static_sbzp` is what makes this exact: with `static_sazp`, the zero
+point would have to be $(d_{min} \times mn_j) / (d \times sc_j)$, rounded to an
+integer.
+
+The cost of the unpacking is storage. Q4_K takes 4.5 bits per weight (144 bytes
+per 256 weights). As `u4` weights with an `f16` scale and an `f16` zero point
+per group of 32, the same weights take 5.0 bits per weight, 11% more; with
+rounded `u4` zero points, as today, they take 4.625. The Performance section
+measures the kernel time of this layout, and the Accuracy section its
+dequantization error. Reading the GGUF block directly would avoid the extra
+storage, but it would add the format's packing to oneDNN (see Native GGUF
+block formats).
+
 ## Implementation
 
 The prototype is a single commit on oneDNN main (`2dd09b52c`, October 12,
@@ -439,7 +464,9 @@ above.
 
 Out of scope. The framework already converts GGUF blocks into standard oneDNN
 inputs (u4 weights with a scale and a zero point per group of 32); only the
-order of operations is missing.
+order of operations is missing. Reading the blocks directly would save the
+0.5 bits per weight of unpacked scales and zero points (see GGUF K-quants:
+two-level scales), but it would tie oneDNN to one format's packing.
 
 ## Execution plan
 
