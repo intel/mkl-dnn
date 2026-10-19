@@ -33,7 +33,7 @@ if(DNNL_GPU_VENDOR STREQUAL "INTEL")
     add_definitions_with_host_compiler(-DNGEN_CONFIG)
     include_directories_with_host_compiler(${ONEDNN_NGEN_DIR})
 
-    set(ONEDNN_GEMMSTONE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/intel/gemm/jit" CACHE PATH "Path to gemmstone source code")
+    set(ONEDNN_GEMMSTONE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/intel/gemmstone" CACHE PATH "Path to gemmstone source code")
     add_definitions_with_host_compiler(-DGEMMSTONE_CONFIG)
     include_directories_with_host_compiler(${ONEDNN_GEMMSTONE_DIR}/include)
 

@@ -45,8 +45,8 @@ list(APPEND ngen_root_hints
             $ENV{NGEN_ROOT}
             ${CMAKE_SOURCE_DIR}/..)
 
-# oneDNN's bundled nGEN, for builds from src/gpu/intel/gemm/jit
-get_filename_component(dnnl_root ${CMAKE_SOURCE_DIR}/../../../../.. ABSOLUTE)
+# oneDNN's bundled nGEN, for builds from src/gpu/intel/gemmstone
+get_filename_component(dnnl_root ${CMAKE_SOURCE_DIR}/../../../.. ABSOLUTE)
 if(EXISTS ${dnnl_root}/third_party/ngen/ngen.hpp)
     list(APPEND ngen_root_hints ${dnnl_root}/third_party)
 endif()

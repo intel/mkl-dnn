@@ -14,14 +14,6 @@
 # limitations under the License.
 #===============================================================================
 
-# Standalone gemmstone build; oneDNN sets ONEDNN_GEMMSTONE_DIR.
-if(NOT DEFINED ONEDNN_GEMMSTONE_DIR)
-    cmake_minimum_required(VERSION 3.18)
-    project(gemmstone)
-    include(cmake/standalone.cmake)
-    return()
-endif()
-
 # TODO: Extend conversion warning support to GEMM code
 if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM" OR CMAKE_CXX_COMPILER_ID MATCHES "(Apple)?[Cc]lang")
     append(CMAKE_CXX_FLAGS " -Wno-implicit-int-conversion")

@@ -40,8 +40,8 @@ foreach(KERNEL flush lsc_flush flush_icache cache_fill)
 endforeach()
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/flush_kernel_cl.h CONTENT "@CACHE_KERNELS_CL@" @ONLY)
 
-# oneDNN's MDAPI header, for builds from src/gpu/intel/gemm/jit
-get_filename_component(dnnl_root ${PROJECT_SOURCE_DIR}/../../../../.. ABSOLUTE)
+# oneDNN's MDAPI header, for builds from src/gpu/intel/gemmstone
+get_filename_component(dnnl_root ${PROJECT_SOURCE_DIR}/../../../.. ABSOLUTE)
 if(EXISTS ${dnnl_root}/third_party/mdapi/mdapi/metrics_discovery_api.h)
     set(MDAPI_INCLUDE_DIR ${dnnl_root}/third_party/mdapi)
 else()

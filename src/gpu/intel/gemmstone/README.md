@@ -70,7 +70,7 @@ gemmstone supports both Linux and Windows, although some tools (`ktool`, `multid
 git clone https://github.com/uxlfoundation/oneDNN
 
 # Build gemmstone (and its tools) standalone from within the tree:
-cd oneDNN/src/gpu/intel/gemm/jit
+cd oneDNN/src/gpu/intel/gemmstone
 mkdir build && cd build
 cmake ..
 cmake --build .
