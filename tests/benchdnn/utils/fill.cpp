@@ -342,10 +342,12 @@ int fill_random_real_sparse(const_dnnl_memory_t dnnl_memory, dnn_mem_t &mem,
     for (int idx = 1; idx < nhandles; idx++) {
         void *dst_ptr = mem_ref.get_mapped_pointer<void>(idx);
         void *src_ptr = nullptr;
-        dnnl_memory_get_data_handle_v2(dnnl_memory, &src_ptr, idx);
+        // The source may be a device allocation, so it must be mapped.
+        DNN_SAFE(dnnl_memory_map_data_v2(dnnl_memory, &src_ptr, idx), WARN);
 
         const size_t size = dnnl_memory_desc_get_size_v2(orig_cc_mem_md, idx);
         std::memcpy(dst_ptr, src_ptr, size);
+        DNN_SAFE(dnnl_memory_unmap_data_v2(dnnl_memory, src_ptr, idx), WARN);
     }
 
     return fill_random_real_dense(mem, mem_ref, res, fill_cfg);
