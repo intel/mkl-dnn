@@ -48,7 +48,10 @@ public:
         return (flags() & dnnl::impl::stream_flags::profiling);
     }
 
-    bool is_verbose_profiler_enabled() const { return use_verbose_profiler_; }
+    bool is_verbose_profiler_enabled() const {
+        return dnnl::impl::get_verbose(dnnl::impl::verbose_t::exec_profile)
+                && use_verbose_profiler_;
+    }
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
     bool is_async_threadpool() const {
