@@ -330,14 +330,14 @@ int fill_random_real_dense(dnn_mem_t &mem, dnn_mem_t &mem_ref, res_t *res,
 
 // Since a sparsity pattern affects performance, it's crucial to keep the
 // pattern intact and only randomize tensor values. Thus, the function relies on
-// an assumption that every sparse format contains three handles, where the
-// second and the third are responsible for a sparsity pattern, and are
-// **already filled**.
+// an assumption that in every sparse format the first handle holds values and
+// the rest (two for CSR/COO/packed, one - offsets - for grouped) are
+// responsible for a sparsity pattern, and are **already filled**.
 int fill_random_real_sparse(const_dnnl_memory_t dnnl_memory, dnn_mem_t &mem,
         dnn_mem_t &mem_ref, res_t *res, const fill_cfg_t &fill_cfg) {
     auto orig_cc_mem_md = query_md(dnnl_memory);
     const int nhandles = query_md_num_handles(orig_cc_mem_md);
-    assert(nhandles == 3);
+    assert(nhandles == 2 || nhandles == 3);
     // Copy-exact the content of metadata buffers. Let data handle go further.
     for (int idx = 1; idx < nhandles; idx++) {
         void *dst_ptr = mem_ref.get_mapped_pointer<void>(idx);
