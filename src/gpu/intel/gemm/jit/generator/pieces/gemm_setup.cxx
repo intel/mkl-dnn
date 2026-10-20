@@ -2102,7 +2102,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
             A_offsetLayout.cast(problem.Tao);
             A_offsetLayout[0].offsetBytes = state.inputs.ao.getByteOffset();
         }
-        gemmRepack2DOffsetData(problem.Ta_ext, A_offsetLayout, state.Ar_offsetLayout, aoLoad, state.Ar_offsetRegs, problem, strategy, state);
+        gemmRepack2DOffsetData(problem.Ta_ext, A_offsetLayout, state.Ar_offsetLayout, aoLoad, state.Ar_offsetRegs, problem, strategy, state, problem.aOffsetAfterScale);
         if (releaseAOLoad) state.ra.safeRelease(aoLoad);
         if (!strategy.persistentLoop())
             state.ra.safeRelease(state.inputs.aoPtr);
@@ -2139,7 +2139,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
             B_offsetLayout.cast(problem.Tbo);
             B_offsetLayout[0].offsetBytes = state.inputs.bo.getByteOffset();
         }
-        gemmRepack2DOffsetData(problem.Tb_ext, B_offsetLayout, state.Br_offsetLayout, boLoad, state.Br_offsetRegs, problem, strategy, state);
+        gemmRepack2DOffsetData(problem.Tb_ext, B_offsetLayout, state.Br_offsetLayout, boLoad, state.Br_offsetRegs, problem, strategy, state, problem.bOffsetAfterScale);
         if (releaseBOLoad) state.ra.safeRelease(boLoad);
         if (!strategy.persistentLoop())
             state.ra.safeRelease(state.inputs.boPtr);

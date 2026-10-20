@@ -543,8 +543,9 @@ dnnl_status_t DNNL_API dnnl_primitive_attr_set_scales_v2(
 ///     NULL when @p ndims is 0.
 /// @param data_type Scaling factors data_type.
 /// @param is_on_host Indicates whether the scale is a host-side scalar.
-/// @param qmode Quantization mode, can be #dnnl_quantization_mode_static_sazp
-///     or #dnnl_quantization_mode_dynamic_mx
+/// @param qmode Quantization mode, can be #dnnl_quantization_mode_static_sazp,
+///     #dnnl_quantization_mode_static_sbzp, #dnnl_quantization_mode_dynamic_mx,
+///     or #dnnl_quantization_mode_dynamic_fp
 /// @returns #dnnl_success on success and a status describing the error
 ///     otherwise.
 dnnl_status_t DNNL_API dnnl_primitive_attr_set_scales_v3(
@@ -657,6 +658,45 @@ dnnl_status_t DNNL_API dnnl_primitive_attr_set_zero_points_v2(
         dnnl_primitive_attr_t attr, int arg, int mask, int ndims,
         const dnnl_dims_t group_dims, dnnl_data_type_t data_type,
         int is_on_host);
+
+/// Sets primitive attributes zero points for primitive operations for a given
+/// memory argument and quantization mode. The zero points must be passed at
+/// execution time as an argument with index #DNNL_ARG_ATTR_ZERO_POINTS | arg.
+///
+/// With #dnnl_quantization_mode_static_sazp, zero points are integers and
+/// are subtracted before scaling: \f$x_{f32} = scale * (x_{quant} - zp)\f$.
+/// With #dnnl_quantization_mode_static_sbzp, zero points are floating-point
+/// and are subtracted after scaling: \f$x_{f32} = scale * x_{quant} - zp\f$.
+/// The quantization mode must match the quantization mode of the scales set
+/// for the same argument.
+///
+/// @sa dnnl_primitive_attr_set_zero_points_v2
+///
+/// @param attr Primitive attributes.
+/// @param arg Parameter argument index as passed to the
+///     dnnl_primitive_execute() call.
+/// @param mask Zero point correspondence mask that defines the
+///     correspondence between the tensor dimensions and the @p
+///     zero_points array. The set i-th bit indicates that a dedicated zero
+///     point is used for each index along that dimension. Set the mask to 0
+///     to use a common zero point for the whole output tensor.
+/// @param ndims Number of group dimensions. Must be 0 or 2.
+/// @param group_dims Block sizes for the last two tensor dimensions:
+///     `{G0, G1}` where `G0` subdivides the second-to-last tensor dimension
+///     and `G1` subdivides the last. The corresponding mask bits must
+///     be set. Use `1` for no sub-blocking.
+///     NULL when @p ndims is 0.
+/// @param data_type Zero points factors data_type.
+/// @param is_on_host Indicates whether the zero point is a host-side scalar.
+/// @param qmode Quantization mode, can be
+///     #dnnl_quantization_mode_static_sazp or
+///     #dnnl_quantization_mode_static_sbzp.
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_set_zero_points_v3(
+        dnnl_primitive_attr_t attr, int arg, int mask, int ndims,
+        const dnnl_dims_t group_dims, dnnl_data_type_t data_type,
+        int is_on_host, dnnl_quantization_mode_t qmode);
 
 /// Sets the rounding mode attribute value for a given argument
 ///

@@ -2485,6 +2485,12 @@ typedef enum {
     /// oneDNN as \f$scale\_dt(amax(X) / max(dst\_dt))\f$ in `f32` then
     /// converted to a scale type and written as an output.
     dnnl_quantization_mode_dynamic_fp,
+    /// static quantization mode: quantization parameter is computed
+    /// ahead of time with scale applied before zero-point (\f$x_{f32}
+    /// = scale * x_{quant} - zp\f$) and passed to oneDNN as an input.
+    /// The zero-point applies to a scaled value and is a floating-point
+    /// number.
+    dnnl_quantization_mode_static_sbzp,
 } dnnl_quantization_mode_t;
 
 /// @struct dnnl_primitive_attr

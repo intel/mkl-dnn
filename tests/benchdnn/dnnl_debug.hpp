@@ -55,4 +55,7 @@ const char *accumulation_mode2str(dnnl_accumulation_mode_t mode);
 /* rounding mode */
 const char *rounding_mode2str(dnnl_rounding_mode_t mode);
 
+/* quantization mode */
+const char *quantization_mode2str(dnnl_quantization_mode_t mode);
+
 #endif

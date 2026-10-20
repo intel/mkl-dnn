@@ -135,6 +135,9 @@ status_t ip_attr_check(const inner_product_desc_t &desc, const engine_t *engine,
 
         // Check scales
         if (!attr->scales_.has_default_values()) {
+            VCHECK_IP_UNIMPL(attr->scales_.has_default_qmode(),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             const auto &sc = attr->scales_;
             VCHECK_IP_UNIMPL(IMPLICATION(!sc.has_default_values(DNNL_ARG_SRC),
                                      sc.get_mask(DNNL_ARG_SRC) == 0),

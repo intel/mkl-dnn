@@ -151,6 +151,9 @@ status_t ref_matmul_t::execute_ref(const exec_ctx_t &ctx) const {
     memory_desc_t wei_scale_md {};
     CHECK(attr_scales.get(DNNL_ARG_WEIGHTS)
                     .get_md(wei_scale_md, *weights_d.md_));
+    // Scales applied before zero-points (both entries use the same mode).
+    const bool with_wei_sbzp
+            = with_wei_scales && attr_scales.get(DNNL_ARG_WEIGHTS).is_sbzp();
 
     const bool with_dst_scales = !attr_scales.has_default_values(DNNL_ARG_DST);
     const auto dst_scale_dt = attr_scales.get_data_type(DNNL_ARG_DST);
@@ -192,26 +195,30 @@ status_t ref_matmul_t::execute_ref(const exec_ctx_t &ctx) const {
 
                 // weights decompression should happen before the operation
                 if (with_wei_decompression) {
+                    float wei_zp = 0.f;
                     if (with_wei_zero_points) {
                         const dim_t wei_zp_offset
                                 = matmul_helper_t::get_quant_off(
                                         weights_dims_idx, ndims, wei_zp_mask,
                                         wei_zp_group_k, wei_zp_group_n,
                                         wei_zp_md);
-                        const auto wei_zp = io::load_float_value(
+                        wei_zp = io::load_float_value(
                                 wei_zp_dt, wei_zero_points, wei_zp_offset);
-                        w -= wei_zp;
                     }
+                    float wei_scale = 1.f;
                     if (with_wei_scales) {
                         const dim_t wei_scale_offset
                                 = matmul_helper_t::get_quant_off(
                                         weights_dims_idx, ndims, wei_scale_mask,
                                         wei_scale_group_k, wei_scale_group_n,
                                         wei_scale_md);
-                        const float wei_scale = io::load_float_value(
+                        wei_scale = io::load_float_value(
                                 wei_scale_dt, wei_scales, wei_scale_offset);
-                        w *= wei_scale;
                     }
+                    // static_sbzp applies the scale first, static_sazp the
+                    // zero-point first.
+                    w = with_wei_sbzp ? w * wei_scale - wei_zp
+                                      : (w - wei_zp) * wei_scale;
                 }
                 acc += s * w;
             }

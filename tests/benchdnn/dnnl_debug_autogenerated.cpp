@@ -1803,3 +1803,7 @@ const char *accumulation_mode2str(dnnl_accumulation_mode_t mode) {
 const char *rounding_mode2str(dnnl_rounding_mode_t mode) {
     return dnnl_rounding_mode2str(mode);
 }
+
+const char *quantization_mode2str(dnnl_quantization_mode_t mode) {
+    return dnnl_quantization_mode2str(mode);
+}

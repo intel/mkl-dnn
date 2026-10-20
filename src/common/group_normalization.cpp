@@ -158,6 +158,9 @@ status_t group_normalization_attr_check(const group_normalization_desc_t &desc,
 
         // Check scales
         if (!attr->scales_.has_default_values()) {
+            VCHECK_GNORM_UNIMPL(attr->scales_.has_default_qmode(),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             static const std::vector<int> supported_args {
                     DNNL_ARG_SRC, DNNL_ARG_DST};
             VCHECK_GNORM_UNIMPL(

@@ -215,7 +215,7 @@ dnnl_quantization_mode_t attr_t::policy2quantization_mode(policy_t policy) {
     if (policy == policy_t::DYNAMIC_FP)
         return dnnl_quantization_mode_dynamic_fp;
 
-    return dnnl_quantization_mode_static_sazp;
+    return dnnl_quantization_mode_undef;
 }
 
 int attr_t::policy2mask(int arg, policy_t policy, int ndims,
@@ -357,6 +357,18 @@ int attr_t::arg_scales_t::entry_t::from_str(const std::string &s) {
     }
     HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
 
+    // process the quantization mode; it always follows a (possibly empty)
+    // groups field, so it is parsed as the trailing token
+    const auto qmode_str = parser::get_substr(s, start_pos, ':');
+    this->qmode = parser::parsers::str2quantization_mode(qmode_str);
+    if (this->qmode == dnnl_quantization_mode_undef) {
+        BENCHDNN_PRINT(0,
+                "Error: quantization mode \'%s\' was not recognized.\n",
+                qmode_str.c_str());
+        SAFE_V(FAIL);
+    }
+    HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
+
     return OK;
 }
 
@@ -415,6 +427,18 @@ int attr_t::zero_points_t::entry_t::from_str(const std::string &s) {
     if (!this->groups.empty() && this->groups.size() != 2) {
         BENCHDNN_PRINT(
                 0, "%s\n", "Error: the number of groups is expected to be 2.");
+        SAFE_V(FAIL);
+    }
+    HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
+
+    // process the quantization mode; it always follows a (possibly empty)
+    // groups field, so it is parsed as the trailing token
+    const auto qmode_str = parser::get_substr(s, start_pos, ':');
+    this->qmode = parser::parsers::str2quantization_mode(qmode_str);
+    if (this->qmode == dnnl_quantization_mode_undef) {
+        BENCHDNN_PRINT(0,
+                "Error: quantization mode \'%s\' was not recognized.\n",
+                qmode_str.c_str());
         SAFE_V(FAIL);
     }
     HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
@@ -898,8 +922,27 @@ std::ostream &operator<<(
         s << scale.policy;
     }
     if (scale.has_single_element()) s << ":" << scale.scale;
-    if (scale.dt != dnnl_f32 || !scale.groups.empty()) s << ':' << scale.dt;
-    if (!scale.groups.empty()) s << ":" << dims2str(scale.groups);
+
+    // TODO: generalize this backward dumping into a common helper shared with
+    // zero-points and dropout operator<<.
+    // Update the string in backward direction to prevent multiple nesting
+    // condition for each next dumping part.
+    std::string str, str_tmp;
+    if (scale.qmode != dnnl_quantization_mode_static_sazp) {
+        str_tmp = std::string(":") + quantization_mode2str(scale.qmode);
+        str = str_tmp + str;
+    }
+    if (!str.empty() || !scale.groups.empty()) {
+        str_tmp = ":"
+                + (scale.groups.empty() ? std::string()
+                                        : dims2str(scale.groups));
+        str = str_tmp + str;
+    }
+    if (!str.empty() || scale.dt != dnnl_f32) {
+        str_tmp = std::string(":") + dt2str(scale.dt);
+        str = str_tmp + str;
+    }
+    s << str;
     return s;
 }
 
@@ -909,18 +952,34 @@ std::ostream &operator<<(
 
     const char *delim = "";
     for (const auto &point : zero_points.points) {
+        const auto &e = point.second;
         s << delim << arg2str(point.first);
-        if (point.second.mask_input == attr_t::mask_input_t::mask) {
-            s << ":" << point.second.mask;
+        if (e.mask_input == attr_t::mask_input_t::mask) {
+            s << ":" << e.mask;
         } else {
-            assert(point.second.mask_input == attr_t::mask_input_t::policy);
-            s << ":" << point.second.policy;
+            assert(e.mask_input == attr_t::mask_input_t::policy);
+            s << ":" << e.policy;
         }
-        if (point.second.has_single_element()) s << ":" << point.second.value;
-        if (point.second.dt != dnnl_s32 || !point.second.groups.empty())
-            s << ':' << point.second.dt;
-        if (!point.second.groups.empty())
-            s << ":" << dims2str(point.second.groups);
+        if (e.has_single_element()) s << ":" << e.value;
+
+        // TODO: generalize this backward dumping into a common helper shared
+        // with scales and dropout operator<<.
+        // Update the string in backward direction to prevent multiple nesting
+        // condition for each next dumping part.
+        std::string str;
+        if (e.qmode != dnnl_quantization_mode_static_sazp) {
+            str.insert(0, std::string(":") + quantization_mode2str(e.qmode));
+        }
+        if (!str.empty() || !e.groups.empty()) {
+            str.insert(0,
+                    ":"
+                            + (e.groups.empty() ? std::string()
+                                                : dims2str(e.groups)));
+        }
+        if (!str.empty() || e.dt != dnnl_s32) {
+            str.insert(0, std::string(":") + dt2str(e.dt));
+        }
+        s << str;
         delim = "+";
     }
 
@@ -1078,6 +1137,8 @@ std::ostream &operator<<(std::ostream &s, const attr_t::deterministic_t &d) {
 }
 
 std::ostream &operator<<(std::ostream &s, const attr_t::dropout_t &drop) {
+    // TODO: generalize this backward dumping into a common helper shared with
+    // scales and zero-points operator<<.
     // Update the string in backward direction to prevent multiple nesting
     // condition for each next dumping part.
     std::string str, str_tmp;
@@ -1537,10 +1598,15 @@ dnnl_primitive_attr_t create_dnnl_attr(
                     ? args_mask
                     : as.get_mask(arg_name, dnnl_undefined_primitive, ndims);
 
+            // The `mx` and `dynamic_fp` modes are still carried by the policy;
+            // the explicit quantization mode carries the rest. Prefer the
+            // policy-derived mode until those migrate to the quantization mode.
+            auto qmode = attr_t::policy2quantization_mode(e.policy);
+            if (qmode == dnnl_quantization_mode_undef) qmode = e.qmode;
+
             DNN_SAFE_V(dnnl_primitive_attr_set_scales_v3(dnnl_attr, arg_name,
                     mask, static_cast<int>(e.groups.size()), e.groups.data(),
-                    e.dt, is_on_host,
-                    attr_t::policy2quantization_mode(e.policy)));
+                    e.dt, is_on_host, qmode));
         }
     }
 
@@ -1553,9 +1619,10 @@ dnnl_primitive_attr_t create_dnnl_attr(
             const auto &e = arg.second;
 
             if (e.policy == policy_t::HOST_SCALAR) {
-                DNN_SAFE_V(dnnl_primitive_attr_set_zero_points_v2(dnnl_attr,
+                // TODO: merge this into the general path below.
+                DNN_SAFE_V(dnnl_primitive_attr_set_zero_points_v3(dnnl_attr,
                         arg_name, 0 /* mask */, 0 /* ndims */, nullptr, e.dt,
-                        true /* is_on_host = true*/));
+                        1 /* is_on_host */, e.qmode));
 
                 continue;
             }
@@ -1572,8 +1639,9 @@ dnnl_primitive_attr_t create_dnnl_attr(
             const auto &groups = e.groups.data();
             const auto dt = e.dt;
 
-            DNN_SAFE_V(dnnl_primitive_attr_set_zero_points(
-                    dnnl_attr, arg_name, mask, group_ndims, groups, dt));
+            DNN_SAFE_V(dnnl_primitive_attr_set_zero_points_v3(dnnl_attr,
+                    arg_name, mask, group_ndims, groups, dt, 0 /* is_on_host */,
+                    e.qmode));
         }
     }
 

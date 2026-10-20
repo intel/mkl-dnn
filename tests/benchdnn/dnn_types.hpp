@@ -96,13 +96,16 @@ struct attr_t {
         struct entry_t {
             entry_t(policy_t apolicy = POLICY_TOTAL, int avalue = 0,
                     dnnl_data_type_t adt = dnnl_s32,
-                    const std::vector<dnnl_dim_t> &agroups = {})
+                    const std::vector<dnnl_dim_t> &agroups = {},
+                    dnnl_quantization_mode_t aqmode
+                    = dnnl_quantization_mode_static_sazp)
                 : policy(apolicy)
                 , value(avalue)
                 , dt(adt)
                 , groups(agroups)
                 , mask_input(policy == POLICY_TOTAL ? mask_input_t::none
-                                                    : mask_input_t::policy) {}
+                                                    : mask_input_t::policy)
+                , qmode(aqmode) {}
 
             int from_str(const std::string &s);
 
@@ -121,6 +124,7 @@ struct attr_t {
             std::vector<dnnl_dim_t> groups;
             int64_t mask = INT_MIN;
             mask_input_t mask_input = mask_input_t::none;
+            dnnl_quantization_mode_t qmode = dnnl_quantization_mode_static_sazp;
         };
 
         int from_str(const std::string &s);
@@ -229,13 +233,16 @@ struct attr_t {
         struct entry_t {
             entry_t(policy_t apolicy = POLICY_TOTAL, float ascale = 1.f,
                     dnnl_data_type_t adt = dnnl_f32,
-                    const std::vector<dnnl_dim_t> &agroups = {})
+                    const std::vector<dnnl_dim_t> &agroups = {},
+                    dnnl_quantization_mode_t aqmode
+                    = dnnl_quantization_mode_static_sazp)
                 : policy(apolicy)
                 , scale(ascale)
                 , dt(adt)
                 , groups(agroups)
                 , mask_input(policy == POLICY_TOTAL ? mask_input_t::none
-                                                    : mask_input_t::policy) {}
+                                                    : mask_input_t::policy)
+                , qmode(aqmode) {}
 
             int from_str(const std::string &s);
 
@@ -247,6 +254,9 @@ struct attr_t {
             }
             bool is_mx() const { return policy == MX; }
             bool is_dynamic_fp() const { return policy == DYNAMIC_FP; }
+            bool is_sbzp() const {
+                return qmode == dnnl_quantization_mode_static_sbzp;
+            }
             bool has_single_element() const {
                 if (mask_input == mask_input_t::mask) return mask == 0;
                 assert(mask_input == mask_input_t::policy);
@@ -259,6 +269,7 @@ struct attr_t {
             std::vector<dnnl_dim_t> groups;
             int64_t mask = INT_MIN;
             mask_input_t mask_input = mask_input_t::none;
+            dnnl_quantization_mode_t qmode = dnnl_quantization_mode_static_sazp;
         };
 
         void set(int arg, const entry_t &scale) { scales[arg] = scale; }

@@ -293,6 +293,8 @@ status_t pd_t::init_attrs(const impl::engine_t *engine) {
     auto ndims = d->c_desc.ndims;
     a_quant.zp_ndims = quant_entry_ndims(a_zps, a_zp_md_, ndims - 2);
     b_quant.zp_ndims = quant_entry_ndims(b_zps, b_zp_md_, ndims - 1);
+    a_quant.zp_after_scale = a_zps.is_sbzp();
+    b_quant.zp_after_scale = b_zps.is_sbzp();
     c_quant.zp_ndims = quant_entry_ndims(c_zps, c_zp_md_, -1);
     a_quant.gs_ndims = quant_entry_ndims(a_gs, a_gs_md_, ndims - 2);
     b_quant.gs_ndims = quant_entry_ndims(b_gs, b_gs_md_, ndims - 1);
@@ -747,6 +749,8 @@ status_t pd_t::init_GEMMProblem(
         problem.bOffset = ABOffset::Calc;
     problem.aoPtrDims = a_quant.zp_host_scalar ? -1 : a_quant.zp_ndims;
     problem.boPtrDims = b_quant.zp_host_scalar ? -1 : b_quant.zp_ndims;
+    problem.aOffsetAfterScale = a_quant.zp_after_scale;
+    problem.bOffsetAfterScale = b_quant.zp_after_scale;
     problem.asPtrDims = a_quant.scale_ndims;
     problem.bsPtrDims = b_quant.scale_ndims;
 

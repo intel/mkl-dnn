@@ -179,6 +179,67 @@ static int check_attr() {
                 dnnl_s8, groups, attr_t::mask_input_t::policy);
     }
 
+    // sbzp quantization mode is encoded as the trailing token of a scale entry,
+    // following a (possibly empty) groups field. This is parser validation, so
+    // scales and zero-points are exercised independently.
+    {
+        base_settings_t s;
+        std::vector<attr_t::arg_scales_t> &sc = s.scales;
+
+        // With groups.
+        SELF_CHECK_EQ(parse_attributes(s, def,
+                              "--attr-scales=wei:per_ocic:f16:32x1:sbzp"),
+                true);
+        SELF_CHECK_EQ(sc.size(), 1);
+        std::vector<dnnl_dim_t> groups = {32, 1};
+        const auto &sc_g = sc[0].get(DNNL_ARG_WEIGHTS);
+        SELF_CHECK_EQ(sc_g.policy, policy_t::PER_OCIC);
+        SELF_CHECK_EQ(sc_g.dt, dnnl_f16);
+        for (size_t i = 0; i < groups.size(); ++i)
+            SELF_CHECK_EQ(sc_g.groups[i], groups[i]);
+        SELF_CHECK_EQ(sc_g.qmode, dnnl_quantization_mode_static_sbzp);
+
+        // Without groups: the qmode token still parses in its own slot and must
+        // not be mistaken for the groups field.
+        SELF_CHECK_EQ(parse_attributes(
+                              s, def, "--attr-scales=wei:per_tensor:f16::sbzp"),
+                true);
+        SELF_CHECK_EQ(sc.size(), 1);
+        const auto &sc_ng = sc[0].get(DNNL_ARG_WEIGHTS);
+        SELF_CHECK_EQ(sc_ng.policy, policy_t::PER_TENSOR);
+        SELF_CHECK_EQ(sc_ng.dt, dnnl_f16);
+        SELF_CHECK_EQ(sc_ng.groups.empty(), true);
+        SELF_CHECK_EQ(sc_ng.qmode, dnnl_quantization_mode_static_sbzp);
+    }
+
+    {
+        base_settings_t s;
+        std::vector<attr_t::zero_points_t> &zp = s.zero_points;
+
+        // With groups.
+        SELF_CHECK_EQ(parse_attributes(s, def,
+                              "--attr-zero-points=wei:per_ocic:f16:32x1:sbzp"),
+                true);
+        SELF_CHECK_EQ(zp.size(), 1);
+        std::vector<dnnl_dim_t> groups = {32, 1};
+        SELF_CHECK_ATTR_ZP(zp[0], DNNL_ARG_WEIGHTS, policy_t::PER_OCIC, 0,
+                dnnl_f16, groups, attr_t::mask_input_t::policy);
+        SELF_CHECK_EQ(zp[0].get(DNNL_ARG_WEIGHTS).qmode,
+                dnnl_quantization_mode_static_sbzp);
+
+        // Without groups: the qmode token still parses in its own slot and must
+        // not be mistaken for the groups field.
+        SELF_CHECK_EQ(parse_attributes(s, def,
+                              "--attr-zero-points=wei:per_tensor:f16::sbzp"),
+                true);
+        SELF_CHECK_EQ(zp.size(), 1);
+        const std::vector<dnnl_dim_t> def_g {};
+        SELF_CHECK_ATTR_ZP(zp[0], DNNL_ARG_WEIGHTS, policy_t::PER_TENSOR, 0,
+                dnnl_f16, def_g, attr_t::mask_input_t::policy);
+        SELF_CHECK_EQ(zp[0].get(DNNL_ARG_WEIGHTS).qmode,
+                dnnl_quantization_mode_static_sbzp);
+    }
+
     {
         base_settings_t s;
         std::vector<attr_t::arg_scales_t> &sc = s.scales;

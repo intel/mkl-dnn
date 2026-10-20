@@ -734,6 +734,22 @@ execution_mode_t str2execution_mode(const std::string &str) {
     return execution_mode_t::direct;
 }
 
+// Maps a QUANT_MODE token to its library quantization mode. Accepts both the
+// library-canonical names emitted by `quantization_mode2str` and the shorter
+// aliases. Returns `undef` for an unrecognized token so callers can tell a
+// quantization mode apart from a neighbor token (e.g. groups) without failing.
+dnnl_quantization_mode_t str2quantization_mode(const std::string &str) {
+    auto s = utils::lowercase(str);
+    if (s == "sazp" || s == "static_sazp")
+        return dnnl_quantization_mode_static_sazp;
+    if (s == "sbzp" || s == "static_sbzp")
+        return dnnl_quantization_mode_static_sbzp;
+    if (s == "mx" || s == "dynamic_mx")
+        return dnnl_quantization_mode_dynamic_mx;
+    if (s == "dynamic_fp") return dnnl_quantization_mode_dynamic_fp;
+    return dnnl_quantization_mode_undef;
+}
+
 runtime_kind_t str2runtime_kind(const std::string &str) {
     auto s = utils::lowercase(str);
     if (s == "cpu") {

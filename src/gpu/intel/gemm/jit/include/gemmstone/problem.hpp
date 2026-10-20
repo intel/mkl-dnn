@@ -165,7 +165,8 @@ enum class BinaryOp {
     Add, Sub, Mul, Div,
     Min, Max,
     Prelu,
-    ScaleSub    /* internal use only */
+    ScaleSub,   /* internal use only */
+    MulSub      /* internal use only */
 };
 
 // Problem parameters shared between kernel types.
@@ -192,6 +193,8 @@ struct GEMMProblem : public CommonProblem {
     bool checkBeta0 = true;                         // If true, check for beta = 0 and handle specially.
     ABOffset aOffset = ABOffset::None;              // A/B offset modes.
     ABOffset bOffset = ABOffset::None;              //
+    bool aOffsetAfterScale = false;                 // If true, A/B offsets are applied after the scales:
+    bool bOffsetAfterScale = false;                 //   x = q * scale - offset (floating-point offsets).
     int aoPtrDims = -1, boPtrDims = -1;             // A/B offset dimensionality (-1: none; 0: scalar; 1: vector, 2: matrix)
     int coPtrDims = -1;                             // C offset dimensionality (-1: none or hostscalar; 0 - others)
     int asPtrDims = -1, bsPtrDims = -1, csPtrDims = -1;           // A/B scale dimensionality (-1: none; 0: scalar; 1: vector, 2: matrix)
@@ -352,6 +355,7 @@ struct GEMMProblem : public CommonProblem {
         s.append(checkBeta0);
         s.append(bdpasEnabled);
         s.append(aOffset, bOffset);
+        s.append(aOffsetAfterScale, bOffsetAfterScale);
         s.append(aoPtrDims, boPtrDims, coPtrDims);
         s.append(asPtrDims, bsPtrDims, csPtrDims);
         s.append(aqGroupM, aqGroupK);

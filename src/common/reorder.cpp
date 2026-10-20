@@ -114,8 +114,14 @@ status_t reorder_desc_init(reorder_desc_t *reorder_desc,
                            zero_points.has_default_values(DNNL_ARG_DST)),
             VERBOSE_UNSUPPORTED_ZP_CFG);
 
+    VCHECK_REORDER_UNIMPL(
+            zero_points.has_default_qmode(), VERBOSE_UNSUPPORTED_ZP_CFG);
+
     // Check scales
     if (!attr->scales_.has_default_values()) {
+        VCHECK_REORDER_UNIMPL(attr->scales_.has_default_qmode(),
+                VERBOSE_UNSUPPORTED_SCALES_CFG);
+
         static const std::vector<int> supported_args {
                 DNNL_ARG_SRC, DNNL_ARG_DST};
         VCHECK_REORDER_UNIMPL(attr->scales_.has_default_values(supported_args),

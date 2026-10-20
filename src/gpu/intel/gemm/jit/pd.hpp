@@ -48,6 +48,8 @@ struct quant_params {
     int group_n = 0;
     bool force_gs = false;
     bool zp_host_scalar = false;
+    // Zero-points applied after the scales (static_sbzp quantization mode).
+    bool zp_after_scale = false;
 };
 
 status_t transfer_post_ops(

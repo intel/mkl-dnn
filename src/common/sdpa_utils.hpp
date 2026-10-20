@@ -181,6 +181,15 @@ static inline status_t sdpa_attr_check(const memory_desc_t *q_desc,
         return status::success;
     }
 
+    // Implementations handle the default quantization mode only.
+    for (const auto *a : {attr, kq_attr, vs_attr}) {
+        if (!a) continue;
+        VCHECK_SDPA_UNIMPL(
+                a->scales_.has_default_qmode(), VERBOSE_UNSUPPORTED_SCALES_CFG);
+        VCHECK_SDPA_UNIMPL(a->zero_points_.has_default_qmode(),
+                VERBOSE_UNSUPPORTED_ZP_CFG);
+    }
+
     using namespace dnnl::impl::data_type;
     if (kq_attr && !kq_attr->has_default_values()) {
         const auto &sc = kq_attr->scales_;

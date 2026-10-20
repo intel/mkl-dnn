@@ -188,6 +188,9 @@ status_t deconv_attr_check(const deconvolution_desc_t &desc,
 
         // Check scales
         if (!attr->scales_.has_default_values()) {
+            VCHECK_DECONV_UNIMPL(attr->scales_.has_default_qmode(),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             const auto &sc = attr->scales_;
             const bool with_groups
                     = desc.src_desc.ndims != desc.weights_desc.ndims;
@@ -208,6 +211,9 @@ status_t deconv_attr_check(const deconvolution_desc_t &desc,
 
         // Check zero points
         if (!attr->zero_points_.has_default_values()) {
+            VCHECK_DECONV_UNIMPL(attr->zero_points_.has_default_qmode(),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+
             const auto &zp = attr->zero_points_;
 
             VCHECK_DECONV_UNIMPL(
