@@ -53,11 +53,11 @@ point closes.
 | Model (GGUF Q4_K_M) | Rounded zero point | Exact zero point | Vulkan backend | Gap closed |
 | ------------------- | -----------------: | ---------------: | -------------: | ---------: |
 | Gemma-4 E2B         |              0.363 |           0.0196 |         0.0187 |      99.7% |
-| Llama-3.2 1B        |              0.041 |           0.0019 |         0.0014 |      98.7% |
-| SmolLM2 1.7B        |              0.073 |           0.0103 |         0.0092 |      98.3% |
+| Llama-3.2 1B        |              0.041 |           0.0018 |         0.0014 |      99.1% |
+| SmolLM2 1.7B        |              0.073 |           0.0101 |         0.0092 |      98.5% |
 | Phi-3.5 mini        |              0.031 |           0.0048 |         0.0040 |      97.0% |
-| Phi-4 mini          |              0.036 |           0.0108 |         0.0030 |      76.4% |
-| Qwen3.5 4B          |              0.025 |           0.0032 |         0.0039 |       103% |
+| Phi-4 mini          |              0.036 |           0.0108 |         0.0030 |      76.0% |
+| Qwen3.5 4B          |              0.025 |           0.0033 |         0.0039 |       103% |
 
 The cause is the same for every model; the models differ in how sensitive they
 are to the shift and in how many of their tensors use Q4_K. Phi-4 mini's
@@ -65,10 +65,9 @@ remaining gap is not from zero points: llama.cpp's OpenVINO backend requantizes
 its Q6_K token embedding, which is also its output layer, to 8 bits. Keeping
 that tensor in Q6_K brings Phi-4 mini to 0.0031 (Vulkan: 0.0030).
 
-The "exact zero point" column was measured with the first version of this
-proposal, which stored $m/d$ as an `f16` zero point under `static_sazp`. The
-mode proposed here represents the same weights with the offset itself as the
-zero point, which avoids the division.
+The "exact zero point" column uses the mode proposed here, `static_sbzp`, with
+the GGUF offset itself as the `f16` zero point: OpenVINO's GPU plugin adapted
+to the mode, on oneDNN with a prototype of this proposal.
 
 OpenVINO's GGUF frontend has the same limitation: its default Q4_K mapping uses
 u4 weights with integer zero points, and its opt-in path for exact zero points
@@ -212,102 +211,6 @@ dequantization error. Reading the GGUF block directly would avoid the extra
 storage, but it would add the format's packing to oneDNN (see Native GGUF
 block formats).
 
-## Implementation
-
-The prototype is a single commit on oneDNN main (`2dd09b52c`, October 12,
-2026) and changes 36 files (686 lines added, 75 removed), including tests and
-documentation.
-
-### Attributes and checks
-
-* `dnnl_quantization_mode_static_sbzp` (C) and `quantization_mode::static_sbzp`
-  (C++); `set_zero_points_v3()`.
-* When the attribute is set: `static_sbzp` is accepted only for
-  `DNNL_ARG_WEIGHTS`, with `f16` or `bf16` data types and not on the host;
-  floating-point zero points only with `static_sbzp`.
-* Default deny: implementations list the attributes they support in
-  `primitive_attr_t::has_default_values()`, and a new skip-mask bit,
-  `static_sbzp`, is checked there. Unless an implementation passes this bit,
-  any attribute that uses the mode is rejected, so implementations that don't
-  check the quantization mode today cannot misread a floating-point zero
-  point. Matmul implementations that use `attr_scales_ok()` and
-  `attr_zero_points_ok()` also reject it, because those accept only
-  `static_sazp` by default.
-* Matmul (common checks): the scope rules in the table above, which need both
-  the scales and the zero points to be final.
-* SDPA and gated MLP pass weight quantization attributes to the GEMM
-  microkernels separately and reject `static_sbzp` explicitly.
-
-### Intel GPU `jit:gemm`
-
-`jit:gemm` already applies the zero point and the grouped scale to the weights
-in registers before the dot product (subtract, then multiply). For
-`static_sbzp`, a new problem flag reverses the order, and the scale and the
-zero point are applied together in one fused multiply-add
-($q \times scale + (-zp)$):
-
-* `u4`/`s4` weights: the int4 conversion runs without the zero point, which
-  `static_sazp` folds into it; the multiply-add follows.
-* `u8` weights (general path): the multiply-add replaces the subtract and the
-  multiply.
-* `bf16` activations: the zero point is subtracted after the scale, in a
-  separate operation, because the scale and the zero point have different
-  internal types there.
-
-The flag is part of the kernel key. The GEMM microkernels (SDPA, gated MLP)
-don't support it.
-
-### Reference implementations
-
-* CPU reference matmul: $w = q \times scale - zp$ for `static_sbzp`.
-* GPU reference matmul: per-element floating-point dequantization, with the
-  zero point read using its data type.
-
-### Tests and documentation
-
-* benchdnn: `:static_sbzp` (or `:sbzp`) suffix on `--attr-scales` and
-  `--attr-zero-points`; reference support; floating-point zero-point test
-  values; a new input, `harness_matmul_decompression_sbzp` (`u4`, `s4`, `u8`
-  weights; `f16` and `bf16`; groups 32 to 256; `ab`, `ba` and `any` weights
-  layouts; post-ops), added to `test_matmul_gpu` and `test_matmul_all`.
-* gtests (`test_iface_attr`): API validation and matmul creation rules.
-* Documentation: the quantization attributes guide (both modes, the
-  destination note, the scope, and the mapping examples), the matmul page, and
-  the API reference.
-
-## Validation
-
-Tested with the prototype as described (scale and zero point in one fused
-multiply-add) on two GPU generations: an Intel Arc B390 (Xe3, integrated) and
-an Intel Arc B580 (Xe2, discrete). The B580 results are for the final commit.
-The B390 results are for the same change on an older main, before two checks
-were added that reject configurations only the reference implementations ran
-(scales and zero points of a type different from the activations, and integer
-destinations); every configuration tested there is still accepted.
-
-| Test                                        | Arc B390                                       | Arc B580                       |
-| ------------------------------------------- | ---------------------------------------------- | ------------------------------ |
-| `test_iface_attr`                           | All passed on CPU (29) and GPU (27)            | All passed on CPU (29) and GPU (27) |
-| New benchdnn input on GPU                   | 159/159 passed, all executed by `jit:gemm`     | 159/159 passed, all executed by `jit:gemm` |
-| New benchdnn input on CPU (reference)       | 159/159 passed                                 | not run (host CPU without `f16`/`bf16` support; skipped by benchdnn) |
-| LLM-sized shapes on GPU (1)                 | 20/20 passed                                   | 20/20 passed                   |
-| `test_matmul_ci` on GPU                     | Same status as main for every case that ran with both builds (5,983 cases) | 5,569 passed, 264 mistrusted, 5 failed, 145 skipped (5,983 cases); the 5 failed cases (none uses `static_sbzp`) fail the same way on main |
-
-(1) `f16` `u4` groups 32 and 128, `f16` `s4` group 64, `f16` `u8` group 128,
-`bf16` `s4` group 128; M = 1, 32, 512; K and N up to 8192.
-
-An earlier version of the prototype, which subtracted the zero point in a
-separate operation, also passed 32/32 LLM-sized cases (including `bf16` `u4`),
-and a negative control: with `jit:gemm` forced back to the `static_sazp` order,
-all 159 cases of the new input failed, so the tests tell the two orders apart.
-
-In `test_matmul_ci` on the B390, both builds give 5,569 passed, 264
-mistrusted, 5 failed and 145 skipped cases. On that machine some cases stop the
-run with `CL_OUT_OF_RESOURCES` with and without the change (for example an
-`f8_e5m2` case with `e8m0` scales and no zero points, which fails the same way
-on main when run alone), and which case stops a run varies, so the suite was
-run in segments around them.
-
 ## Performance
 
 Existing configurations are unaffected: the new mode is opt-in, and the
@@ -324,8 +227,8 @@ weights, scales and zero points are read from memory as in an LLM decode step;
 Intel Arc B390, `f16` activations and scales, `u4` weights, minimum over three
 rounds, ms):
 
-| Groups | Shape (M x K x N)  | `static_sbzp`, `f16` zp | First RFC version, `f16` zp | `static_sazp`, `u4` zp |
-| -----: | ------------------ | ----------------------: | --------------------------: | ---------------------: |
+| Groups | Shape (M x K x N)  | `static_sbzp`, `f16` zp | `static_sazp`, `f16` zp | `static_sazp`, `u4` zp |
+| -----: | ------------------ | ----------------------: | ----------------------: | ---------------------: |
 |    128 | 1 x 4096 x 4096    |                  0.0833 |                      0.0839 |                 0.0820 |
 |        | 1 x 3072 x 8192    |                  0.1284 |                      0.1272 |                 0.1230 |
 |        | 1 x 8192 x 3072    |                  0.1252 |                      0.1254 |                 0.1224 |
@@ -337,11 +240,12 @@ rounds, ms):
 |        | 32 x 4096 x 4096   |                  0.2064 |                      0.2229 |                 0.2164 |
 |        | 512 x 4096 x 4096  |                  0.3869 |                      0.3697 |                 0.3804 |
 
-The "first RFC version" column is the earlier prototype of this proposal
-(`f16` zero points under `static_sazp`, based on an older main). For single-row
-products the kernels are limited by memory bandwidth (about 107 GB/s for
-1 x 4096 x 4096 with groups of 128), and `static_sbzp` takes the same time as
-that prototype. Compared with integer zero points it takes 2% to 4% longer
+The middle column is the alternative of `f16` zero points ($m/d$) under
+`static_sazp` (see Alternatives considered), measured with a prototype on an
+older main. For single-row products the kernels are limited by memory
+bandwidth (about 107 GB/s for 1 x 4096 x 4096 with groups of 128), and
+`static_sbzp` takes the same time as that alternative. Compared with integer
+zero points it takes 2% to 4% longer
 with groups of 128 and 7% to 8% longer with groups of 32, which is the extra
 data of `f16` zero points (16 instead of 4 bits per group: 2.3% and 8.1% more
 bytes per weight). For 32 and 512 rows, the differences are within the
@@ -349,7 +253,8 @@ run-to-run variation.
 
 With warm caches (the same benchdnn runs without `--cold-cache`), where the
 dequantization arithmetic instead of the memory traffic decides, `static_sbzp`
-also takes the same time as the first version: 0.0242 ms against 0.0263 ms for
+also takes the same time as `f16` zero points under `static_sazp`: 0.0242 ms
+against 0.0263 ms for
 1 x 4096 x 4096 and 0.0433 ms against 0.0439 ms for 1 x 3072 x 8192 (groups of
 128).
 
@@ -388,29 +293,35 @@ lower. With `bf16` activations and `s4` weights (groups of 128),
 0.0429 ms and 0.0790 against 0.0991 ms for the three shapes) and equal for 32
 and 512 rows.
 
-End to end, the first version of this proposal cost 0.8% to 1.9% of decode
+End to end, `f16` zero points under `static_sazp` cost 0.8% to 1.9% of decode
 throughput at a 1K context in llama.cpp's OpenVINO backend, with prefill
 within the run-to-run variation, compared with rounded integer zero points.
 `static_sbzp` has the same kernel time, so we expect the same.
 
 ## Accuracy
 
-The weights `static_sbzp` reconstructs from GGUF Q4_K data are as close to the
-exact values as with the first RFC version, and much closer than with rounded
-integer zero points. Dequantization error over all 96 Q4_K tensors of
+The weights `static_sbzp` reconstructs from GGUF Q4_K data are much closer to
+the exact values than with rounded integer zero points, and as close as with
+`f16` zero points under `static_sazp`. Dequantization error over all 96 Q4_K
+tensors of
 Llama-3.2 1B (830 million weights), against exact dequantization in double
 precision, with the arithmetic done in `f16` as in the kernel:
 
 | Zero point                                          | RMS error (% of RMS weight) | Max. abs. error |
 | --------------------------------------------------- | --------------------------: | --------------: |
 | Rounded integer, $scale \times (q - round(m/d))$    |                       8.23% |         5.7e-02 |
-| `f16` $m/d$ under `static_sazp` (first RFC version) |                      0.071% |         9.5e-04 |
+| `f16` $m/d$ under `static_sazp`                     |                      0.071% |         9.5e-04 |
 | `f16` $m$ under `static_sbzp` (one fused operation) |                      0.069% |         7.3e-04 |
 
 This is a numerical simulation of the dequantization (Python, `f16` rounding
-after each operation of the kernel), not a measurement on the GPU. End-to-end
-results with OpenVINO and llama.cpp need the OpenVINO GPU plugin to be adapted
-to the new mode, and are not measured yet.
+after each operation of the kernel), not a measurement on the GPU.
+
+End to end, on the GPU, the KL divergence table in the Introduction is
+measured with `static_sbzp`: llama.cpp's OpenVINO backend with OpenVINO's GPU
+plugin adapted to the mode, on an Intel Arc B390. With `static_sbzp`, the KL
+divergence against the CPU backend drops by 70% to 96% compared with rounded
+integer zero points, and the gap to the Vulkan backend closes by 97% or more on
+five of the six models.
 
 ## Alternatives considered
 
@@ -422,9 +333,9 @@ exactly.
 
 ### Floating-point zero points under the existing mode
 
-The first version of this proposal: allow `f16`, `bf16` and `f32` zero points
-with $W_f = scale \times (W_{\mathrm{int}} - zp)$, opted in per implementation.
-It needs no new API and gives the same accuracy, but the framework still
+Allow `f16`, `bf16` and `f32` zero points with
+$W_f = scale \times (W_{\mathrm{int}} - zp)$, opted in per implementation. It
+needs no new API and gives the same accuracy, but the framework still
 computes $-b / scale$, the zero point loses its integer meaning without the
 semantics saying so, and implementations that ignore the zero-point data type
 would misread it. A mode makes the semantics explicit and lets every
@@ -473,8 +384,8 @@ two-level scales), but it would tie oneDNN to one format's packing.
 1. Agree on the mode, the API and the scope in this RFC.
 2. Land the change: API and checks, reference implementations, Intel GPU
    `jit:gemm`, benchdnn and gtests, documentation.
-3. Later, on request: per-channel scales, integer activations (see the open
-   questions), other weights arguments (gated MLP), optimized CPU
+3. Later, on request: per-channel scales, integer activations (driven by
+   performance data), other weights arguments (gated MLP), optimized CPU
    implementations, more primitives.
 
 ## Open questions
@@ -484,12 +395,12 @@ two-level scales), but it would tie oneDNN to one format's packing.
    combinations (for example, `bf16` activations with `f16` scales and zero
    points)?
 2. **Validation on other GPUs:** the prototype is tested on Intel Arc B390
-   (Xe3) and B580 (Xe2) GPUs. We would like the oneDNN team's help to cover
-   other generations (for example Xe-LPG, Xe-HPG and Xe-HPC).
+   (Xe3) and B580 (Xe2) GPUs. Resolved: the oneDNN team will cover the other
+   generations, and reported bugs come back to the authors.
 3. **Integer activations:** frameworks can quantize activations to `s8` at run
    time (OpenVINO's dynamic quantization for compressed weights). With
    `static_sbzp` weights, the zero point term of each group becomes
    $zp \times \sum x$ without the weights scale, so it needs per-group sums of
-   the activations, as precomputed reductions provide for `static_sazp`. This
-   proposal rejects integer activations with `static_sbzp`; should it be
-   planned as the first extension?
+   the activations, as precomputed reductions provide for `static_sazp`.
+   Resolved: not in the first revision. Dynamic quantization is an
+   optimization, so this extension is driven by performance data.
