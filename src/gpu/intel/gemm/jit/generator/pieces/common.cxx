@@ -63,6 +63,11 @@ void Generator<hw>::epilogue(const CommonStrategy &strategy, CommonState &state)
 {
     auto r0_info = state.r0_info;
 
+#ifdef STANDALONE
+    if (strategy.tracking.startEnd)
+        addTimepoint(TimepointThreadEnd, state);
+#endif
+
     if (!getEfficient64Bit() && r0_info.getBase() < 112) {
         mov<uint32_t>(r0DWords(hw), r127, r0_info);
         r0_info = r127;

@@ -72,11 +72,13 @@ struct GEMMCandidate {
     GEMMProblem problem;
     GEMMStrategy strategy;
 
+#ifndef STANDALONE
     /* Serialization for kernel cache. */
     void serialize(SerializationStream &s) const
     {
         s.append(problem, strategy);
     }
+#endif
 };
 
 /* Ranked microkernel candidates for one request, built without generating code.

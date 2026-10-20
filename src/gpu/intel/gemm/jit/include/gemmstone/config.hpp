@@ -23,7 +23,11 @@
 
 namespace gemmstone {
 enum class GEMMVerbose { DebugInfo };
+#ifdef STANDALONE
+int getVerbose(GEMMVerbose v);
+#else
 inline int getVerbose(GEMMVerbose v) { return 0; }
+#endif
 } // namespace gemmstone
 
 #define GEMMSTONE_ASSERTIONS 1
@@ -40,6 +44,21 @@ inline int getVerbose(GEMMVerbose v) { return 0; }
 #endif
 #endif
 
+#endif
+
+#ifdef STANDALONE
+#   if defined(FORMAT_ABBREV_)
+#       define ASM_OUTPUT
+#   elif defined(FORMAT_ABBREV_b)
+#       define BINARY_OUTPUT
+#   elif defined(FORMAT_ABBREV_e)
+#       define ZEBIN_OUTPUT
+#   elif defined(FORMAT_ABBREV_o)
+#       define OPENCL_OUTPUT
+#       ifndef CL_TARGET_OPENCL_VERSION
+#           define CL_TARGET_OPENCL_VERSION 210
+#       endif
+#   endif
 #endif
 
 #ifdef GEMMSTONE_WITH_OPENCL_RUNTIME

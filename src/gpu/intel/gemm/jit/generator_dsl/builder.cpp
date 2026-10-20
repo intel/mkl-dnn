@@ -291,6 +291,7 @@ struct tensor_config_t {
     transform_t transform;
 };
 
+#ifndef STANDALONE
 void apply_post_ops(const dnnl::impl::gpu::intel::gpu_post_ops_t &ops,
         const tensor_t &C, const std::vector<expr_t> &idxs,
         const std::vector<idx_t> &dims) {
@@ -365,6 +366,7 @@ void apply_post_ops(const dnnl::impl::gpu::intel::gpu_post_ops_t &ops,
         }
     }
 }
+#endif
 
 // Basic iterator with no iteration over m and n.
 struct basic_iterator_t : kloop_iterator_t {
@@ -611,7 +613,9 @@ struct generator_dsl_t {
                 strategy.kb_load, C_base);
 
         auto store_C = [&]() {
+#ifndef STANDALONE
             apply_post_ops(problem.postOps.ops, C, C_idxs, {m_var, n_var});
+#endif
             store(kloop_it.C_store(), C, {}, {C_store_transform.cache_hint});
         };
 

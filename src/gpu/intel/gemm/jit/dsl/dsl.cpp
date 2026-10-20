@@ -1299,6 +1299,7 @@ global_tensor_t def_global_tensor(const std::string &name,
             name, batch_idxs, dims, sizes, std::move(strides), transpose);
 }
 
+#ifndef STANDALONE
 namespace op {
 kind_t kind(dnnl::impl::alg_kind_t alg) {
     using namespace dnnl::impl::alg_kind;
@@ -1321,6 +1322,7 @@ kind_t kind(dnnl::impl::alg_kind_t alg) {
     return op::kind_t::undef;
 }
 } // namespace op
+#endif
 
 } // namespace dsl
 GEMMSTONE_NAMESPACE_END

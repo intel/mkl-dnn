@@ -45,6 +45,10 @@ static inline bool useEltwiseInjector(const GEMMProblem &problem)
 template <HW hw>
 bool Generator<hw>::gemmUpdateC(GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state)
 {
+#ifdef STANDALONE
+    if (problem.mock.cUpdate)
+        return true;
+#endif
 
     auto Tc = problem.Tc;
     auto Tco = problem.Tco;
@@ -74,6 +78,7 @@ bool Generator<hw>::gemmUpdateC(GEMMProblem &problem, GEMMStrategy &strategy, GE
         if (!gemmApplyCOffsetDispatch(problem, strategy, state)) return false;
     }
 
+#ifndef STANDALONE
     // Prepare legacy eltwise postop injector if configured.
     GRFRange postOpScratch;
     if (useEltwiseInjector(problem)) {
@@ -87,6 +92,7 @@ bool Generator<hw>::gemmUpdateC(GEMMProblem &problem, GEMMStrategy &strategy, GE
             postOpScratch = state.ra.alloc_range(postOpInjector->min_scratch_regs());
         postOpInjector->set_scratch(postOpScratch);
     }
+#endif
 
     // Convert C to the type of alpha/beta if needed and if possible (no data size change).
     // If not possible, must be done at a lower level during C update.
@@ -114,11 +120,13 @@ bool Generator<hw>::gemmUpdateC(GEMMProblem &problem, GEMMStrategy &strategy, GE
     if (!gemmAccessC(COperation::UpdateStore, problem, strategy, state))
         return false;
 
+#ifndef STANDALONE
     // Postop cleanup.
     if (useEltwiseInjector(problem)) {
         postOpInjector.reset();
         state.ra.safeRelease(postOpScratch);
     }
+#endif
 
     // Free C data and layout.
     safeReleaseRanges(state.C_regs, state);
@@ -152,7 +160,9 @@ bool Generator<hw>::gemmAccessC(COperation op, const GEMMProblem &problem, const
         auto modProblem = problem;
         modProblem.alpha = 1;
         modProblem.beta = 0;
+#ifndef STANDALONE
         modProblem.postOps = PostOps{};
+#endif
         modProblem.cOffset = COffset::None;
         return gemmAccessC(COperation::UpdateStore, modProblem, strategy, state);
     }
@@ -194,6 +204,7 @@ bool Generator<hw>::gemmAccessC(COperation op, const GEMMProblem &problem, const
     // MX dst scaling must be applied after all other post-ops before store.
     bool splitUpdateStore = (problem.cOffset == COffset::Post) || problem.hasCMXScale();
 
+#ifndef STANDALONE
     // New post-op path: do all post-ops up to sum, if any.
     size_t poSum = 0;
     bool newPostOps = !useEltwiseInjector(problem);
@@ -204,6 +215,7 @@ bool Generator<hw>::gemmAccessC(COperation op, const GEMMProblem &problem, const
         gemmApplyPostOps(0, poSum, problem, strategy, state);
         splitUpdateStore |= (poSum + 1 < problem.postOps.len());
     }
+#endif
 
     if (op == COperation::UpdateStore && splitUpdateStore) {
         // C postoffset is implemented by splitting the update and store steps.
@@ -219,11 +231,13 @@ bool Generator<hw>::gemmAccessC(COperation op, const GEMMProblem &problem, const
         storeProblem.alpha = 1;
         storeProblem.beta = 0;
 
+#ifndef STANDALONE
         // Do any post-sum post-ops.
         if (newPostOps)
             gemmApplyPostOps(poSum + 1, problem.postOps.len(), problem, strategy, state);
         storeProblem.postOps = PostOps{};
         gemmApplyMXScale(problem, strategy, state);
+#endif
         storeProblem.cMXScale = false;
 
         if (problem.cOffset == COffset::Post)
@@ -663,10 +677,12 @@ bool Generator<hw>::gemmUpdateCDispatch(GEMMProblem &problem, GEMMStrategy &stra
 
             subproblem.beta = 1;
 
+#ifndef STANDALONE
             if (subproblem.postOps.len() > 0) {
                 auto &lastPO = subproblem.postOps[subproblem.postOps.len() - 1];
                 if (lastPO.is_sum()) lastPO.set_scale(1.0f);
             }
+#endif
 
             if (!gemmUpdateC(subproblem, strategy, substate)) return false;
 
@@ -812,6 +828,7 @@ void Generator<hw>::updateC(const GRFMultirange &C_acc, const GRFMultirange &C_a
         FOR_EACH_C(mul(esize, acc, acc, valphar.getRegAvoiding(hw, acc)));
     }
 
+#ifndef STANDALONE
     if (useEltwiseInjector(problem)) {
         Label labelPostOpDone;
         bool allocFlag = state.flagAP.isInvalid();
@@ -826,6 +843,7 @@ void Generator<hw>::updateC(const GRFMultirange &C_acc, const GRFMultirange &C_a
             postOpInjector->compute(range);
         mark(labelPostOpDone);
     }
+#endif
 
 #undef FOR_EACH_C
 #undef FOR_EACH_C_CX
@@ -1033,6 +1051,9 @@ void Generator<hw>::updateCLayout(const RegisterLayout &layoutExt, const Registe
                 // Load C data.
                 auto &sublayoutLoad = (loadOnly && !copyC) ? sublayoutAcc : sublayoutExt;
                 auto &C_loadRange   = (loadOnly && !copyC) ? C_accRange   : C_extRange;
+#ifdef STANDALONE
+                if (!problem.mock.cLoad)
+#endif
                     loadMatrix(C_loadRange, sublayoutLoad, C_addrs[0], strategy, state);
 
                 // Set up a0.0 descriptor for stores (and save load descriptors) if needed.
@@ -1147,7 +1168,13 @@ void Generator<hw>::updateCLayout(const RegisterLayout &layoutExt, const Registe
                 auto &sublayoutSrc = copyC || needsFullK ? sublayoutExt : sublayoutAcc;
                 auto &C_srcRange = copyC || needsFullK ? C_extRange : C_accRange;
 
+#ifdef STANDALONE
+                if (!problem.mock.cStore) {
+#endif
                 FOR_EACH_C storeMatrix(C_srcRange, sublayoutSrc, C_addrs[q], strategy, state);
+#ifdef STANDALONE
+                }
+#endif
             }
 
             state.setTacc(originalTacc);
@@ -1646,6 +1673,10 @@ void Generator<hw>::doAlternateCRemainder(COperation op, const GEMMProblem &prob
     int rsimd;
     rsimd = 64 >> rshift;
 
+#ifdef STANDALONE
+    status << "Generic C remainder handling (m/n)" << status_stream::endl;
+#endif
+
     auto &block0 = state.C_layout[0];
     bool cColMajorMem = isColMajor(problem.C.layout);
     bool cColMajorReg = block0.colMajor;
@@ -1958,6 +1989,9 @@ void Generator<hw>::doAlternateCRemainder(COperation op, const GEMMProblem &prob
         } else
             block.flag[0] = VirtualFlag(mod.getFlagReg(), hw);
 
+#ifdef STANDALONE
+        if (!(problem.mock.cLoad && problem.mock.cStore))
+#endif
         atomicAddMatrixBlock(Tc_ext, GRFRange(Cacc.getBase(), Cacc.getLen()), block, problem.C, strategy.C, header[0], problem, strategy, state);
 
         if (branchAtomic) {
@@ -1979,6 +2013,9 @@ void Generator<hw>::doAlternateCRemainder(COperation op, const GEMMProblem &prob
         }
 
         // Regular update.
+#ifdef STANDALONE
+        if (!problem.mock.cLoad)
+#endif
         if (loadOnly || !problem.beta0()) {
             doReadSuppressionWA(strategy, state);
             if (atomicLoad && hw >= HW::Xe2) {
@@ -2023,6 +2060,9 @@ void Generator<hw>::doAlternateCRemainder(COperation op, const GEMMProblem &prob
                          IGNORE_SWSB mov<uint32_t>(8  | mod | M8, indirect[a0[3]].ud(), src.sub(hw, 8, DataType::ud)(1)); break;
             } else stub();
         } else
+#ifdef STANDALONE
+        if (!problem.mock.cStore)
+#endif
         FOR_EACH_C {
             if (strategy.C.newDP) {
                 !byte_access         ? store(16 | mod, D32    | strategy.C.cachingW, strategy.C.base, header[q], Cacc) :
@@ -2323,6 +2363,10 @@ void Generator<hw>::gemmKReduce(const GEMMProblem &problem, const GEMMStrategy &
 {
     auto Tc = problem.Tc;
     Label lDone;
+
+#ifdef STANDALONE
+    if (problem.mock.cUpdate && !problem.mock.keepKReduce) return;
+#endif
 
     // Early exit if nothing to do. All branching scalar since no fusing in k dimension.
     if (!strategy.fixedWGK()) {
@@ -2678,6 +2722,10 @@ void Generator<hw>::gemmPrefetchC(const GEMMProblem &problem, GEMMStrategy &stra
     state.Cp_regs = state.ra.alloc_range(state.Cp_layout.regs());
 
     loadMatrix(state.Cp_regs, state.Cp_layout, state.Cp_addrs, strategy, state);
+#ifdef STANDALONE
+    if (problem.readCheck && problem.readCheckC)
+        readCheck(state.Cp_regs, strategy, state);
+#endif
 
     safeReleaseRanges(state.Cp_regs, state);
     safeReleaseRanges(state.Cp_addrs, state);

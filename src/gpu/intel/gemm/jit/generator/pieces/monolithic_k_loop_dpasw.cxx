@@ -1295,6 +1295,12 @@ void Generator<hw>::sysgemmMultiplyChunk(const GEMMProblem &problem, const GEMMS
         auto A = aReg.retype(problem.Ta.ngen());
         auto B = bReg.retype(problem.Tb.ngen());
         auto C = cReg.retype(problem.Tc.ngen());
+#ifdef STANDALONE
+        if (problem.mock.multiply) {
+            mod.setExecSize(0);
+            sync.nop(mod);
+        } else
+#endif
         first ? dpasw(mod, sdepth, rcount, C, null.retype(problem.Tc.ngen()), A, B)
               : dpasw(mod, sdepth, rcount, C, C, A, B);
     };
@@ -2536,6 +2542,12 @@ void Generator<hw>::sysgemm2MultiplyChunkX48(const GEMMProblem &problem, const G
 
     auto dpaswTyped = [&](InstructionModifier mod, uint8_t sdepth, uint8_t rcount,
                           const GRF &cReg, const GRF &aReg, const GRF &bReg) {
+#ifdef STANDALONE
+        if (problem.mock.multiply) {
+            mod.setExecSize(0);
+            sync.nop(mod);
+        } else
+#endif
         dpasw(mod, sdepth, rcount, cReg.retype(problem.Tc.ngen()), cReg.retype(problem.Tc.ngen()),
                                    aReg.retype(problem.Ta.ngen()), bReg.retype(problem.Tb.ngen()));
     };
@@ -2582,6 +2594,12 @@ void Generator<hw>::sysgemm2MultiplyChunkX32(const GEMMProblem &problem, const G
 
     auto dpaswTyped = [&](InstructionModifier mod, uint8_t sdepth, uint8_t rcount,
                           const GRF &cReg, const GRF &aReg, const GRF &bReg) {
+#ifdef STANDALONE
+        if (problem.mock.multiply) {
+            mod.setExecSize(0);
+            sync.nop(mod);
+        } else
+#endif
         dpasw(mod, sdepth, rcount, cReg.retype(problem.Tc.ngen()), cReg.retype(problem.Tc.ngen()),
                                    aReg.retype(problem.Ta.ngen()), bReg.retype(problem.Tb.ngen()));
     };

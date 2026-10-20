@@ -178,6 +178,12 @@ struct CommonState {
         ngen::Subregister callStorageSub, callStorage;
         bool use = false;
     } invertSub;
+#ifdef STANDALONE
+    struct {
+        uint8_t surface;                            // BTS index for tracking data buffer
+        ngen::Subregister stride;                   // uw, per-thread storage space for tracking information, in bytes
+    } tracking;
+#endif
 
     CommonState(ngen::HW hw) : ra(hw), raVFlag(hw), tokenAllocator(hw) {}
 
@@ -464,6 +470,9 @@ struct GEMMState : public CommonState {
     ngen::GRF r0InfoGRF() const;
     void setTacc(Type T);
 
+#ifdef STANDALONE
+    void dump(std::ostream &s);
+#endif
 };
 
 GEMMSTONE_NAMESPACE_END

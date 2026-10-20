@@ -60,6 +60,9 @@ struct EvaluateAuxOutput {
     bool kParallel = false;
     bool kParallelVariable = false;
     bool disableAtomics = false;
+#ifdef STANDALONE
+    double ctime, mtime, etime;
+#endif
 };
 
 DerivedEvaluateParams getDerivedParams(const kcatalog::Entry &e, const EvaluateParams &p);

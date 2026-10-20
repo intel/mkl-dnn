@@ -191,6 +191,11 @@ void Generator<hw>::gemmFusedBetaScale(GEMMProblem problem, GEMMStrategy strateg
     // Skip if our tile is completely outside C.
     InstructionModifier cond = simt | f0[1] | anyv;
 
+#ifdef STANDALONE
+    if (problem.mock.cUpdate || problem.mock.cStore)
+        jmpi(1, lScaleDone);
+    else
+#endif
     strategy.fused ? goto12(cond, lScaleDone)
                    :  ejmpi(cond, lScaleDone);
 
@@ -436,7 +441,9 @@ bool Generator<hw>::gemmFusedPostOpsFinalize(Label &labelLateExit, GEMMProblem &
     auto modState = state;
 
     modProblem.beta = 1;
+#ifndef STANDALONE
     modProblem.postOps = PostOps{};
+#endif
     if (modProblem.cOffset == COffset::Post)
         modProblem.cOffset = COffset::None;
 

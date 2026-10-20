@@ -173,6 +173,9 @@ enum class BinaryOp {
 struct CommonProblem {
     bool nonuniformWGs = false;                 // Support nonuniform workgroups?
     bool gtpinSupport = false;                  // Support GT-Pin?
+#ifdef STANDALONE
+    bool readCheck = false;                     // Check for read overruns?
+#endif
 };
 
 // GEMM kernel problem description.
@@ -210,8 +213,30 @@ struct GEMMProblem : public CommonProblem {
     bool hasGroupSumsB = false;
     bool bdpasEnabled = false;                             // bdpas enabled for problem.
     bool cMXScale = false;
+#ifdef STANDALONE
+    struct MockSettings {
+        bool abZeroInc = false;                     // If true, increment A/B pointers by zero.
+        bool abInc = false;                         // If true, omit A/B increments completely.
+        bool abLoad = false;                        // If true, omit A/B loads completely.
+        bool abRandom = false;                      // If true, A/B will be prefilled with random data (when loads omitted); if false, all zeroes.
+        bool abInit = false;                        // If true, skip A/B prefill when A/B loads are omitted.
+        bool cInit = false;                         // If true, omit C accumulator initialization.
+        bool cUpdate = false;                       // If true, omit C update and by default, any local k reduction.
+        bool keepKReduce = false;                   //   Don't omit local k reduction.
+        bool cLoad = false;                         // If true, omit C loads.
+        bool cStore = false;                        // If true, omit C stores.
+        bool slmW = false;                          // If true, omit SLM writes.
+        bool multiply = false;                      // If true, omit matrix multiplications.
+        bool slmInit = false;                       // If true, initialize SLM to NaN.
+        bool barriers = false;                      // If true, omit barriers.
+    } mock;
+    bool readCheckA = true;                         // Perform read checks (if enabled) on A.
+    bool readCheckB = true;                         // Perform read checks (if enabled) on B.
+    bool readCheckC = true;                         // Perform read checks (if enabled) on C.
+#endif
     ngen::Product product;
     MatrixAddressing sroundSeed;
+#ifndef STANDALONE
     PostOpsProblem postOps;                         // Fused post operations to apply
 
     // The following data is derived from the postOps and does not need
@@ -238,6 +263,14 @@ struct GEMMProblem : public CommonProblem {
             postOps.ops.pop_back();
     }
     bool binaryPostProcess() const { return postOps.cStochasticRound || hasCScale(); }
+#else
+    bool hasPostOp() const { return false; }
+    bool hasNonSum1PostOp() const { return false; }
+    bool hasBinaryPostOp() const { return false; }
+    bool hasSum1PostOpAtEnd() const { return false; }
+    void removeFinalSumPostOp() {}
+    bool binaryPostProcess() const { return hasCScale(); }
+#endif
 
     bool beta0() const   { return (beta  ==  0); }
     bool beta1() const   { return (beta  ==  1); }
@@ -343,6 +376,7 @@ struct GEMMProblem : public CommonProblem {
         return To.asSigned().isSubsetOf(T) && (To.bits() < T.bits() || T_ext.bits() < T.bits());
     }
 
+#ifndef STANDALONE
     /* Serialization for kernel cache. */
     void serialize(SerializationStream &s) const
     {
@@ -373,6 +407,7 @@ struct GEMMProblem : public CommonProblem {
         s.append(postOps);
         s.append(product);
     }
+#endif
 };
 
 

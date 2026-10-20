@@ -88,6 +88,9 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
     bool allowFixedMasks = (remOpts & NoFixedMasks) == 0;
     bool prefetch = astrategy.prefetch;
     bool atomic = astrategy.atomic;
+#ifdef STANDALONE
+    prefetch |= astrategy.pfLoad;
+#endif
 
     int R = rounddown_pow2(r);
     int C = rounddown_pow2(c);

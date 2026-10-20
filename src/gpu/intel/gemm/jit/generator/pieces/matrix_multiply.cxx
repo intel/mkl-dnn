@@ -38,6 +38,14 @@ void Generator<hw>::outerProduct(int h, int ha_period, int hb_period, int opCoun
                                  const GRFMultirange &A_regs, const GRFMultirange &B_regs,
                                  const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state)
 {
+#ifdef STANDALONE
+    if (problem.readCheck)
+        noop();
+    else if (problem.mock.multiply) {
+        if (hw >= HW::Gen12LP)
+            wrdepRanges({A_regs, B_regs});
+    } else
+#endif
     if (strategy.dotVL)
         innerProductFMA(h, ha_period, hb_period, opCount, rem, A_layout, B_layout, A_regs, B_regs, problem, strategy, state);
     else if (strategy.systolic)

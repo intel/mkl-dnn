@@ -94,8 +94,36 @@ CommonDriverInfo Generator<hw>::driverInfo(GEMMProblem problem, const GEMMStrate
     info.support4GB[2] = (strategy.C.base.getModel() == ModelA64);
     if (strategy.kParallel || strategy.kParallelVariable)
         info.blockingAlt[LoopK] = strategy.kPadding;
+#ifdef STANDALONE
+    info.problem = problem.toString() + ' ' + problem.scalarsToString();
+    if (strategy.systolic)
+        info.extra = "sys";
+    if (strategy.tracking.enabled)
+        info.extra += " track";
+    if (strategy.strongReadCheck)
+        info.extra += " src";
+    if (strategy.relaxedAccumulation)
+        info.extra += " rx";
+    if (!strategy.optAlignAB2D) {
+        if (isBlock2D(strategy.A.accessType))   /* rely on automatic downgrading for prefetches */
+            info.extra += " a2d";
+        if (isBlock2D(strategy.B.accessType))
+            info.extra += " b2d";
+    }
+    if (isBlock2D(strategy.C.accessType) || (strategy.prefetchC && isBlock2D(strategy.C_prefetch.accessType)))
+        info.extra += " c2d";
+    if (strategy.A.base.getModel() == ModelSLM)
+        info.extra += " alocal";
+    if (strategy.B.base.getModel() == ModelSLM)
+        info.extra += " blocal";
+    if (strategy.C.base.getModel() == ModelSLM)
+        info.extra += " clocal";
+#endif
 
     return info;
 }
+
+#ifdef STANDALONE
+#endif /* STANDALONE */
 
 GEMMSTONE_NAMESPACE_END

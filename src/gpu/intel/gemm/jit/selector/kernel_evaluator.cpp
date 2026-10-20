@@ -158,6 +158,12 @@ double evaluateSCore(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, 
 
     double time = ctime + std::max(mtime, etime);
 
+#ifdef STANDALONE
+    aux.ctime = ctime;
+    aux.mtime = mtime;
+    aux.etime = etime;
+#endif
+
     return time;
 #undef PARAM
 }
@@ -214,6 +220,11 @@ double evaluateS(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, Eval
 
             score += evaluateSCore(e, dp0, aux0);
 
+#ifdef STANDALONE
+            aux.ctime += aux0.ctime;
+            aux.mtime += aux0.mtime;
+            aux.etime += aux0.etime;
+#endif
         }
 
         return score;
@@ -353,6 +364,12 @@ double evaluateECore(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, 
 
     double time = ctime + std::max(mtime, etime);
 
+#ifdef STANDALONE
+    aux.ctime = ctime;
+    aux.mtime = mtime;
+    aux.etime = etime;
+#endif
+
     return time;
 #undef PARAM
 }
@@ -408,6 +425,11 @@ double evaluateE(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, Eval
 
             score += evaluateECore(e, dp0, aux0);
 
+#ifdef STANDALONE
+            aux.ctime += aux0.ctime;
+            aux.mtime += aux0.mtime;
+            aux.etime += aux0.etime;
+#endif
         }
 
         return score;

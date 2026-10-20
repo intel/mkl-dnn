@@ -295,10 +295,12 @@ void CopyPlan::transform()
 
     legalizeShfl();
 
+#ifndef STANDALONE
 #if GEMMSTONE_ENABLE_COPY_PLAN_DUMP
     const auto verbose = getVerbose(GEMMVerbose::DebugInfo);
     if (verbose >= 170)
         dump(verbose >= 180);
+#endif
 #endif
 }
 

@@ -164,6 +164,17 @@ void Generator<hw>::loadMatrixBlock(const Register &dest, const RegisterBlock &b
                 load(mod, dest, aligned_block_oword(block.count), astrategy.base, addr);
             else
                 hw_unsupported();
+#ifdef STANDALONE
+            if (readCheck && (astrategy.base.getModel() == ModelBTS)) {
+                auto init = (strategy.strongReadCheck ? ~uint32_t(0) : uint32_t(0));
+                if (flag.isValid())
+                    mov<uint32_t>(block.simdSize | ~maskMod, dest, init);
+                if (block.simdSize <= 2)
+                    mov<uint32_t>(2, dest[2](1), init);
+                if (block.simdSize <= 1)
+                    mov<uint32_t>(1, dest[1], init);
+            }
+#endif
             break;
         default: stub();
     }

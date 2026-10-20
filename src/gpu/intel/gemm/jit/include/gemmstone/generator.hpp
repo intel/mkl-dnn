@@ -49,6 +49,10 @@ GEMMSTONE_NAMESPACE_START
 // Macro configuration
 #ifndef GENERATOR_BASE
 
+#if defined(STANDALONE) && (defined(ASM_OUTPUT) + defined(BINARY_OUTPUT) + defined(OPENCL_OUTPUT) + defined(ZEBIN_OUTPUT) != 1)
+#error "Exactly one *_OUTPUT format must be defined"
+#endif
+
 #if defined(OPENCL_OUTPUT)
 #define GENERATOR_SUPER(hw) ngen::OpenCLCodeGenerator<hw>
 #define FORWARD(hw) NGEN_FORWARD_OPENCL(hw)
@@ -70,17 +74,28 @@ template <ngen::HW hw> class Generator : public GENERATOR_BASE(hw) {
 public:
     using super = GENERATOR_SUPER(hw);
 
+#ifdef ASM_OUTPUT
+    Generator(ngen::Product product) : super(hw) {}
+#else
     Generator(ngen::Product product) : GENERATOR_BASE(hw)(product, GENERATOR_DEBUGINFO) {}
+#endif
 
     FORWARD(hw)
 
     // Kernel generation entrypoints.
     void gemm(GEMMProblem problem, GEMMStrategy strategy, const ngen::InterfaceHandler &interface_);
+#ifdef STANDALONE
+#endif
     void gemmMicrokernel(GEMMProblem problem, GEMMStrategy strategy, const ngen::InterfaceHandler &interface_);
+#if defined(BINARY_OUTPUT) || !defined(STANDALONE)
     microkernel::Package gemmMicrokernelPackage(const GEMMProblem &problem, const GEMMStrategy &strategy, const ngen::InterfaceHandler &interface_, const microkernel::Protocol &protocol, uint32_t gmdid, bool transposeC = false);
+#endif
 
     // Driver information retrieval.
     static CommonDriverInfo driverInfo(GEMMProblem problem, const GEMMStrategy &strategy);
+
+#ifdef STANDALONE
+#endif
 
 protected:
 #if defined(OPENCL_OUTPUT) || defined(ZEBIN_OUTPUT)
@@ -94,8 +109,10 @@ protected:
     RegisterLayout outputCLayout;
     microkernel::ClobberSet knownClobbers;
 
+#ifndef STANDALONE
     using Injector = PostOpsProblem::Injector<hw>;
     std::unique_ptr<Injector> postOpInjector;
+#endif
 
     class status_stream {
     protected:
@@ -114,10 +131,22 @@ protected:
 
         template <typename T>
         status_stream &operator<<(const T &obj) {
+#ifdef ASM_OUTPUT
+            if (lineStart)
+                line << "\x1B[1;3" << cc << 'm';
+            line << obj;
+            lineStart = false;
+#endif
             return *this;
         }
 
         status_stream &operator<<(const Endl &e) {
+#ifdef ASM_OUTPUT
+            line << "\x1B[0m";
+            lineStart = true;
+            parent.comment(line.str());
+            line.str(std::string());
+#endif
             return *this;
         }
     } status{*this};
@@ -285,6 +314,21 @@ protected:
     void copyRegisters(Type Ts, Type Td, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst, const GRFMultirange &src, const GRFMultirange &dst, int dOffR, int dOffC, const Scalar &alpha, const SubregisterPair &alpha_real, const SubregisterPair &alpha_imag, bool conjugate, const CommonStrategy &strategy, CommonState &state, bool preserveSrc = false, bool s4Shift = true);
     void copyExecute(CopyPlan &&plan, CommonState &state);
     void overlappedCopy(const GRFMultirange &src, const GRFMultirange &dst, CommonState &state);
+
+#ifdef STANDALONE
+    // debug_tools.cxx
+    void readCheckInitMatrix(const GRFMultirange &r, const CommonStrategy &strategy);
+    void readCheckInitMatrix(const GRFMultirange &r, const RegisterLayout &layout, const CommonStrategy &strategy);
+    void readCheck(const GRFMultirange &r, const CommonStrategy &strategy, CommonState &state, const RegisterLayout *layout = nullptr);
+    void gemmFinalizeReadCheck(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    void gemmStoreReadCheck(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+
+    void mockInitMatrix(Type T, const GRFMultirange &r, const CommonStrategy &strategy, bool random);
+    void mockInitSLM(Type T, size_t bytes, CommonState &state);
+
+    void gemmInitTracking(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+    template <typename TT> void addTimepoint(TT type, CommonState &state);
+#endif
 
     // emulation.cxx
     friend struct ngen::EmulationImplementation;
@@ -510,6 +554,18 @@ protected:
     void sysgemm2MultiplyChunkX32(const GEMMProblem &problem, const GEMMStrategy &strategy, int chunkA, bool odd);
     void sysgemm2MultiplyChunkX48(const GEMMProblem &problem, const GEMMStrategy &strategy, int chunkA);
 
+#ifdef STANDALONE
+    // notes.cxx
+public:
+    std::string getNotes();
+
+protected:
+    void gemmKernelAnalysis(GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
+    void gemmKernelNotes(GEMMProblem &problem, GEMMStrategy &strategy);
+    void driverInfoNotes(const CommonDriverInfo &info);
+    std::stringstream noteStream;
+#endif
+
     // post_ops.cxx
     void gemmAlphaScale(GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state, bool cxCombine = true);
     void gemmBetaScale(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
@@ -524,9 +580,11 @@ protected:
     bool gemmBinaryOpC(BinaryOp op, bool row, bool column, Type Tco, MatrixAddressing CO, MatrixAddressingStrategy CO_strategy, ngen::Subregister base, ngen::Subregister ld, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     bool gemmApplyCOffsetDispatch(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 
+#ifndef STANDALONE
     void gemmApplyPostOps(size_t poMin, size_t poMax, const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void gemmApplyMXScale(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
     void gemmLoadBinaryOpArgs(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
+#endif
 
     // quantization.cxx
     bool gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &problem, GEMMStrategy &strategy, GEMMState &state);
@@ -581,7 +639,11 @@ protected:
     void gemmReorderLocalIDs(const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state);
 };
 
+#ifdef STANDALONE
+#define MOCK_BARRIERS if (!problem.mock.barriers)
+#else
 #define MOCK_BARRIERS
+#endif
 
 template <ngen::HW hw> using gemm_kernel_generator_t = Generator<hw>;
 

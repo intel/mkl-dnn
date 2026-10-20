@@ -388,6 +388,11 @@ void Generator<hw>::gemmAllocRegs(GEMMProblem &problem, GEMMStrategy &strategy, 
                 }
             }
 
+#ifdef STANDALONE
+            auto N_mask = N_bundles.regMask(0) & ((uint64_t(1) << Bundle(0,0).stride(hw)) - 1);
+            status << "N bundle mask: " << std::hex << N_mask << std::dec << status_stream::endl;
+#endif
+
             if (repackV)
                 Vr_regs = chunkAlloc(Vr_regCount, V_chunk, hintV0, VC_bundles, state);
             else for (int copy = 0; copy < V_copies; copy++)
@@ -576,6 +581,10 @@ void Generator<hw>::gemmAllocRegs(GEMMProblem &problem, GEMMStrategy &strategy, 
     state.Agr_regs = state.ra.alloc_range(state.Agr_layout.regs());
     state.Bgr_regs = state.ra.alloc_range(state.Bgr_layout.regs());
 
+#ifdef STANDALONE
+    if (problem.readCheck)
+        state.readFailures = state.C_regs[0][0].ud(0);
+#endif
 }
 
 template <HW hw>

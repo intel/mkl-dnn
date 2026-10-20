@@ -18,6 +18,9 @@
 #define GEMMSTONE_INCLUDE_GEMMSTONE_DRIVER_INFO_HPP
 
 #include <cstdint>
+#ifdef STANDALONE
+#include <iostream>
+#endif
 #include <string>
 
 #include "gemmstone/config.hpp"
@@ -95,6 +98,10 @@ struct CommonDriverInfo {
     int perKSLM;                    // If > 0, dynamically allocate at least perKSLM * wg[LoopK] bytes of SLM.
     int alignment[3];               // Address alignment requirements for A,B,C (gemm) or S,D (copy).
     bool support4GB[3];             // True if >4GB buffers allowed for A,B,C (gemm) or S,D (copy).
+#ifdef STANDALONE
+    std::string problem;            // String representation of problem.
+    std::string extra;              // String representation of any Extra information.
+#endif
 
     bool fusedEUs()           const { return (fusedLoop != LoopNone); }
     bool isMNK()              const { auto l = loopOrder[0] & ~LoopPersistent; return l == LoopM || l == LoopMNHilbertMNK || l == LoopMNBoustrophedonMNK || l == LoopMNLinearMNK || l == LoopMNNestedLinearMNK; }
@@ -146,6 +153,10 @@ struct CommonDriverInfo {
         return cInterleaveEnabled() ? 64 / Tc_ext : 1;
     }
 
+#ifdef STANDALONE
+    inline void dump(std::ostream &s, bool withExtras = true) const;
+    static inline CommonDriverInfo undump(std::istream &s, bool withExtras = true);
+#endif
 };
 
 // Definitions for flag arguments to kernels.
@@ -164,6 +175,214 @@ enum {
     FlagSkipBetaCheck = 0x200,
     FlagKSlice2 = 0x10000,
 };
+
+#ifdef STANDALONE
+void CommonDriverInfo::dump(std::ostream &s, bool withExtras) const
+{
+    s << std::boolalpha << '{';
+    s << subgroupSize << ", ";
+    s << "(LoopType) " << int(fusedLoop) << ", ";
+    s << grfCount << ", {";
+    s << "(LoopType) " << int(loopOrder[0]) << ", ";
+    s << "(LoopType) " << int(loopOrder[1]) << ", ";
+    s << "(LoopType) " << int(loopOrder[2]) << "}, {";
+    s << blocking[0] << ", ";
+    s << blocking[1] << ", ";
+    s << blocking[2] << "}, {";
+    s << blockingAlt[0] << ", ";
+    s << blockingAlt[1] << ", ";
+    s << blockingAlt[2] << "}, {";
+    s << unroll[0] << ", ";
+    s << unroll[1] << ", ";
+    s << unroll[2] << "}, {";
+    s << wg[0] << ", ";
+    s << wg[1] << ", ";
+    s << wg[2] << "}, ";
+    s << wgExpand << ", ";
+    s << "(WGType) " << int(wgUpdate) << ", ";
+    s << flags << ", ";
+    s << slm << ", ";
+    s << perKSLM << ", {";
+    s << alignment[0] << ", ";
+    s << alignment[1] << ", ";
+    s << alignment[2] << "}, {";
+    s << support4GB[0] << ", ";
+    s << support4GB[1] << ", ";
+    s << support4GB[2] << '}';
+    if (withExtras) {
+        s << ", \"";
+        s << problem << "\", \"";
+        s << extra << "\"";
+    }
+    s << '}';
+    s << std::noboolalpha;
+}
+
+CommonDriverInfo CommonDriverInfo::undump(std::istream &s, bool withExtras)
+{
+    auto expect = [&](char c) {
+        char in;
+        s >> std::ws;
+
+        if (s.eof())
+            throw std::runtime_error("Fatal error parsing CommonDriverInfo");
+
+        s >> in;
+
+        if (in != c)
+            throw std::runtime_error("Fatal error parsing CommonDriverInfo");
+    };
+
+    auto readLoop = [&]() {
+        int intInput;
+        s >> std::ws;
+        if (s.peek() == '(') {
+            std::string cast = "(LoopType)";
+            for (auto &c: cast)
+                expect(c);
+        }
+        s >> intInput;
+        return static_cast<LoopType>(intInput);
+    };
+
+    auto readWG = [&]() {
+        s >> std::ws;
+        if (s.peek() == '(') {
+            int intInput;
+            std::string cast = "(WGType)";
+            for (auto &c: cast)
+                expect(c);
+            s >> intInput;
+            return static_cast<WGType>(intInput);
+        } else {
+            bool fixedWG;
+            s >> fixedWG;
+            return fixedWG ? WGFixed : WGDynamic;
+        }
+    };
+
+    auto readFlags = [&]() {
+        uint64_t flags = 0;
+        s >> std::ws;
+        if (!std::isalpha(s.peek()))
+            s >> flags;
+        else {
+            bool kRemainderHandling, kParallel, kParallelLocal;
+
+            s >> kRemainderHandling;
+            expect(',');
+            s >> kParallel;
+            expect(',');
+            s >> kParallelLocal;
+
+            if (kRemainderHandling) flags |= FlagKRemainderHandling;
+            if (kParallel)          flags |= FlagKParallel;
+            if (kParallelLocal)     flags |= FlagKParallelLocal;
+        }
+        return flags;
+    };
+
+    auto read2 = [&](int (&array)[2]) {
+        expect('{');
+        for (int i = 0; i < 2; i++) {
+            if (i > 0) expect(',');
+            s >> array[i];
+        }
+        expect('}');
+    };
+
+    auto read3 = [&](int (&array)[3]) {
+        expect('{');
+        for (int i = 0; i < 3; i++) {
+            if (i > 0) expect(',');
+            s >> array[i];
+        }
+        expect('}');
+    };
+
+    CommonDriverInfo result;
+
+    // Read lines until we get to one starting with '{'
+    s >> std::ws;
+    while (s.peek() != '{') {
+        std::string line;
+        std::getline(s, line);
+        s >> std::ws;
+        if (s.eof())
+            throw std::runtime_error("Fatal error parsing CommonDriverInfo");
+    }
+
+    s >> std::boolalpha;
+    expect('{');
+    s >> result.subgroupSize;
+    expect(',');
+    result.fusedLoop = readLoop();
+    expect(',');
+    s >> result.grfCount;
+    expect(',');
+    expect('{');
+    for (int i = 0; i < 3; i++) {
+        if (i > 0) expect(',');
+        result.loopOrder[i] = readLoop();
+    }
+    expect('}');
+    expect(',');
+    read3(result.blocking);
+    expect(',');
+    read3(result.blockingAlt);
+    expect(',');
+    read3(result.unroll);
+    expect(',');
+    read3(result.wg);
+    expect(',');
+    s >> result.wgExpand;
+    expect(',');
+    result.wgUpdate = readWG();
+    expect(',');
+    result.flags = readFlags();
+    expect(',');
+    s >> result.slm;
+    expect(',');
+    s >> result.perKSLM;
+    expect(',');
+    read3(result.alignment);
+    expect(',');
+    expect('{');
+    for (int i = 0; i < 3; i++) {
+        if (i > 0) expect(',');
+        s >> result.support4GB[i];
+    }
+    expect('}');
+    if (withExtras) {
+        expect(',');
+        expect('"');
+        std::getline(s, result.problem, '"');
+        expect(',');
+        expect('"');
+        std::getline(s, result.extra, '"');
+    }
+    expect('}');
+    s >> std::noboolalpha;
+
+    return result;
+}
+
+enum TimepointType : uint32_t {
+    TimepointInvalid        = 0,            // Not a timepoint -- marks end of timepoint array
+    TimepointTmEvent        = 1,            // Timer interrupted, value suspect (ORs with other values below)
+    TimepointThreadStart    = 0x10000,      // Thread start
+    TimepointThreadEnd      = 0x20000,      // Thread end
+    TimepointSubthreadStart = 0x30000,      // Sub-thread start (persistent threads)
+    TimepointSubthreadEnd   = 0x40000,      // Sub-thread end (persistent threads)
+    TimepointAccumDone      = 0x50000,      // C accumulation complete
+};
+
+struct Timepoint {
+    uint32_t type;                          // See TimepointType enum
+    uint32_t time;
+};
+
+#endif /* STANDALONE */
 
 GEMMSTONE_NAMESPACE_END
 
