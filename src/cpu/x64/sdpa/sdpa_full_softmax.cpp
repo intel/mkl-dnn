@@ -38,6 +38,7 @@
 #include "cpu/x64/brgemm/brgemm.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/jit_uni_softmax.hpp"
+#include "cpu/x64/matmul/brgemm_matmul_utils.hpp"
 #include "cpu/x64/sdpa/sdpa_full_softmax_select_ir.hpp"
 
 namespace dnnl {
@@ -150,6 +151,18 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
                 dst_md, 2, d_dims, data_type::f32, format_tag::ab));
         CHECK(brgemm_desc_set_postops(&brg, &attr, &dst_md, /*LDD=*/ldc));
     }
+
+    const bool amx_fp16 = dt == data_type::f16 && mayiuse(avx512_core_amx_fp16);
+    const bool amx_vnni_k_tail = mayiuse(avx512_core_amx)
+            && (dt == data_type::bf16 || amx_fp16)
+            && K % data_type_vnni_granularity(dt) != 0;
+    if (amx_vnni_k_tail) {
+        brgemm_attr_t brgattr;
+        brgattr.extendable_k = true;
+        brgattr.wary_A_k_tail_read = true;
+        CHECK(brgemm_desc_set_attr(&brg, brgattr));
+    }
+
     CHECK(brgemm_desc_finalize(&brg));
     // AMX kernels (bf16/f16 on amx*) need a tile palette configured before
     // execution and a per-thread tile-store scratch; brgemm_init_tiles fills
@@ -198,8 +211,13 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     const dim_t k_pack = needs_vnni_b ? 2 : 1;
     const bool pack_b = needs_vnni_b;
+    const bool amx_vnni_pack = pack_b && mayiuse(avx512_core_amx)
+            && (p_.mm_dt == data_type::bf16 || mayiuse(avx512_core_amx_fp16));
+    const dim_t b_k_pad
+            = amx_vnni_pack ? matmul::get_wei_k_blk(p_.mm_dt) : k_pack;
 
     conf.b_k_pack = k_pack;
+    conf.b_k_pad = b_k_pad;
 
     const dim_t seq_q = p_.seq_q;
     const dim_t seq_kv = p_.seq_kv;
@@ -237,7 +255,9 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
                                                 / (b_panel_rows * qk_dt_sz))
                                       : seq_kv;
-    const dim_t granule = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : 16);
+    const dim_t min_granule = nstl::max<dim_t>(16, b_k_pad);
+    const dim_t granule
+            = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
     kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
     conf.kv_block = kv_block;
@@ -418,17 +438,17 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
     // buffer that follows the per-thread blocks; kt_global_bytes sizes it. For
     // bf16/f16 the tile is VNNI-packed over hs_qk (K padded to k_pack), so the
-    // buffer uses rnd_up(hs_qk, k_pack) rows.
+    // buffer uses rnd_up(hs_qk, b_k_pad) rows.
     const dim_t num_head_kv
             = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
     conf.num_head_kv = num_head_kv;
-    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, k_pack);
-    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, k_pack);
+    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, b_k_pad);
+    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, b_k_pad);
     if (need_kt && num_head_kv > 0)
         conf.kt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
                 * hs_qk_pad * seq_kv * qk_dt_sz;
     // bf16/f16: mm2's V is VNNI-packed once per (batch, kv_head) into a shared
-    // [batch x num_head_kv x rnd_up(seq_kv, k_pack) x hs_v] buffer following the
+    // [batch x num_head_kv x rnd_up(seq_kv, b_k_pad) x hs_v] buffer following the
     // transposed-K buffer.
     if (pack_b && num_head_kv > 0)
         conf.vt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
@@ -707,13 +727,14 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // VNNI-pack factor decided in init from dtype AND ISA (b_k_pack_ == 1 for
     // f32 and the non-AMX f16 FMA path, 2 for bf16 / AMX-FP16 f16).
     const dim_t k_pack = b_k_pack_;
+    const dim_t b_k_pad = conf.b_k_pad;
     const bool pack_b = k_pack > 1;
     // mm1 materialises a dense (VNNI-packed for bf16/f16) [hs_qk, seq_kv] B
     // tile whenever it must transpose or pack K; f32 with contiguous seq_kv
     // reads K in place.
     const bool need_kt = transpose_b || pack_b;
-    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, k_pack);
-    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, k_pack);
+    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, b_k_pad);
+    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, b_k_pad);
     // Element strides to walk the K tensor's seq_kv / hs_qk axes when
     // materialising the dense [hs_qk, seq_kv] transpose (see init: derived from
     // the physical layout, so this handles both natural and pre-transposed K).
@@ -747,8 +768,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                     + (static_cast<size_t>(batch_idx) * num_head_kv
                               + kv_head_idx)
                             * kt_head_elems * qk_dt_sz;
-            // Zero the VNNI tail pair when hs_qk is not a multiple of k_pack.
-            if (pack_b && hs_qk % k_pack != 0)
+            // Zero padded reduction rows for BRGEMM's VNNI/AMX K block.
+            if (pack_b && hs_qk_pad > hs_qk)
                 std::memset(kt, 0, kt_head_elems * qk_dt_sz);
             for (dim_t kv = 0; kv < seq_kv; ++kv)
                 for (dim_t h = 0; h < hs_qk; ++h) {
@@ -773,7 +794,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                     + (static_cast<size_t>(batch_idx) * num_head_kv
                               + kv_head_idx)
                             * vt_head_elems * qk_dt_sz;
-            if (seq_kv % k_pack != 0)
+            if (seq_kv_pad > seq_kv)
                 std::memset(vt, 0, vt_head_elems * qk_dt_sz);
             for (dim_t kv = 0; kv < seq_kv; ++kv)
                 for (dim_t n = 0; n < hs_v; ++n) {

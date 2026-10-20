@@ -154,6 +154,8 @@ struct sdpa_full_softmax_conf_t {
     bool mm2_direct = false;
     // BRGEMM B VNNI pack factor (1 plain, 2 VNNI2).
     dim_t b_k_pack = 1;
+    // K granularity required by the selected BRGEMM path (AMX block or VNNI).
+    dim_t b_k_pad = 1;
     bool mm1_transpose_k = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
