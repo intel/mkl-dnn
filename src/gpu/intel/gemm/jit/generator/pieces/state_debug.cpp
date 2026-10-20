@@ -15,7 +15,7 @@
 *******************************************************************************/
 
 
-#include "gemmstone/generator.hpp"
+#include "state.hpp"
 
 GEMMSTONE_NAMESPACE_START
 

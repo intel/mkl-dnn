@@ -127,7 +127,7 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         kbq_loadLate = std::min(kbq_loadLate, kInterleaveChunk);
     }
 
-    // 2D quantization remainders are loaded one group at a time
+    // In the k remainder, 2D quantization parameters are loaded one group at a time (see kLoopSetup).
     int kaq_loadRem = std::min(kaq_load, aqGroupK);
     int kbq_loadRem = std::min(kbq_load, bqGroupK);
     int kaq_loadLateRem = std::min(kaq_loadLate, aqGroupK);
@@ -1115,7 +1115,9 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         auto Ar_scaleLayout  = state.Ar_scaleLayout;
         auto Agr_layout      = state.Agr_layout;
         if (rem && kq_loadRem < kq_load) {
-            // Slice the repacked layout, taking a single k-group
+            // Like A/B, remainder groups are loaded into slot 0, and early (dequantization) consumers index
+            //  them by the remainder period. Late consumers index by the main period, so repack into its slot.
+            //  Other slots are unused in the remainder, so in-place post-processing may clobber them.
             int hq = late ? (h % kq_load) / aqGroupK : 0;
             for (auto *layout: {&Ar_offsetLayout, &Ar_scaleLayout, &Agr_layout}) {
                 if (layout->empty()) continue;
@@ -1275,6 +1277,8 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         ls.swapLast2();
 
     // A/B 2D quantization parameter loads.
+    // Loads are issued one repack (dequantization) step early, once the last step has read the old data.
+    //  Remainder groups share slot 0, so they use the remainder repack step.
     auto reqLoadAq = every(kaq_load) | duration(durationAq) | lookahead(ka_repackMain);
     auto reqLoadBq = every(kbq_load) | duration(durationBq) | lookahead(kb_repackMain);
     auto reqLoadAqRem = every(kaq_loadRem) | lookahead(ka_repackPeriodRem);

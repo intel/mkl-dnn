@@ -14,6 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
+#ifndef GEMMSTONE_INCLUDE_INTERNAL_NGEN_INCLUDES_HPP
+#define GEMMSTONE_INCLUDE_INTERNAL_NGEN_INCLUDES_HPP
+
 #include "gemmstone/config.hpp"
 
 #ifdef STANDALONE
@@ -33,4 +36,6 @@
 #   include "ngen_asm.hpp"
 #   include "ngen_opencl.hpp"
 #   include "ngen_register_allocator.hpp"
+#endif
+
 #endif
