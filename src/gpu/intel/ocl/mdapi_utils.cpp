@@ -44,7 +44,7 @@ namespace ocl {
 
 #ifdef DNNL_GPU_ENABLE_MDAPI
 
-static bool open_metrics_device(MetricsDiscovery::IMetricsDevice_1_13 **device,
+static bool open_metrics_device(MetricsDiscovery::IMetricsDeviceLatest **device,
         const std::shared_ptr<void> &lib) {
     static MetricsDiscovery::OpenMetricsDevice_fn func;
     if (!func) { *(void **)(&func) = dlsym(lib.get(), "OpenMetricsDevice"); }
@@ -53,7 +53,7 @@ static bool open_metrics_device(MetricsDiscovery::IMetricsDevice_1_13 **device,
     return code == MetricsDiscovery::CC_OK;
 }
 
-static bool close_metrics_device(MetricsDiscovery::IMetricsDevice_1_13 *device,
+static bool close_metrics_device(MetricsDiscovery::IMetricsDeviceLatest *device,
         const std::shared_ptr<void> &lib) {
     static MetricsDiscovery::CloseMetricsDevice_fn func;
     if (!func) { *(void **)(&func) = dlsym(lib.get(), "CloseMetricsDevice"); }
@@ -187,7 +187,7 @@ private:
     }
 
     bool is_initialized_ = false;
-    MetricsDiscovery::IMetricsDevice_1_13 *metric_device_ = nullptr;
+    MetricsDiscovery::IMetricsDeviceLatest *metric_device_ = nullptr;
     MetricsDiscovery::IMetricSet_1_1 *metric_set_ = nullptr;
     int freq_metric_idx_ = -1;
     std::shared_ptr<void> lib = nullptr;
