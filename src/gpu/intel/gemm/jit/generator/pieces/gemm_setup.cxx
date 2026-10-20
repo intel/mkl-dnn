@@ -1819,12 +1819,18 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
             && assignMasks(state.A_scaleLayout,  LoopM,    LoopK,       masks, strategy, state)
             && assignMasks(state.Ag_layout,      LoopM,    LoopK,       masks, strategy, state)
             && assignMasks(state.Ap_layout,      LoopM,    LoopK,    A_cmasks, strategy, state)
+            && assignMasks(state.Ap_offsetLayout,LoopM,    LoopK,    A_cmasks, strategy, state)
+            && assignMasks(state.Ap_scaleLayout, LoopM,    LoopK,    A_cmasks, strategy, state)
+            && assignMasks(state.Agp_layout,     LoopM,    LoopK,    A_cmasks, strategy, state)
             && assignMasks(state.Ai_layout,      LoopM,    LoopNone, A_cmasks, strategy, state)
             && assignMasks(state.B_layout,       LoopK,    LoopN,       masks, strategy, state)
             && assignMasks(state.B_offsetLayout, LoopK,    LoopN,       masks, strategy, state)
             && assignMasks(state.B_scaleLayout,  LoopK,    LoopN,       masks, strategy, state)
             && assignMasks(state.Bg_layout,      LoopK,    LoopN,       masks, strategy, state)
             && assignMasks(state.Bp_layout,      LoopK,    LoopN,    B_cmasks, strategy, state)
+            && assignMasks(state.Bp_offsetLayout,LoopK,    LoopN,    B_cmasks, strategy, state)
+            && assignMasks(state.Bp_scaleLayout, LoopK,    LoopN,    B_cmasks, strategy, state)
+            && assignMasks(state.Bgp_layout,     LoopK,    LoopN,    B_cmasks, strategy, state)
             && assignMasks(state.Bi_layout,      LoopNone, LoopN,    B_cmasks, strategy, state)
         ;
     };
@@ -1890,14 +1896,14 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
     allocAddrRegs(hw, state.Bg_addrs, state.Bg_layout, state);
     if (strategy.pfaux) {
         if (strategy.prefetchA) {
-            allocAddrRegs(hw, state.Ap_offsetAddrs, state.A_offsetLayout, state);
-            allocAddrRegs(hw, state.Ap_scaleAddrs,  state.A_scaleLayout,  state);
-            allocAddrRegs(hw, state.Agp_addrs,      state.Ag_layout,       state);
+            allocAddrRegs(hw, state.Ap_offsetAddrs, state.Ap_offsetLayout, state);
+            allocAddrRegs(hw, state.Ap_scaleAddrs,  state.Ap_scaleLayout,  state);
+            allocAddrRegs(hw, state.Agp_addrs,      state.Agp_layout,      state);
         }
         if (strategy.prefetchB) {
-            allocAddrRegs(hw, state.Bp_offsetAddrs, state.B_offsetLayout, state);
-            allocAddrRegs(hw, state.Bp_scaleAddrs,  state.B_scaleLayout,  state);
-            allocAddrRegs(hw, state.Bgp_addrs,      state.Bg_layout,      state);
+            allocAddrRegs(hw, state.Bp_offsetAddrs, state.Bp_offsetLayout, state);
+            allocAddrRegs(hw, state.Bp_scaleAddrs,  state.Bp_scaleLayout,  state);
+            allocAddrRegs(hw, state.Bgp_addrs,      state.Bgp_layout,      state);
         }
     }
 
@@ -2010,7 +2016,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
         setupQAddr(Tao, state.A_offsetAddrs, state.A_offsetLayout, state.inputs.aoPtr,
                    i0o, A_h0o, state.inputs.ldao, state.offsetAo);
         if (strategy.pfaux && strategy.prefetchA)
-            setupQAddr(Tao, state.Ap_offsetAddrs, state.A_offsetLayout, state.inputs.aoPtr,
+            setupQAddr(Tao, state.Ap_offsetAddrs, state.Ap_offsetLayout, state.inputs.aoPtr,
                        i0o, A_h0o, state.inputs.ldao, state.offsetAo);
     }
     if (as2D) {
@@ -2019,14 +2025,14 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
         setupQAddr(Ta_scale, state.A_scaleAddrs, state.A_scaleLayout, state.inputs.aScalePtr,
                    i0s, A_h0s, state.inputs.ldaScale, state.offsetAs);
         if (strategy.pfaux && strategy.prefetchA)
-            setupQAddr(Ta_scale, state.Ap_scaleAddrs, state.A_scaleLayout, state.inputs.aScalePtr,
+            setupQAddr(Ta_scale, state.Ap_scaleAddrs, state.Ap_scaleLayout, state.inputs.aScalePtr,
                        i0s, A_h0s, state.inputs.ldaScale, state.offsetAs);
     }
     if (ag2D) {
         setupQAddr(Tag, state.Ag_addrs, state.Ag_layout, state.inputs.agPtr,
                    i0qLate, A_h0qLate, state.inputs.ldag, state.inputs.offsetAg);
         if (strategy.pfaux && strategy.prefetchA)
-            setupQAddr(Tag, state.Agp_addrs, state.Ag_layout, state.inputs.agPtr,
+            setupQAddr(Tag, state.Agp_addrs, state.Agp_layout, state.inputs.agPtr,
                        i0qLate, A_h0qLate, state.inputs.ldag, state.inputs.offsetAg);
     }
     if (bo2D) {
@@ -2035,7 +2041,7 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
         setupQAddr(Tbo, state.B_offsetAddrs, state.B_offsetLayout, state.inputs.boPtr,
                    B_h0o, j0o, state.inputs.ldbo, state.offsetBo);
         if (strategy.pfaux && strategy.prefetchB)
-            setupQAddr(Tbo, state.Bp_offsetAddrs, state.B_offsetLayout, state.inputs.boPtr,
+            setupQAddr(Tbo, state.Bp_offsetAddrs, state.Bp_offsetLayout, state.inputs.boPtr,
                        B_h0o, j0o, state.inputs.ldbo, state.offsetBo);
     }
     if (bs2D) {
@@ -2044,14 +2050,14 @@ bool Generator<hw>::gemmAccumulateCSetup(GEMMProblem &problem, GEMMStrategy &str
         setupQAddr(Tb_scale, state.B_scaleAddrs, state.B_scaleLayout, state.inputs.bScalePtr,
                    B_h0s, j0s, state.inputs.ldbScale, state.offsetBs);
         if (strategy.pfaux && strategy.prefetchB)
-            setupQAddr(Tb_scale, state.Bp_scaleAddrs, state.B_scaleLayout, state.inputs.bScalePtr,
+            setupQAddr(Tb_scale, state.Bp_scaleAddrs, state.Bp_scaleLayout, state.inputs.bScalePtr,
                        B_h0s, j0s, state.inputs.ldbScale, state.offsetBs);
     }
     if (bg2D) {
         setupQAddr(Tbg, state.Bg_addrs, state.Bg_layout, state.inputs.bgPtr,
                    B_h0qLate, j0qLate, state.inputs.ldbg, state.inputs.offsetBg);
         if (strategy.pfaux && strategy.prefetchB)
-            setupQAddr(Tbg, state.Bgp_addrs, state.Bg_layout, state.inputs.bgPtr,
+            setupQAddr(Tbg, state.Bgp_addrs, state.Bgp_layout, state.inputs.bgPtr,
                        B_h0qLate, j0qLate, state.inputs.ldbg, state.inputs.offsetBg);
     }
 
@@ -2348,6 +2354,12 @@ void Generator<hw>::gemmAccumulateCTeardown(GEMMProblem &problem, GEMMStrategy &
     state.B_scaleLayout.clear();
     state.Ag_layout.clear();
     state.Bg_layout.clear();
+    state.Ap_offsetLayout.clear();
+    state.Bp_offsetLayout.clear();
+    state.Ap_scaleLayout.clear();
+    state.Bp_scaleLayout.clear();
+    state.Agp_layout.clear();
+    state.Bgp_layout.clear();
 
     if (state.systolicSumA || state.systolicSumB || state.fmaSumA || state.fmaSumB)
         setupTeardownAccumulateSum(false, Type::invalid, problem, strategy, state);
