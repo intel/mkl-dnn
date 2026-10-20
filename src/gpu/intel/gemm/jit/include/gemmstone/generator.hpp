@@ -65,6 +65,10 @@ GEMMSTONE_NAMESPACE_START
 #define GENERATOR_SUPER(hw) ngen::ELFCodeGenerator<hw>
 #define FORWARD(hw) NGEN_FORWARD_ELF(hw)
 #define GENERATOR_DEBUGINFO {__FILE__, __LINE__}
+#else
+#define GENERATOR_SUPER(hw) ngen::AsmCodeGenerator
+#define FORWARD(hw)
+#define GENERATOR_DEBUGINFO {__FILE__, __LINE__}
 #endif
 
 #define GENERATOR_BASE(hw) GENERATOR_SUPER(hw)
