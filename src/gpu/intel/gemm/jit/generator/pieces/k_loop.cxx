@@ -426,9 +426,9 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
             gemmALoad(state.Ap_regs, state.Ap_layout, state.Ap_addrs, problem, strategy, state);
             // Auxiliary (quantization) prefetches always immediately follow the A prefetch.
             if (aQuantPFEnabled) {
-                if (ao2D || ao2DLate) prefetchMatrix(state.A_offsetLayout, state.Ap_offsetAddrs, strategy, state);
-                if (as2D || as2DLate) prefetchMatrix(state.A_scaleLayout,  state.Ap_scaleAddrs,  strategy, state);
-                if (ag2DLate)         prefetchMatrix(state.Ag_layout,      state.Agp_addrs,      strategy, state);
+                if (ao2D || ao2DLate) prefetchMatrix(state.Ap_offsetLayout, state.Ap_offsetAddrs, strategy, state);
+                if (as2D || as2DLate) prefetchMatrix(state.Ap_scaleLayout,  state.Ap_scaleAddrs,  strategy, state);
+                if (ag2DLate)         prefetchMatrix(state.Agp_layout,      state.Agp_addrs,      strategy, state);
             }
         });
     }
@@ -449,9 +449,9 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
             gemmBLoad(state.Bp_regs, state.Bp_layout, state.Bp_addrs, problem, strategy, state);
             // Auxiliary (quantization) prefetches always immediately follow the B prefetch.
             if (bQuantPFEnabled) {
-                if (bo2D || bo2DLate) prefetchMatrix(state.B_offsetLayout, state.Bp_offsetAddrs, strategy, state);
-                if (bs2D || bs2DLate) prefetchMatrix(state.B_scaleLayout,  state.Bp_scaleAddrs,  strategy, state);
-                if (bg2DLate)         prefetchMatrix(state.Bg_layout,      state.Bgp_addrs,      strategy, state);
+                if (bo2D || bo2DLate) prefetchMatrix(state.Bp_offsetLayout, state.Bp_offsetAddrs, strategy, state);
+                if (bs2D || bs2DLate) prefetchMatrix(state.Bp_scaleLayout,  state.Bp_scaleAddrs,  strategy, state);
+                if (bg2DLate)         prefetchMatrix(state.Bgp_layout,      state.Bgp_addrs,      strategy, state);
             }
         });
     }
@@ -841,34 +841,42 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
 
     // A prefetch address increment.
     int delayAPFInc = delayABInc ? (ka_pfStride >> 1) : 0;
-    int kaPfIncQ = std::max(1, (problem.aqGroupK > 0 && ka_pfStride % problem.aqGroupK == 0)
-                                ? (ka_pfStride / problem.aqGroupK) : 1);
+    auto kaPfIncQ = [&]() {
+        if (problem.aqGroupK <= 0 || ka_pfStride % problem.aqGroupK != 0)
+            stub("aux A prefetch requires ka_pfStride to be a multiple of aqGroupK");
+        return ka_pfStride / problem.aqGroupK;
+    };
 
     if (strategy.prefetchA && readA) {
         ls.schedule(reqPFA.delay(delayAPFInc), [&](Iteration h) {
             gemmAIncrement(state.Ap_layout, state.Ap_addrs, kInc(h, ka_pfStride), problem, strategy, state);
             // Auxiliary (quantization) prefetch address increments always immediately follow.
             if (aQuantPFEnabled) {
-                if (ao2D || ao2DLate) incAddrK(state.Ap_offsetAddrs, true, kaPfIncQ, state.ldao,     state.ldaoIncrements, state.A_offsetLayout, strategy, state);
-                if (as2D || as2DLate) incAddrK(state.Ap_scaleAddrs,  true, kaPfIncQ, state.ldaScale, state.ldasIncrements, state.A_scaleLayout,  strategy, state);
-                if (ag2DLate)         incAddrK(state.Agp_addrs,      true, kaPfIncQ, state.ldag,     state.ldagIncrements, state.Ag_layout,      strategy, state);
+                auto inc = kaPfIncQ();
+                if (ao2D || ao2DLate) incAddrK(state.Ap_offsetAddrs, true, inc, state.ldao,     state.ldaoIncrements, state.Ap_offsetLayout, strategy, state);
+                if (as2D || as2DLate) incAddrK(state.Ap_scaleAddrs,  true, inc, state.ldaScale, state.ldasIncrements, state.Ap_scaleLayout,  strategy, state);
+                if (ag2DLate)         incAddrK(state.Agp_addrs,      true, inc, state.ldag,     state.ldagIncrements, state.Agp_layout,      strategy, state);
             }
         });
     }
 
     // B prefetch address increment.
     int delayBPFInc = delayABInc ? (kb_pfStride >> 1) : 0;
-    int kbPfIncQ = std::max(1, (problem.bqGroupK > 0 && kb_pfStride % problem.bqGroupK == 0)
-                                ? (kb_pfStride / problem.bqGroupK) : 1);
+    auto kbPfIncQ = [&]() {
+        if (problem.bqGroupK <= 0 || kb_pfStride % problem.bqGroupK != 0)
+            stub("aux B prefetch requires kb_pfStride to be a multiple of bqGroupK");
+        return kb_pfStride / problem.bqGroupK;
+    };
 
     if (strategy.prefetchB && readB) {
         ls.schedule(reqPFB.delay(delayBPFInc), [&](Iteration h) {
             gemmBIncrement(state.Bp_layout, state.Bp_addrs, kInc(h, kb_pfStride), problem, strategy, state);
             // Auxiliary (quantization) prefetch address increments always immediately follow.
             if (bQuantPFEnabled) {
-                if (bo2D || bo2DLate) incAddrK(state.Bp_offsetAddrs, false, kbPfIncQ, state.ldbo,     state.ldboIncrements, state.B_offsetLayout, strategy, state);
-                if (bs2D || bs2DLate) incAddrK(state.Bp_scaleAddrs,  false, kbPfIncQ, state.ldbScale, state.ldbsIncrements, state.B_scaleLayout,  strategy, state);
-                if (bg2DLate)         incAddrK(state.Bgp_addrs,      false, kbPfIncQ, state.ldbg,     state.ldbgIncrements, state.Bg_layout,      strategy, state);
+                auto inc = kbPfIncQ();
+                if (bo2D || bo2DLate) incAddrK(state.Bp_offsetAddrs, false, inc, state.ldbo,     state.ldboIncrements, state.Bp_offsetLayout, strategy, state);
+                if (bs2D || bs2DLate) incAddrK(state.Bp_scaleAddrs,  false, inc, state.ldbScale, state.ldbsIncrements, state.Bp_scaleLayout,  strategy, state);
+                if (bg2DLate)         incAddrK(state.Bgp_addrs,      false, inc, state.ldbg,     state.ldbgIncrements, state.Bgp_layout,      strategy, state);
             }
         });
     }

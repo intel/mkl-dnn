@@ -186,6 +186,31 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
     if (xs2D &&  !(X_scaleLayout = RegisterLayout::tryCreate(hw, Txs, rs,     cs,     XS, X_scaleStrategy,  remR, remC))) return false;
     if (xg2D &&      !(Xg_layout = RegisterLayout::tryCreate(hw, Txg, rNoSLM, cNoSLM, Xg, Xg_strategy,      remR, remC))) return false;
 
+    if (strategy.pfaux && (isA ? strategy.prefetchA : strategy.prefetchB)) {
+        auto &Xp_offsetLayout = isA ? state.Ap_offsetLayout : state.Bp_offsetLayout;
+        auto &Xp_scaleLayout  = isA ? state.Ap_scaleLayout  : state.Bp_scaleLayout;
+        auto &Xgp_layout      = isA ? state.Agp_layout      : state.Bgp_layout;
+        int pfChunk = isA ? strategy.ka_prefetch : strategy.kb_prefetch;
+
+        int xqPfGroups = 1;
+        if (isA ? problem.quantized2DA() : problem.quantized2DB()) {
+            if (xqGroupK <= 0 || pfChunk % xqGroupK != 0)
+                stub("aux prefetch requires ka_prefetch/kb_prefetch to be a multiple of aqGroupK/bqGroupK (see GEMMStrategy::preflight)");
+            xqPfGroups = pfChunk / xqGroupK;
+        }
+
+        int rPFo = isA ? rNoSLM : xqPfGroups;
+        int cPFo = isA ? xqPfGroups : cNoSLM;
+        int rPFs = isA ? rNoSLM : xqPfGroups;
+        int cPFs = isA ? xqPfGroups : cNoSLM;
+        int rPFg = isA ? rNoSLM : xqPfGroups;
+        int cPFg = isA ? xqPfGroups : cNoSLM;
+
+        if (xo2D && !(Xp_offsetLayout = RegisterLayout::tryCreate(hw, Txo, rPFo, cPFo, XO, X_offsetStrategy, remR, remC))) return false;
+        if (xs2D && !(Xp_scaleLayout  = RegisterLayout::tryCreate(hw, Txs, rPFs, cPFs, XS, X_scaleStrategy,  remR, remC))) return false;
+        if (xg2D && !(Xgp_layout      = RegisterLayout::tryCreate(hw, Txg, rPFg, cPFg, Xg, Xg_strategy,      remR, remC))) return false;
+    }
+
     // Adjust masks for m/n grouping.
     auto adjustMask = [=](MaskInfo &mask) {
         if (!mask || xqGroupMN <= 1) return;

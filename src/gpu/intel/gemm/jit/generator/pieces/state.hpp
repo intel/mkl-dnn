@@ -392,6 +392,9 @@ struct GEMMState : public CommonState {
     RegisterLayout A_offsetLayout, B_offsetLayout;
     RegisterLayout A_scaleLayout, B_scaleLayout, C_scaleLayout;
     RegisterLayout Ag_layout, Bg_layout;
+    RegisterLayout Ap_offsetLayout, Bp_offsetLayout;
+    RegisterLayout Ap_scaleLayout, Bp_scaleLayout;
+    RegisterLayout Agp_layout, Bgp_layout;
     RegisterLayout A_offsetLayoutRem, B_offsetLayoutRem;
     RegisterLayout A_scaleLayoutRem, B_scaleLayoutRem;
     RegisterLayout Ag_layoutRem, Bg_layoutRem;
