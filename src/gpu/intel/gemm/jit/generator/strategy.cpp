@@ -116,6 +116,12 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 
     // Addressing preflight.
 
+    // Avoid k-group-remainder logic by rounding up auxiliary tensor prefetch strides to k-group boundaries
+    if (pfaux && problem.quantized2DA() && problem.aqGroupK > 0 && (ka_pfStride % problem.aqGroupK) != 0)
+        ka_pfStride = align_up(ka_pfStride, problem.aqGroupK);
+    if (pfaux && problem.quantized2DB() && problem.bqGroupK > 0 && (kb_pfStride % problem.bqGroupK) != 0)
+        kb_pfStride = align_up(kb_pfStride, problem.bqGroupK);
+
     if (hw >= HW::Xe2) for (auto *s: {&A, &B, &C, &AO, &BO, &CO, &A_scale, &B_scale,
                                       &A_prefetch, &B_prefetch, &C_prefetch, &AB_prefetchL3})
         s->newDP = true;
