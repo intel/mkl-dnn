@@ -447,6 +447,12 @@ std::string generateShim(const Package &package, HostLanguage language,
                             "size");
             }
         } else {
+            /* Scalars are uniform, but IGC accepts only "=rw" (per-lane)
+               output constraints. */
+            if (pargs[i].out())
+                throw std::runtime_error(
+                        "Microkernel scalar output arguments are not "
+                        "supported");
             if (args[i]->location.size() != 1)
                 throw std::runtime_error(
                         "Microkernel scalar argument is not contiguous in "
