@@ -999,6 +999,9 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.bcast_B_desc.set_params(
             weights_d.dims(), dst_d.dims(), bgmmc.batch_ndims, bgmmc.batch);
 
+    VCHECK_BG(bm_conf_utils.set_or_check_tags(src_md, dst_md, bias_md),
+            VERBOSE_UNSUPPORTED_TAG);
+
     const int mmla_m_block = brgemm_utils::mmla_bd_blk();
     const int mmla_n_block = brgemm_utils::mmla_n_block(isa);
     const int mmla_k_block = brgemm_utils::mmla_rd_block();
@@ -1015,6 +1018,18 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                         || weights_md == mmla_weights_md);
     }
 
+    // Apply the DOT fallback heuristic only to measured plain 2D/3D cases
+    // with 'any' weights.
+    const bool apply_mmla_heuristic
+            = weights_d.format_kind() == format_kind::any && bgmmc.ndims <= 3
+            && bm_conf_utils.check_is_plain(bgmmc.src_tag)
+            && bm_conf_utils.check_is_plain(bgmmc.dst_tag);
+    if (bgmmc.use_mmla && apply_mmla_heuristic) {
+        const double work = static_cast<double>(bgmmc.batch) * bgmmc.M * bgmmc.N
+                * bgmmc.K;
+        bgmmc.use_mmla = brgemm_utils::has_sufficient_mmla_work(
+                work, bgmmc.nthr, mmla_n_block);
+    }
     if (bgmmc.use_mmla) bm_conf_utils.set_n_blk_fixed();
 
     // Dispatch small shapes to VNNI for better performance
@@ -1030,8 +1045,6 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             ? mmla_k_block
             : 16 * data_type_vnni_granularity(bgmmc.wei_dt);
 
-    VCHECK_BG(bm_conf_utils.set_or_check_tags(src_md, dst_md, bias_md),
-            VERBOSE_UNSUPPORTED_TAG);
     VCHECK_BG(bm_conf_utils.set_or_check_B_tag(weights_md),
             VERBOSE_UNSUPPORTED_TAG_S, "wei");
 

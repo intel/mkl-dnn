@@ -84,13 +84,16 @@ bool use_bf16_mmla(const jit_brgemm_conv_conf_t &jcp,
     const int k_block = brgemm_utils::mmla_rd_block();
     if (jcp.ic % k_block || jcp.oc % n_block) return false;
 
-    // Accept 'any' or weights already packed for MMLA.
+    // Explicit weights must match MMLA packing; 'any' permits either path.
     const auto wei_tag = n_block == 16 ? OhwI2i16o4i : OhwI2i32o4i;
     auto want_weights_md = weights_md;
     CHECK_BOOL(memory_desc_init_by_tag(want_weights_md, wei_tag));
     if (weights_md.format_kind != format_kind::any)
         return weights_md == want_weights_md;
-    return true;
+
+    const double work = static_cast<double>(jcp.mb) * jcp.os * jcp.oc * jcp.ic
+            * jcp.kh * jcp.kw;
+    return brgemm_utils::has_sufficient_mmla_work(work, jcp.nthr, n_block);
 }
 
 // MMLA convolution requires packed weights and complete N/K tiles. It does
