@@ -18,6 +18,7 @@
 #define GEMMSTONE_INCLUDE_GEMMSTONE_KERNEL_CATALOG_HPP
 
 #include <string>
+#include <cstring>
 #include <tuple>
 #include <array>
 #include <utility>
@@ -29,25 +30,42 @@ GEMMSTONE_NAMESPACE_START
 
 namespace kcatalog {
 
-// There are two versions of the kernel catalog structures:
-//   - a mutable version, used inside of ktool for easier modification
-//   - an immutable vesion, which is an aggregate type and used when the catalog
-//       is loaded.
 using string = const char *;
-#define DEFAULT(val)
-#define DEFAULT3(v1,v2,v3)
 
 struct Restrictions {
-    int steppingMin        DEFAULT(-1);             // If >= 0, minimum supported stepping (inclusive)
-    int steppingMax        DEFAULT(-1);             // If >= 0, maximum supported stepping (exclusive)
-    int acceptSizesMin[3]  DEFAULT3(-1, -1, -1);    // m/n/k ranges where kernel always accepted.
-    int acceptSizesMax[3]  DEFAULT3(-1, -1, -1);    //   (see kernel_evaluator.cpp for more details)
-    int allowedSizesMin[3] DEFAULT3(-1, -1, -1);    // m/n/k ranges outside of which kernel always rejected.
-    int allowedSizesMax[3] DEFAULT3(-1, -1, -1);
-    int alignment[3]       DEFAULT3(1, 1, 1);       // A/B/C alignment requirements.
+    int steppingMin;                               // If >= 0, minimum supported stepping (inclusive)
+    int steppingMax;                               // If >= 0, maximum supported stepping (exclusive)
+    int acceptSizesMin[3];                         // m/n/k ranges where kernel always accepted.
+    int acceptSizesMax[3];                         //   (see kernel_evaluator.cpp for more details)
+    int allowedSizesMin[3];                        // m/n/k ranges outside of which kernel always rejected.
+    int allowedSizesMax[3];
+    int alignment[3];                              // A/B/C alignment requirements.
     string tags;                                    // see RestrictionTags for entries.
 
+    friend bool operator==(const Restrictions &r1, const Restrictions &r2)
+    {
+        bool equal = (r1.steppingMin == r2.steppingMin)
+                  && (r1.steppingMax == r2.steppingMax)
+                  && (std::strcmp(r1.tags, r2.tags) == 0);
+
+        for (int i = 0; i < 3; i++) {
+            equal &= (r1.acceptSizesMin[i]  == r2.acceptSizesMin[i])
+                  && (r1.acceptSizesMax[i]  == r2.acceptSizesMax[i])
+                  && (r1.allowedSizesMin[i] == r2.allowedSizesMin[i])
+                  && (r1.allowedSizesMax[i] == r2.allowedSizesMax[i])
+                  && (r1.alignment[i]       == r2.alignment[i]);
+        }
+
+        return equal;
+    }
 };
+
+// Member initializers would prevent C++11 aggregate initialization of static catalogs.
+constexpr Restrictions defaultRestrictions()
+{
+    return {-1, -1, {-1, -1, -1}, {-1, -1, -1},
+            {-1, -1, -1}, {-1, -1, -1}, {1, 1, 1}, ""};
+}
 
 enum RestrictionTags : char {
     ReqDisabled = '@',
@@ -217,8 +235,8 @@ struct Entry {
 struct Catalog {
     template <std::size_t N>
     Catalog(const std::array<Entry, N> &a): entryCount(N), entries(a.data()) {}
-    int entryCount          DEFAULT(0);
-
+    int entryCount;
+    Catalog(int count, const Entry *data): entryCount(count), entries(data) {}
     const Entry *entries;
 };
 
