@@ -76,9 +76,15 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
 
     auto wgTileMN = strategy.wgTile(isA ? LoopM : LoopN);
 
+    // Offsets applied after the scales (x = q * scale - offset) are fused with the scales into one mad.
+    // bf16 data uses f32 quantization data (mixed mode), except on Xe3p+ which has pure bf16 mad.
+    bool offsetAfterScale = isA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
+    bool pureBf16 = (hw >= HW::Xe3p) && offsetAfterScale && xo2D && xs2D && !lateOffset
+                 && Tx == Type::bf16 && Txs == Tx && Txo == Tx && !usesLateScale(problem, strategy, isA);
+
     Txo_int = Txo.isInteger() ? Tx.asSignedInt() : Tx;
     Txs_int = Tx;
-    if (Tx == Type::bf16)
+    if (Tx == Type::bf16 && !pureBf16)
         Txs_int = Type::f32;
     Txg_int = Txg;
 
@@ -98,11 +104,8 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
         if (Tx == Type::bf16) Txs_int = Type::f16;
     }
 
-    // Offsets applied after the scales are subtracted from the dequantized values in the
-    // compute type (f32 for bf16, as for the scales).
-    bool offsetAfterScale = isA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
-    if (offsetAfterScale)
-        Txo_int = (Tx == Type::bf16) ? Type::f32 : Tx;
+    if (offsetAfterScale && !pureBf16)
+        Txo_int = (Tx == Type::bf16) ? Type(Type::f32) : Tx;
 
     if (lateOffset && (Txo.isSubByteInt() || Txo.isInt8()))
         Txo_int = Type::s32;
@@ -425,13 +428,31 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
     GRFMultirange qPairs;
     int npairs = 0;
 
-    if (bfSpecialPath) {
-        for (npairs = 8; npairs > 0; npairs >>= 1) {
-            qPairs = tryChunkAlloc(npairs, 1, BundleGroup::AllBundles(), BundleGroup::AllBundles(), state);
-            if (!qPairs.empty()) break;
+    auto allocUpTo8 = [&](int &n) {
+        GRFMultirange regs;
+        for (n = 8; n > 0; n >>= 1) {
+            regs = tryChunkAlloc(n, 1, BundleGroup::AllBundles(), BundleGroup::AllBundles(), state);
+            if (!regs.empty()) break;
         }
-        if (qPairs.empty()) throw out_of_registers_exception();
-    }
+        if (regs.empty()) throw out_of_registers_exception();
+        return regs;
+    };
+
+    if (bfSpecialPath) qPairs = allocUpTo8(npairs);
+
+    // bf16 data with f32 scales/offsets: mad in f32, then one RNE conversion. The conversions are
+    // batched over several temporaries to hide the mad latency.
+    bool bfMadViaF32 = (op == BinaryOp::MulSub) && (T == Type::bf16) && (Tq == Type::f32);
+    if (bfMadViaF32 && bfSpecialPath) stub();
+    GRFMultirange f32Temp;
+    int ntemp = 0;
+    if (bfMadViaF32) f32Temp = allocUpTo8(ntemp);
+    vector<std::pair<RegData, int>> pendingCvt;
+    auto flushCvt = [&] {
+        int i = 0;
+        for (auto &c: pendingCvt) emov(c.second, c.first, f32Temp[i++].f(0)(1), strategy, state);
+        pendingCvt.clear();
+    };
 
     for (auto &block: layout) {
         auto crosspack = block.crosspack;
@@ -533,8 +554,17 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
                     mad(simd, data(strided), -qdata(strideq), data(strided), Immediate::hf(0x6C00));  /* 0x6C00 = 2^12 */
                     break;
                 case BinaryOp::MulSub:
-                    if (T != Tq || !one_of(T, {Type::f16, Type::f32})) stub();
-                    mad(simd, data(strided), -odata(strideq), data(strided), qdata(strideq));
+                    if (bfMadViaF32) {
+                        mad(simd, f32Temp[int(pendingCvt.size())].f(0)(1), -odata(strideq), data(strided), qdata(strideq));
+                        pendingCvt.emplace_back(data(strided), simd);
+                        if (int(pendingCvt.size()) == ntemp) flushCvt();
+                    } else {
+                        if (T != Tq || !one_of(T, {Type::f16, Type::f32, Type::bf16})) stub();
+                        // Pure bf16 mad (Xe3p+): vector sources must share the destination's sub-GRF offset.
+                        if (T == Type::bf16 && ((strideq && qdata.getOffset() != data.getOffset()) || odata.getOffset() != data.getOffset()))
+                            stub("Misaligned bf16 quantization data");
+                        mad(simd, data(strided), -odata(strideq), data(strided), qdata(strideq));
+                    }
                     break;
                 default: stub();
             }
@@ -543,7 +573,9 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
         }
     }
 
+    flushCvt();
     safeReleaseRanges(qPairs, state);
+    safeReleaseRanges(f32Temp, state);
 }
 
 // Shift s4/2 data by 8/2 to transfrom it into u4/2 data.
@@ -725,8 +757,9 @@ void Generator<hw>::gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, 
         }
 
         // Offsets applied after the scales go into the same mad as the scales when the types match.
-        bool lateOffsetMad = xo2D && offsetAfterScale && xs2D && !state.useBDPAS
-                          && one_of(Tdst, {Type::f16, Type::f32}) && Txs_int == Tdst && Txo_int == Tdst;
+        bool lateOffsetMad = xo2D && offsetAfterScale && xs2D && !state.useBDPAS && Txs_int == Txo_int
+                          && one_of(Txs_int, {Type::f16, Type::f32, Type::bf16})
+                          && (Txs_int == Tdst || (Tdst == Type::bf16 && Txs_int == Type::f32));
 
         if (xs2D)
             if (!state.useBDPAS)
