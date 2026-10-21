@@ -374,6 +374,12 @@ status_t pd_t::zp_ok(const impl::engine_t *engine) {
     const bool weights_upconversion
             = wei_decomp_ || (a_smallint && dy_quant_enabled_);
 
+    // static_sbzp: weights decompression with grouped scales and zero-points.
+    VDISPATCH_GEMM(!b_quant.zp_after_scale, VERBOSE_UNSUPPORTED_ZP_CFG);
+    VDISPATCH_GEMM(IMPLICATION(a_quant.zp_after_scale,
+                           wei_decomp_ && a_zp_2d() && a_scales_2d()),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
+
     if (!a_zps.has_default_values()) {
         VDISPATCH_GEMM(a_zps.get_data_type() != u3,
                 "%s: int3 zero points are unsupported",
