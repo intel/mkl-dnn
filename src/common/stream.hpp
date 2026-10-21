@@ -79,8 +79,6 @@ struct dnnl_stream {
 
     virtual dnnl::impl::status_t run_verbose_profiler(
             const std::string &pd_info, double start_ms, uint64_t component) {
-        // TODO: Change interface to std::string &&pd_info to allow direct
-        // move into primitive profiling data, avoiding string copy overhead
         return dnnl::impl::status::unimplemented;
     }
 
