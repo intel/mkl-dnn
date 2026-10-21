@@ -35,6 +35,9 @@ namespace x64 {
 
 struct brgemm_kernel_t;
 class jit_generator_t;
+namespace sdpa_brgemm_copy {
+class b_packer_t;
+} // namespace sdpa_brgemm_copy
 namespace softmax_impl {
 struct jit_softmax_kernel_base_t;
 } // namespace softmax_impl
@@ -154,8 +157,12 @@ struct sdpa_full_softmax_conf_t {
     bool mm2_direct = false;
     // BRGEMM B VNNI pack factor (1 plain, 2 VNNI2).
     dim_t b_k_pack = 1;
-    // K granularity required by the selected BRGEMM path (AMX block or VNNI).
-    dim_t b_k_pad = 1;
+    // VNNI pack factor of the materialized QK^T weights.
+    dim_t kt_k_pack = 1;
+    // Physical reduction extents required by the K and V copy kernels.
+    dim_t kt_k_pad = 1, vt_k_pad = 1;
+    // Packed B leading dimensions include copy-kernel N-block padding.
+    dim_t kt_ld = 0, vt_ld = 0;
     bool mm1_transpose_k = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
@@ -206,6 +213,7 @@ struct sdpa_full_softmax_kernels_t {
     brgemm_kernel_t *mm1_kernels[2][2] = {};
     brgemm_kernel_t *mm2_kernels[2][2] = {};
     brgemm_kernel_t *mm2_kernels_beta0[2] = {};
+    std::unique_ptr<sdpa_brgemm_copy::b_packer_t> k_packer, v_packer;
 
     // Vectorized JIT softmax kernel and its pd. execute() invokes the kernel
     // for each score row.
