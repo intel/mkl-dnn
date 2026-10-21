@@ -59,7 +59,7 @@ public:
     int init_ref_memory_args(const engine_t &eng, res_t *res);
     int execute_prim(res_t *res) const;
     void check_correctness(const args_t &args, bool has_eltwise, bool has_nans,
-            res_t *res) const;
+            res_t *res, float p2p_threshold = 0.f) const;
     // some util function for ref_partition_t to link args
     void replace_arg(const int arg, const dnn_mem_t &mem) {
         // Only compatible memory objects can be replaced.
