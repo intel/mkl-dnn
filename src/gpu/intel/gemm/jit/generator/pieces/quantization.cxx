@@ -428,31 +428,18 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
     GRFMultirange qPairs;
     int npairs = 0;
 
-    auto allocUpTo8 = [&](int &n) {
-        GRFMultirange regs;
-        for (n = 8; n > 0; n >>= 1) {
-            regs = tryChunkAlloc(n, 1, BundleGroup::AllBundles(), BundleGroup::AllBundles(), state);
-            if (!regs.empty()) break;
+    if (bfSpecialPath) {
+        for (npairs = 8; npairs > 0; npairs >>= 1) {
+            qPairs = tryChunkAlloc(npairs, 1, BundleGroup::AllBundles(), BundleGroup::AllBundles(), state);
+            if (!qPairs.empty()) break;
         }
-        if (regs.empty()) throw out_of_registers_exception();
-        return regs;
-    };
+        if (qPairs.empty()) throw out_of_registers_exception();
+    }
 
-    if (bfSpecialPath) qPairs = allocUpTo8(npairs);
-
-    // bf16 data with f32 scales/offsets: mad in f32, then one RNE conversion. The conversions are
-    // batched over several temporaries to hide the mad latency.
-    bool bfMadViaF32 = (op == BinaryOp::MulSub) && (T == Type::bf16) && (Tq == Type::f32);
-    if (bfMadViaF32 && bfSpecialPath) stub();
-    GRFMultirange f32Temp;
-    int ntemp = 0;
-    if (bfMadViaF32) f32Temp = allocUpTo8(ntemp);
-    vector<std::pair<RegData, int>> pendingCvt;
-    auto flushCvt = [&] {
-        int i = 0;
-        for (auto &c: pendingCvt) emov(c.second, c.first, f32Temp[i++].f(0)(1), strategy, state);
-        pendingCvt.clear();
-    };
+    // MulSub on bf16 data: mixed mode with f32 quantization data (pre-Xe3p), otherwise pure bf16 mad (Xe3p+).
+    bool bfMixed = (T == Type::bf16) && (Tq == Type::f32);
+    if (op == BinaryOp::MulSub && (bfMixed ? hw >= HW::Xe3p : (T != Tq || !one_of(T, {Type::f16, Type::f32, Type::bf16}))))
+        stub("Unsupported MulSub types");
 
     for (auto &block: layout) {
         auto crosspack = block.crosspack;
@@ -554,17 +541,13 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
                     mad(simd, data(strided), -qdata(strideq), data(strided), Immediate::hf(0x6C00));  /* 0x6C00 = 2^12 */
                     break;
                 case BinaryOp::MulSub:
-                    if (bfMadViaF32) {
-                        mad(simd, f32Temp[int(pendingCvt.size())].f(0)(1), -odata(strideq), data(strided), qdata(strideq));
-                        pendingCvt.emplace_back(data(strided), simd);
-                        if (int(pendingCvt.size()) == ntemp) flushCvt();
-                    } else {
-                        if (T != Tq || !one_of(T, {Type::f16, Type::f32, Type::bf16})) stub();
-                        // Pure bf16 mad (Xe3p+): vector sources must share the destination's sub-GRF offset.
-                        if (T == Type::bf16 && ((strideq && qdata.getOffset() != data.getOffset()) || odata.getOffset() != data.getOffset()))
-                            stub("Misaligned bf16 quantization data");
-                        mad(simd, data(strided), -odata(strideq), data(strided), qdata(strideq));
-                    }
+                    // Mixed mode: packed bf16 must start at sub-GRF offset 0 or 16.
+                    if (bfMixed && strided == 1 && data.getOffset() % 16)
+                        stub("Unsupported bf16 mixed-mode mad");
+                    // Pure bf16 mad: vector sources must share the destination's sub-GRF offset.
+                    if (T == Type::bf16 && !bfMixed && strideq && (qdata.getOffset() != data.getOffset() || odata.getOffset() != data.getOffset()))
+                        stub("Misaligned bf16 quantization data");
+                    mad(simd, data(strided), -odata(strideq), data(strided), qdata(strideq));
                     break;
                 default: stub();
             }
@@ -573,9 +556,7 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
         }
     }
 
-    flushCvt();
     safeReleaseRanges(qPairs, state);
-    safeReleaseRanges(f32Temp, state);
 }
 
 // Shift s4/2 data by 8/2 to transfrom it into u4/2 data.
