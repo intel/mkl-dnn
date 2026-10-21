@@ -35,6 +35,7 @@ void GEMMProblem::transpose()
     std::swap(Tao, Tbo);
     std::swap(Ta_scale, Tb_scale);
     std::swap(aOffset, bOffset);
+    std::swap(aOffsetAfterScale, bOffsetAfterScale);
     std::swap(aoPtrDims, boPtrDims);
     std::swap(asPtrDims, bsPtrDims);
     std::swap(aqGroupM, bqGroupN);
