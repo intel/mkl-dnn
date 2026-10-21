@@ -103,8 +103,8 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
         if (Tx == Type::bf16) Txs_int = Type::f16;
     }
 
-    if (offsetAfterScale && !pureBf16)
-        Txo_int = (Tx == Type::bf16) ? Type(Type::f32) : Tx;
+    if (offsetAfterScale)
+        Txo_int = Txs_int;
 
     if (lateOffset && (Txo.isSubByteInt() || Txo.isInt8()))
         Txo_int = Type::s32;
@@ -581,12 +581,12 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     if (!canDequantizeSubByteInt(layoutSrc, layoutDst, layoutOffset, layoutScale))
         stub("Cannot perform dequantizeSubByteInt");
 
-    // Offsets applied after the scales (x = q * scale - offset) are subtracted last, in the same
-    // mad as the scale when both have the destination type (f16 or f32).
+    // Offsets applied after the scales (x = q * scale - offset) go into the scale mad.
     bool offsetAfterScale = problem && (doA ? problem->aOffsetAfterScale : problem->bOffsetAfterScale);
     bool earlyOffset = !layoutOffset.empty() && !offsetAfterScale;
-    bool lateOffsetMad = offsetAfterScale && !layoutOffset.empty() && !layoutScale.empty()
-                      && one_of(Tdst, {Type::f16, Type::f32}) && layoutOffset.type() == Tdst && layoutScale.type() == Tdst;
+    auto scaleOp = offsetAfterScale ? BinaryOp::MulSub : BinaryOp::Mul;
+    auto lateOffsetLayout = offsetAfterScale ? &layoutOffset : nullptr;
+    auto lateOffsetRegs = offsetAfterScale ? &offset : nullptr;
 
     bool signedInt = Tsrc.isSigned();
     bool i4 = (Tsrc.bits() == 4);
@@ -637,10 +637,7 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     //      this could be merged into the previous multiplication.
     if (!f32 && !layoutScale.empty()) {
         if (!problem) stub();
-        if (lateOffsetMad)
-            gemmDequantizeOperation(doA, Type::f16, Type::f16, BinaryOp::MulSub, *effLayoutDst, layoutScale, *effDst, scale, h, kab_load, kq_load, *problem, strategy, state, &layoutOffset, &offset);
-        else
-            gemmDequantizeOperation(doA, Type::f16, Type::f16, BinaryOp::Mul, *effLayoutDst, layoutScale, *effDst, scale, h, kab_load, kq_load, *problem, strategy, state);
+        gemmDequantizeOperation(doA, Type::f16, Type::f16, scaleOp, *effLayoutDst, layoutScale, *effDst, scale, h, kab_load, kq_load, *problem, strategy, state, lateOffsetLayout, lateOffsetRegs);
     }
 
     // 6) Convert to dst type if needed.
@@ -652,15 +649,8 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     // 7) Apply scales for f32 after f16->f32 upconversion.
     if (f32 && !layoutScale.empty()) {
         if (!problem) stub();
-        if (lateOffsetMad)
-            gemmDequantizeOperation(doA, Type::f32, Type::f32, BinaryOp::MulSub, layoutDst, layoutScale, dst, scale, h, kab_load, kq_load, *problem, strategy, state, &layoutOffset, &offset);
-        else
-            gemmDequantizeOperation(doA, Type::f32, Type::f32, BinaryOp::Mul, layoutDst, layoutScale, dst, scale, h, kab_load, kq_load, *problem, strategy, state);
+        gemmDequantizeOperation(doA, Type::f32, Type::f32, scaleOp, layoutDst, layoutScale, dst, scale, h, kab_load, kq_load, *problem, strategy, state, lateOffsetLayout, lateOffsetRegs);
     }
-
-    // 8) Subtract offsets applied after the scales, if not done with the scales above.
-    if (offsetAfterScale && !layoutOffset.empty() && !lateOffsetMad)
-        gemmDequantizeOperation(doA, Tdst, layoutOffset.type(), BinaryOp::Sub, layoutDst, layoutOffset, dst, offset, h, kab_load, kq_load, *problem, strategy, state);
 }
 
 // Dequantize A/B, given 2D grouped quantization data.
@@ -691,7 +681,7 @@ void Generator<hw>::gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, 
 
     bool xo2D = !oLayout.empty() && !lateOffset;
     bool xs2D = !sLayout.empty() && !lateScale;
-    // Offsets applied after the scales (x = q * scale - offset) are subtracted last.
+    // Offsets applied after the scales (x = q * scale - offset) go into the scale mad.
     bool offsetAfterScale = doA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
     bool xo2DEarly = xo2D && !offsetAfterScale;
 
@@ -736,24 +726,12 @@ void Generator<hw>::gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, 
             }
         }
 
-        // Offsets applied after the scales go into the same mad as the scales when the types match.
-        bool lateOffsetMad = xo2D && offsetAfterScale && xs2D && !state.useBDPAS && Txs_int == Txo_int
-                          && one_of(Txs_int, {Type::f16, Type::f32, Type::bf16})
-                          && (Txs_int == Tdst || (Tdst == Type::bf16 && Txs_int == Type::f32));
-
         if (xs2D)
             if (!state.useBDPAS)
             {
-                if (lateOffsetMad)
-                    gemmDequantizeOperation(doA, Tdst, Txs_int, BinaryOp::MulSub, layoutDst, sLayout, dst, sRegs, h, kab_load, kq_load, problem, strategy, state, &oLayout, &oRegs);
-                else
-                    gemmDequantizeOperation(doA, Tdst, Txs_int, BinaryOp::Mul, layoutDst, sLayout, dst, sRegs, h, kab_load, kq_load, problem, strategy, state);
+                gemmDequantizeOperation(doA, Tdst, Txs_int, offsetAfterScale ? BinaryOp::MulSub : BinaryOp::Mul, layoutDst, sLayout, dst, sRegs, h, kab_load, kq_load, problem, strategy, state,
+                                        offsetAfterScale ? &oLayout : nullptr, offsetAfterScale ? &oRegs : nullptr);
 	        }
-
-        if (xo2D && offsetAfterScale && !lateOffsetMad) {
-            if (state.useBDPAS) stub("BDPAS with offsets applied after the scales");
-            gemmDequantizeOperation(doA, Tdst, Txo_int, BinaryOp::Sub, layoutDst, oLayout, dst, oRegs, h, kab_load, kq_load, problem, strategy, state);
-        }
     }
 
     if (ms < md || ns < nd) {
