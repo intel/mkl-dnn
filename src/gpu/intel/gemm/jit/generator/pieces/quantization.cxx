@@ -79,8 +79,7 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
     // Offsets applied after the scales (x = q * scale - offset) are fused with the scales into one mad.
     // bf16 data uses f32 quantization data (mixed mode), except on Xe3p+ which has pure bf16 mad.
     bool offsetAfterScale = isA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
-    bool pureBf16 = (hw >= HW::Xe3p) && offsetAfterScale && xo2D && xs2D && !lateOffset
-                 && Tx == Type::bf16 && Txs == Tx && Txo == Tx && !usesLateScale(problem, strategy, isA);
+    bool pureBf16 = (hw >= HW::Xe3p) && offsetAfterScale && Tx == Type::bf16 && Txs == Tx && Txo == Tx;
 
     Txo_int = Txo.isInteger() ? Tx.asSignedInt() : Tx;
     Txs_int = Tx;
