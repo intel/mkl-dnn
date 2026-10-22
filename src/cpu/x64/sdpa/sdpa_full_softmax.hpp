@@ -159,6 +159,7 @@ struct sdpa_full_softmax_conf_t {
     dim_t b_k_pack = 1;
     // VNNI pack factor of the materialized QK^T weights.
     dim_t kt_k_pack = 1;
+    dim_t vt_k_pack = 1;
     // Physical reduction extents required by the K and V copy kernels.
     dim_t kt_k_pad = 1, vt_k_pad = 1;
     // Packed B leading dimensions include copy-kernel N-block padding.

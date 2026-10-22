@@ -68,8 +68,9 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     VDISPATCH_SDPA(key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1
                     || key_mdw.strides()[sdpa_pd_t::ndims - 2] == 1,
             "one key matrix axis must be contiguous");
-    VDISPATCH_SDPA(val_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
-            "the value head-size axis must be contiguous");
+    VDISPATCH_SDPA(val_mdw.strides()[sdpa_pd_t::ndims - 1] == 1
+                    || val_mdw.strides()[sdpa_pd_t::ndims - 2] == 1,
+            "one value matrix axis must be contiguous");
 
     const data_type_t dt = qry_mdw.data_type();
     VDISPATCH_SDPA(utils::one_of(dt, f32, bf16, f16), VERBOSE_UNSUPPORTED_DT);
@@ -144,7 +145,8 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // unit-stride; full-softmax materialises a transpose for a strided keys
     // axis, so route those cases to full rather than rejecting them.
     const bool online_capable = dt == f32 && !with_buffer_mask()
-            && key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1;
+            && key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1
+            && val_mdw.strides()[sdpa_pd_t::ndims - 1] == 1;
     const std::string forced = getenv_string_user("SDPA_IMPL");
     VDISPATCH_SDPA(
             utils::one_of(forced, std::string(), std::string("auto"),
