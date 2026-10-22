@@ -254,6 +254,19 @@ struct brgemm_matmul_conf_t {
     // the symmetric src/wei zero-point + 128-shift correction in the grouped
     // int8 quantization path. Mirrors brgemm_desc_t::with_per_mn_compensation.
     bool with_per_mn_compensation = false;
+    // Per-(M, N) compensation summed over K and initialized into buffer C by
+    // one f32 brgemm per tile: C = -U * V, U (M x K'), V (K' x N).
+    bool per_mn_comp_via_brgemm = false;
+    // K' = per_mn_comp_wei_rows + (src zp ? num_K_blocks + 1 : 0). The wei zp
+    // term has one row per group of wei scales/zp along K, the src zp term
+    // one row per brgemm K call.
+    dim_t per_mn_comp_wei_gsize = 0;
+    dim_t per_mn_comp_wei_rows = 0;
+    dim_t per_mn_comp_K = 0;
+    dim_t per_mn_comp_ldv = 0; // padded N of V
+    // The AMX ukernel applies a common src scale in every per-K call, the
+    // other kernels apply it once with the post-ops.
+    bool per_mn_comp_src_scale_per_call = false;
     bool req_wei_vnni_downconvert = false;
     bool is_runtime_M = false;
     bool is_runtime_N = false;

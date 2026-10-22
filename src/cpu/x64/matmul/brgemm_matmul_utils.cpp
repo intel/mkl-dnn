@@ -335,11 +335,11 @@ status_t check_isa_with_datatype(
 status_t gemv_check_isa_with_datatype(
         const cpu_isa_t isa, const brgemm_matmul_conf_utils_t &bm_conf_utils) {
     // Valid GEMV (dt, isa) combinations:
-    // - f32  -> avx2
+    // - f32  -> avx2 or avx512_core
     // - bf16 -> avx512_core_bf16
     // - f16  -> avx512_core_fp16
     // Any other data type or isa is unsupported.
-    const bool ok = (bm_conf_utils.is_f32() && isa == avx2)
+    const bool ok = (bm_conf_utils.is_f32() && one_of(isa, avx2, avx512_core))
             || (bm_conf_utils.is_bf16() && isa == avx512_core_bf16)
             || (bm_conf_utils.is_f16() && isa == avx512_core_fp16);
 
@@ -2600,8 +2600,11 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                                 || bm_conf_utils.is_f16_with_int_wei())
                             && isa == avx512_core_fp16)
                     || (bm_conf_utils.is_f8() && isa == avx10_2)
+                    // Copy A computes the wei zp compensation, grouped int8
+                    // gets it from per-(M, N) compensation instead.
                     || (bgmmc.wei_zp_type != brgemm_broadcast_t::none
-                            && !bm_conf_utils.with_weights_decompression())
+                            && !bm_conf_utils.with_weights_decompression()
+                            && !bgmmc.with_int8_grouped_quantization)
                     || bgmmc.transposed_A);
 
     bgmmc.use_buffer_a = is_copy_a_required;
@@ -3134,6 +3137,40 @@ void init_aux_values(brgemm_matmul_conf_t &bgmmc,
     bgmmc.with_per_mn_compensation = bgmmc.with_int8_grouped_quantization
             && (bgmmc.has_zero_point_a || bgmmc.has_zero_point_b
                     || bgmmc.s8s8_compensation_required);
+    const bool per_k_scales_in_kernel = bgmmc.is_src_scale_per_k
+            || (bgmmc.is_wei_scale_per_k && !bgmmc.apply_scales_in_buffer_b);
+    bgmmc.per_mn_comp_via_brgemm = bgmmc.with_per_mn_compensation
+            && per_k_scales_in_kernel && bgmmc.use_buffer_c
+            && !bgmmc.s8s8_compensation_required && !bgmmc.is_c_buf_dst_dt
+            && !bgmmc.is_gemv && !bgmmc.is_runtime_M && !bgmmc.is_runtime_N
+            && !bgmmc.is_runtime_K && !is_runtime_value(bgmmc.batch)
+            && is_superset(bgmmc.isa, avx512_core)
+            && (bgmmc.is_amx || bgmmc.N_blk <= bgmmc.LDC)
+            // Row sums of A are read from plain, K-contiguous src.
+            && !bgmmc.transposed_A
+            && bgmmc.A_strides[0] == bgmmc.a_dt_sz
+            // Blocked weights: only int4 (no md compensation). The src zp term
+            // reads column sums of B and needs plain, N-contiguous weights.
+            && IMPLICATION(bgmmc.blocked_B, bgmmc.is_int4_weights)
+            && IMPLICATION(bgmmc.has_zero_point_a,
+                    !bgmmc.blocked_B && !bgmmc.transposed_B
+                            && bgmmc.B_strides[0] == bgmmc.b_dt_sz);
+    if (bgmmc.per_mn_comp_via_brgemm) {
+        dim_t gsize = 0;
+        auto fold = [&](bool active, dim_t g) {
+            if (active && g > 0) gsize = gsize ? math::gcd(gsize, g) : g;
+        };
+        fold(bgmmc.is_wei_scale_per_k && !bgmmc.apply_scales_in_buffer_b,
+                bgmmc.wei_scales_k_gsize);
+        fold(bgmmc.is_wei_zp_per_k, bgmmc.wei_zp_k_gsize);
+        bgmmc.per_mn_comp_wei_gsize = gsize ? gsize : bgmmc.K;
+        bgmmc.per_mn_comp_wei_rows = bgmmc.has_zero_point_b
+                ? div_up(bgmmc.K, bgmmc.per_mn_comp_wei_gsize)
+                : 0;
+        bgmmc.per_mn_comp_K = bgmmc.per_mn_comp_wei_rows
+                + (bgmmc.has_zero_point_a ? bgmmc.num_K_blocks + 1 : 0);
+        bgmmc.per_mn_comp_ldv = bgmmc.N + bgmmc.LDC;
+    }
     bgmmc.post_ops_applicable = one_of(true, bgmmc.with_sum, bgmmc.with_bias,
             bgmmc.with_src_scales,
             bgmmc.with_wei_scales && !bgmmc.apply_scales_in_buffer_b,
@@ -3208,7 +3245,16 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
                 bgmmc.nthr * bgmmc.zp_b_comp_elems_per_thr,
                 types::data_type_size(s32));
 
-    if (bgmmc.with_per_mn_compensation) {
+    if (bgmmc.per_mn_comp_via_brgemm) {
+        scratchpad.book(key_brgemm_primitive_per_mn_comp_u,
+                static_cast<size_t>(
+                        bgmmc.batch * bgmmc.M * bgmmc.per_mn_comp_K),
+                types::data_type_size(f32));
+        scratchpad.book(key_brgemm_primitive_per_mn_comp_v,
+                static_cast<size_t>(bgmmc.batch * bgmmc.per_mn_comp_K
+                        * bgmmc.per_mn_comp_ldv),
+                types::data_type_size(f32));
+    } else if (bgmmc.with_per_mn_compensation) {
         // f32 tile that mirrors buffer_c's stripe layout
         const size_t per_thr_elems = static_cast<size_t>(bgmmc.M_blk)
                 * static_cast<size_t>(rnd_up(bgmmc.N_blk, bgmmc.LDC));
