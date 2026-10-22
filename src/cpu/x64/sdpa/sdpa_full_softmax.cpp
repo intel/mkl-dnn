@@ -185,9 +185,13 @@ sdpa_full_softmax_kernels_t::~sdpa_full_softmax_kernels_t() {
     for (int qi = 0; qi < 2; ++qi) {
         for (int ki = 0; ki < 2; ++ki) {
             if (mm1_kernels[qi][ki]) brgemm_kernel_destroy(mm1_kernels[qi][ki]);
-            if (mm2_kernels[qi][ki]) brgemm_kernel_destroy(mm2_kernels[qi][ki]);
+            for (int vi = 0; vi < 2; ++vi)
+                if (mm2_kernels[qi][ki][vi])
+                    brgemm_kernel_destroy(mm2_kernels[qi][ki][vi]);
         }
-        if (mm2_kernels_beta0[qi]) brgemm_kernel_destroy(mm2_kernels_beta0[qi]);
+        for (int vi = 0; vi < 2; ++vi)
+            if (mm2_kernels_beta0[qi][vi])
+                brgemm_kernel_destroy(mm2_kernels_beta0[qi][vi]);
     }
 }
 
@@ -228,6 +232,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const bool pack_b = needs_vnni_b;
     const bool transpose_v = p_.v_strides[p_.ndims - 1] != 1;
     const bool need_vt = pack_b || transpose_v;
+    const bool need_kt = mm1_transpose_k || pack_b;
     const dim_t vt_k_pack = p_.mm_dt == data_type::f16 && transpose_v
                     && mayiuse(avx512_core_fp16)
             ? data_type_vnni_granularity(p_.mm_dt)
@@ -284,6 +289,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
     kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
+    if (need_kt) kv_block = nstl::min<dim_t>(kv_block, 64);
     conf.kv_block = kv_block;
     const dim_t kv_tail = kv_block < seq_kv ? seq_kv % kv_block : 0;
     conf.kv_tail = kv_tail;
@@ -324,12 +330,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // mm1 materialises a dense (and, for bf16/f16, VNNI-packed) [hs_qk, seq_kv]
     // B tile whenever it must transpose K or pack it; its ldb is then the dense
     // seq_kv. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in place.
-    const bool need_kt = mm1_transpose_k || pack_b;
-    const dim_t kt_ld = need_kt
-            ? sdpa_brgemm_copy::b_packer_t::packed_ld(seq_kv)
-            : seq_kv;
-    const dim_t vt_ld
-            = need_vt ? sdpa_brgemm_copy::b_packer_t::packed_ld(hs_v) : hs_v;
+    const dim_t kt_ld = need_kt ? 64 : seq_kv;
+    const dim_t vt_ld = need_vt ? 64 : hs_v;
+    conf.v_block = need_vt ? nstl::min<dim_t>(hs_v, 64) : hs_v;
+    conf.v_tail = hs_v % conf.v_block;
     conf.kt_ld = kt_ld;
     conf.vt_ld = vt_ld;
     const dim_t mm1_ldb = need_kt ? kt_ld : k_hs_stride;
@@ -343,7 +347,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     auto build_tile_descs = [&](dim_t m, dim_t kv, bool select_postop, int qi,
                                     int ki) -> status_t {
         sdpa_amx_cfg_t &mm1_amx = conf.mm1_amx[qi][ki];
-        sdpa_amx_cfg_t &mm2_amx = conf.mm2_amx[qi][ki];
         CHECK(build_brgemm_desc(descs.mm1_desc[qi][ki], p_.mm_dt, /*beta=*/0.0f,
                 m, kv, hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop,
@@ -354,13 +357,16 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         // mm2 B is V in place when its columns are contiguous and no VNNI
         // packing is needed; otherwise it uses the materialized V buffer.
         // K = kv (one kv-block of the reduction); beta accumulates across them.
-        CHECK(build_brgemm_desc(descs.mm2_desc[qi][ki], p_.mm_dt, mm2_beta, m,
-                hs_v, kv, /*lda=*/seq_kv,
-                /*ldb=*/need_vt ? vt_ld : p_.v_strides[row_dim],
-                /*ldc=*/mm2_ldc,
-                /*post_ops=*/nullptr, /*select_postop=*/false,
-                &mm2_amx.need_config, mm2_amx.palette, &mm2_amx.wsp_size, 0,
-                mm2_b_is_vnni));
+        for (int vi = 0; vi < 2; ++vi) {
+            const dim_t width = vi ? conf.v_tail : conf.v_block;
+            if (!width) continue;
+            auto &mm2_amx = conf.mm2_amx[qi][ki][vi];
+            CHECK(build_brgemm_desc(descs.mm2_desc[qi][ki][vi], p_.mm_dt,
+                    mm2_beta, m, width, kv, /*lda=*/seq_kv,
+                    /*ldb=*/need_vt ? vt_ld : p_.v_strides[row_dim],
+                    /*ldc=*/mm2_ldc, nullptr, false, &mm2_amx.need_config,
+                    mm2_amx.palette, &mm2_amx.wsp_size, 0, mm2_b_is_vnni));
+        }
         descs.mm_valid[qi][ki] = true;
         return status::success;
     };
@@ -396,11 +402,15 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 CHECK(build_tile_descs(ms[qi], kvs[ki], select_postop, qi, ki));
             }
             if (mm2_beta != 0.0f) {
-                CHECK(build_brgemm_desc(descs.mm2_desc_beta0[qi], p_.mm_dt,
-                        /*beta=*/0.0f, ms[qi], hs_v, kv_block, /*lda=*/seq_kv,
-                        /*ldb=*/need_vt ? vt_ld : p_.v_strides[row_dim],
-                        /*ldc=*/mm2_ldc, nullptr, false, nullptr, nullptr,
-                        nullptr, 0, mm2_b_is_vnni));
+                for (int vi = 0; vi < 2; ++vi) {
+                    const dim_t width = vi ? conf.v_tail : conf.v_block;
+                    if (!width) continue;
+                    CHECK(build_brgemm_desc(descs.mm2_desc_beta0[qi][vi],
+                            p_.mm_dt, 0.0f, ms[qi], width, kv_block, seq_kv,
+                            need_vt ? vt_ld : p_.v_strides[row_dim], mm2_ldc,
+                            nullptr, false, nullptr, nullptr, nullptr, 0,
+                            mm2_b_is_vnni));
+                }
                 descs.beta0_valid[qi] = true;
             }
         }
@@ -432,7 +442,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     for (int qi = 0; qi < 2; ++qi)
         for (int ki = 0; ki < 2; ++ki)
             if ((conf.mm1_amx[qi][ki].need_config
-                        || conf.mm2_amx[qi][ki].need_config)
+                        || conf.mm2_amx[qi][ki][0].need_config
+                        || conf.mm2_amx[qi][ki][1].need_config)
                     && !pack_b)
                 return status::unimplemented;
 
@@ -454,10 +465,11 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // the largest wsp over all kernels (they run sequentially per work-item).
     size_t max_wsp = 0;
     for (int qi = 0; qi < 2; ++qi)
-        for (int ki = 0; ki < 2; ++ki)
-            max_wsp = nstl::max(max_wsp,
-                    nstl::max(conf.mm1_amx[qi][ki].wsp_size,
-                            conf.mm2_amx[qi][ki].wsp_size));
+        for (int ki = 0; ki < 2; ++ki) {
+            max_wsp = nstl::max(max_wsp, conf.mm1_amx[qi][ki].wsp_size);
+            for (int vi = 0; vi < 2; ++vi)
+                max_wsp = nstl::max(max_wsp, conf.mm2_amx[qi][ki][vi].wsp_size);
+        }
     conf.amx_wsp_bytes = max_wsp > 0 ? align64(max_wsp) : 0;
     conf.scratch_per_thread
             = scores_bytes + pv_bytes + prob_bytes + conf.amx_wsp_bytes;
@@ -477,13 +489,15 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t seq_kv_pad = utils::rnd_up(seq_kv, vt_k_pad);
     if (need_kt && num_head_kv > 0)
         conf.kt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
-                * hs_qk_pad * kt_ld * qk_dt_sz;
+                * hs_qk_pad * sdpa_brgemm_copy::b_packer_t::packed_ld(seq_kv)
+                * qk_dt_sz;
     // mm2's V is packed once per (batch, kv_head) into a shared
     // [batch x num_head_kv x rnd_up(seq_kv, vt_k_pad) x hs_v] buffer following the
     // transposed-K buffer.
     if (need_vt && num_head_kv > 0)
         conf.vt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
-                * seq_kv_pad * vt_ld * qk_dt_sz;
+                * seq_kv_pad * sdpa_brgemm_copy::b_packer_t::packed_ld(hs_v)
+                * qk_dt_sz;
 
     return status::success;
 }
@@ -522,14 +536,14 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     if (need_kt) {
         kernels.k_packer.reset(new sdpa_brgemm_copy::b_packer_t());
         CHECK(kernels.k_packer->init(hs_qk, seq_kv, conf.k_hs_stride,
-                conf.k_seq_stride, conf.kt_ld, p_.mm_dt));
+                conf.k_seq_stride, conf.kt_ld, p_.mm_dt, true));
     }
     if (need_vt) {
         const dim_t v_row = p_.v_strides[row_dim];
         const dim_t v_col = p_.v_strides[p_.ndims - 1];
         kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
         CHECK(kernels.v_packer->init(
-                seq_kv, hs_v, v_row, v_col, conf.vt_ld, p_.mm_dt));
+                seq_kv, hs_v, v_row, v_col, conf.vt_ld, p_.mm_dt, true));
     }
 
     auto destroy_kernels = [&]() {
@@ -539,14 +553,16 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
                     brgemm_kernel_destroy(mm1_kernels_[qi][ki]);
                     mm1_kernels_[qi][ki] = nullptr;
                 }
-                if (mm2_kernels_[qi][ki]) {
-                    brgemm_kernel_destroy(mm2_kernels_[qi][ki]);
-                    mm2_kernels_[qi][ki] = nullptr;
+                for (int vi = 0; vi < 2; ++vi) {
+                    if (!mm2_kernels_[qi][ki][vi]) continue;
+                    brgemm_kernel_destroy(mm2_kernels_[qi][ki][vi]);
+                    mm2_kernels_[qi][ki][vi] = nullptr;
                 }
             }
-            if (mm2_kernels_beta0_[qi]) {
-                brgemm_kernel_destroy(mm2_kernels_beta0_[qi]);
-                mm2_kernels_beta0_[qi] = nullptr;
+            for (int vi = 0; vi < 2; ++vi) {
+                if (!mm2_kernels_beta0_[qi][vi]) continue;
+                brgemm_kernel_destroy(mm2_kernels_beta0_[qi][vi]);
+                mm2_kernels_beta0_[qi][vi] = nullptr;
             }
         }
     };
@@ -560,12 +576,19 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
                 if (!descs.mm_valid[qi][ki]) continue;
                 CHECK(brgemm_kernel_create(
                         &mm1_kernels_[qi][ki], descs.mm1_desc[qi][ki]));
-                CHECK(brgemm_kernel_create(
-                        &mm2_kernels_[qi][ki], descs.mm2_desc[qi][ki]));
+                for (int vi = 0; vi < 2; ++vi) {
+                    if (vi && !conf.v_tail) continue;
+                    CHECK(brgemm_kernel_create(&mm2_kernels_[qi][ki][vi],
+                            descs.mm2_desc[qi][ki][vi]));
+                }
             }
-            if (descs.beta0_valid[qi])
-                CHECK(brgemm_kernel_create(
-                        &mm2_kernels_beta0_[qi], descs.mm2_desc_beta0[qi]));
+            if (descs.beta0_valid[qi]) {
+                for (int vi = 0; vi < 2; ++vi) {
+                    if (vi && !conf.v_tail) continue;
+                    CHECK(brgemm_kernel_create(&mm2_kernels_beta0_[qi][vi],
+                            descs.mm2_desc_beta0[qi][vi]));
+                }
+            }
         }
         return status::success;
     };
@@ -594,12 +617,19 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
                                 && kt_k_pack_ > 1
                                 && !mayiuse(avx512_core_amx_fp16)));
                 CHECK(brgemm_kernel_create(&mm1_kernels_[qi][ki], mm1_brg));
-                CHECK(brgemm_kernel_create(
-                        &mm2_kernels_[qi][ki], descs.mm2_desc[qi][ki]));
+                for (int vi = 0; vi < 2; ++vi) {
+                    if (vi && !conf.v_tail) continue;
+                    CHECK(brgemm_kernel_create(&mm2_kernels_[qi][ki][vi],
+                            descs.mm2_desc[qi][ki][vi]));
+                }
             }
-            if (descs.beta0_valid[qi])
-                CHECK(brgemm_kernel_create(
-                        &mm2_kernels_beta0_[qi], descs.mm2_desc_beta0[qi]));
+            if (descs.beta0_valid[qi]) {
+                for (int vi = 0; vi < 2; ++vi) {
+                    if (vi && !conf.v_tail) continue;
+                    CHECK(brgemm_kernel_create(&mm2_kernels_beta0_[qi][vi],
+                            descs.mm2_desc_beta0[qi][vi]));
+                }
+            }
         }
     }
 
@@ -800,8 +830,10 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // avoids the redundant per-query-tile pack. The copy is dtype-agnostic
     // (memcpy of qk_dt_sz bytes per element).
     const dim_t num_head_kv = num_head_kv_;
-    const size_t kt_head_elems = static_cast<size_t>(hs_qk_pad) * conf.kt_ld;
-    const size_t vt_head_elems = static_cast<size_t>(seq_kv_pad) * conf.vt_ld;
+    const size_t kt_head_elems = static_cast<size_t>(hs_qk_pad)
+            * sdpa_brgemm_copy::b_packer_t::packed_ld(seq_kv);
+    const size_t vt_head_elems = static_cast<size_t>(seq_kv_pad)
+            * sdpa_brgemm_copy::b_packer_t::packed_ld(hs_v);
     char *kt_all = need_kt ? static_cast<char *>(scratch_base)
                     + static_cast<size_t>(nthr) * block_size
                            : nullptr;
@@ -971,8 +1003,11 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = q_ptr;
-            be.ptr.B = static_cast<const char *>(b_ptr)
-                    + static_cast<size_t>(kv0) * mm1_bcol * qk_dt_sz;
+            const size_t b_offset = need_kt
+                    ? static_cast<size_t>(kv0 / 64) * hs_qk_pad * conf.kt_ld
+                            + (kv0 % 64) * mm1_bcol
+                    : static_cast<size_t>(kv0) * mm1_bcol;
+            be.ptr.B = static_cast<const char *>(b_ptr) + b_offset * qk_dt_sz;
             float *c_blk = scores + kv0;
             if (has_mm1_postops) {
                 brgemm_post_ops_data_t pod(
@@ -1050,16 +1085,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // Run mm2 for the kv-block [kv0, kv0+K): A is P's column slice (lda =
         // seq_kv), B is V's kv-block panel (packed: (kv0/k_pack) K-groups in;
         // f32: kv0 rows down), accumulating into mm2_c.
-        auto run_mm2 = [&](const brgemm_kernel_t *k, dim_t kv0) {
+        auto run_mm2 = [&](const brgemm_kernel_t *k, dim_t kv0, dim_t v0) {
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
                     + static_cast<size_t>(kv0) * qk_dt_sz;
-            be.ptr.B = need_vt ? static_cast<const char *>(v_b_ptr)
-                            + static_cast<size_t>(kv0 / conf.vt_k_pack)
-                                    * conf.vt_ld * conf.vt_k_pack * qk_dt_sz
-                               : static_cast<const char *>(v_b_ptr)
-                            + static_cast<size_t>(kv0) * v_row * qk_dt_sz;
-            brgemm_kernel_execute(k, 1, &be, mm2_c, amx_wsp);
+            const size_t b_offset = need_vt
+                    ? static_cast<size_t>(v0 / 64) * seq_kv_pad * conf.vt_ld
+                            + (kv0 / conf.vt_k_pack) * conf.vt_ld
+                                    * conf.vt_k_pack
+                    : static_cast<size_t>(kv0) * v_row + v0;
+            be.ptr.B = static_cast<const char *>(v_b_ptr) + b_offset * qk_dt_sz;
+            brgemm_kernel_execute(k, 1, &be, mm2_c + v0, amx_wsp);
         };
 
         // The first kv-block writes fresh C (beta = 0); the rest accumulate
@@ -1067,15 +1103,20 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // if any, is never first), so mm2_kernels_beta0_ (sized for kv_block_)
         // is the right kernel.
         const bool multi_block = kv_block < seq_kv;
-        if (mm2_amx_[qi][0].need_config)
-            amx_tile_configure(mm2_amx_[qi][0].palette);
-        run_mm2(multi_block ? mm2_kernels_beta0_[qi] : mm2_kernels_[qi][0], 0);
-        for (dim_t b = 1; b < n_kv_full; ++b)
-            run_mm2(mm2_kernels_[qi][0], b * kv_block);
-        if (kv_tail) {
-            if (mm2_amx_[qi][1].need_config)
-                amx_tile_configure(mm2_amx_[qi][1].palette);
-            run_mm2(mm2_kernels_[qi][1], n_kv_full * kv_block);
+        for (dim_t v0 = 0; v0 < hs_v; v0 += conf.v_block) {
+            const int vi = hs_v - v0 < conf.v_block;
+            if (mm2_amx_[qi][0][vi].need_config)
+                amx_tile_configure(mm2_amx_[qi][0][vi].palette);
+            run_mm2(multi_block ? mm2_kernels_beta0_[qi][vi]
+                                : mm2_kernels_[qi][0][vi],
+                    0, v0);
+            for (dim_t b = 1; b < n_kv_full; ++b)
+                run_mm2(mm2_kernels_[qi][0][vi], b * kv_block, v0);
+            if (kv_tail) {
+                if (mm2_amx_[qi][1][vi].need_config)
+                    amx_tile_configure(mm2_amx_[qi][1][vi].palette);
+                run_mm2(mm2_kernels_[qi][1][vi], n_kv_full * kv_block, v0);
+            }
         }
 
         // Write the result to the user output. When mm2 wrote f32 directly into
@@ -1126,7 +1167,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // Release AMX tiles so the configured state does not leak past this
         // work-item (no-op for non-AMX f32). The full-block cfg's need_config
         // is representative (the tail kernels share the ISA/dtype).
-        if (mm1_amx_[qi][0].need_config || mm2_amx_[qi][0].need_config)
+        if (mm1_amx_[qi][0].need_config || mm2_amx_[qi][0][0].need_config)
             amx_tile_release();
     });
 

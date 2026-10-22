@@ -162,8 +162,9 @@ struct sdpa_full_softmax_conf_t {
     dim_t vt_k_pack = 1;
     // Physical reduction extents required by the K and V copy kernels.
     dim_t kt_k_pad = 1, vt_k_pad = 1;
-    // Packed B leading dimensions include copy-kernel N-block padding.
+    // Materialized B operands use independent 64-column panels.
     dim_t kt_ld = 0, vt_ld = 0;
+    dim_t v_block = 0, v_tail = 0;
     bool mm1_transpose_k = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
@@ -176,7 +177,7 @@ struct sdpa_full_softmax_conf_t {
     int nthr = 0;
 
     // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
-    sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2];
+    sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2][2];
 
     size_t scratch_total(int n) const {
         return scratch_per_thread * static_cast<size_t>(n) + kt_global_bytes
@@ -191,7 +192,7 @@ struct sdpa_full_softmax_conf_t {
 // remainder is 0). mm2_desc_beta0 is the beta = 0 full-kv-block mm2 descriptor
 // used for the first block when seq_kv is tiled (per q-tile).
 struct sdpa_full_softmax_descs_t {
-    brgemm_desc_t mm1_desc[2][2], mm2_desc[2][2], mm2_desc_beta0[2];
+    brgemm_desc_t mm1_desc[2][2], mm2_desc[2][2][2], mm2_desc_beta0[2][2];
     bool mm_valid[2][2] = {};
     bool beta0_valid[2] = {};
 };
@@ -212,8 +213,8 @@ struct sdpa_full_softmax_kernels_t {
     // mm1/mm2 BRGEMM kernels indexed [is_q_tail][is_kv_tail]; mm2_kernels_beta0
     // is the beta = 0 first-block mm2 (per q-tile), built only when tiled.
     brgemm_kernel_t *mm1_kernels[2][2] = {};
-    brgemm_kernel_t *mm2_kernels[2][2] = {};
-    brgemm_kernel_t *mm2_kernels_beta0[2] = {};
+    brgemm_kernel_t *mm2_kernels[2][2][2] = {};
+    brgemm_kernel_t *mm2_kernels_beta0[2][2] = {};
     std::unique_ptr<sdpa_brgemm_copy::b_packer_t> k_packer, v_packer;
 
     // Vectorized JIT softmax kernel and its pd. execute() invokes the kernel
