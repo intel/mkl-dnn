@@ -240,16 +240,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             ? data_type_vnni_granularity(p_.mm_dt)
             : k_pack;
     conf.kt_k_pack = kt_k_pack;
-    const bool amx_vnni_pack = pack_b && mayiuse(avx512_core_amx)
-            && (p_.mm_dt == data_type::bf16 || mayiuse(avx512_core_amx_fp16));
-    const dim_t wei_k_blk = matmul::get_wei_k_blk(p_.mm_dt);
-    const dim_t kt_required_block
-            = (amx_vnni_pack || mm1_transpose_k) ? wei_k_blk : dim_t(1);
-    // Both values are lower bounds. Round explicitly so K padding remains a
-    // multiple of the pack step even if the matmul block size changes.
+    const dim_t copy_k_block = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
     const dim_t kt_k_pad
-            = utils::rnd_up(nstl::max(kt_k_pack, kt_required_block), kt_k_pack);
-    const dim_t vt_k_pad = (amx_vnni_pack || transpose_v) ? wei_k_blk : k_pack;
+            = (pack_b || mm1_transpose_k) ? copy_k_block : dim_t(1);
+    const dim_t vt_k_pad = need_vt ? copy_k_block : dim_t(1);
 
     conf.b_k_pack = k_pack;
     conf.kt_k_pad = kt_k_pad;
@@ -528,14 +522,14 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     if (need_kt) {
         kernels.k_packer.reset(new sdpa_brgemm_copy::b_packer_t());
         CHECK(kernels.k_packer->init(hs_qk, seq_kv, conf.k_hs_stride,
-                conf.k_seq_stride, conf.kt_ld, conf.kt_k_pad, p_.mm_dt));
+                conf.k_seq_stride, conf.kt_ld, p_.mm_dt));
     }
     if (need_vt) {
         const dim_t v_row = p_.v_strides[row_dim];
         const dim_t v_col = p_.v_strides[p_.ndims - 1];
         kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
-        CHECK(kernels.v_packer->init(seq_kv, hs_v, v_row, v_col, conf.vt_ld,
-                conf.vt_k_pad, p_.mm_dt));
+        CHECK(kernels.v_packer->init(
+                seq_kv, hs_v, v_row, v_col, conf.vt_ld, p_.mm_dt));
     }
 
     auto destroy_kernels = [&]() {
