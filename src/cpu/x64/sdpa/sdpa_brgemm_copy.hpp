@@ -19,7 +19,6 @@
 #ifndef CPU_X64_SDPA_SDPA_BRGEMM_COPY_HPP
 #define CPU_X64_SDPA_SDPA_BRGEMM_COPY_HPP
 
-#include <cstring>
 #include <memory>
 
 #include "common/utils.hpp"
@@ -35,20 +34,26 @@ class b_packer_t {
 public:
     static dim_t packed_ld(dim_t N) { return utils::rnd_up(N, dim_t(64)); }
 
-    status_t init(dim_t K, dim_t N, dim_t src_ld, dim_t dst_ld,
-            dim_t k_pad_block, data_type_t dt, format_tag_t src_tag) {
-        if (K <= 0 || N <= 0 || src_ld <= 0 || dst_ld < packed_ld(N)
-                || k_pad_block <= 0
-                || !utils::one_of(src_tag, format_tag::ab, format_tag::ba))
+    status_t init(dim_t K, dim_t N, dim_t src_k_stride, dim_t src_n_stride,
+            dim_t dst_ld, dim_t k_pad_block, data_type_t dt) {
+        if (K <= 0 || N <= 0 || src_k_stride <= 0 || src_n_stride <= 0
+                || dst_ld < packed_ld(N) || k_pad_block <= 0)
             return status::invalid_arguments;
+        if (src_k_stride != 1 && src_n_stride != 1)
+            return status::unimplemented;
 
         K_ = K;
         N_ = N;
-        src_ld_ = src_ld;
         dst_ld_ = dst_ld;
         k_pad_block_ = k_pad_block;
         dt_ = dt;
-        src_tag_ = src_tag;
+        if (src_n_stride == 1) {
+            src_tag_ = format_tag::ab;
+            src_ld_ = src_k_stride;
+        } else {
+            src_tag_ = format_tag::ba;
+            src_ld_ = src_n_stride;
+        }
         k_vnni_ = data_type_vnni_granularity(dt_);
         if (k_vnni_ <= 0 || k_pad_block_ % k_vnni_ != 0)
             return status::invalid_arguments;

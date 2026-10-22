@@ -65,6 +65,9 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
     VDISPATCH_SDPA(qry_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
             "the query head-size axis must be contiguous");
+    VDISPATCH_SDPA(key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1
+                    || key_mdw.strides()[sdpa_pd_t::ndims - 2] == 1,
+            "one key matrix axis must be contiguous");
     VDISPATCH_SDPA(val_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
             "the value head-size axis must be contiguous");
 

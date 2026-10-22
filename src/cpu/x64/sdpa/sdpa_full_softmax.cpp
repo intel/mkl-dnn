@@ -512,22 +512,16 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     const dim_t mm1_ldb = need_kt ? conf.kt_ld : k_hs_stride_;
 
     if (need_kt) {
-        const format_tag_t k_tag
-                = conf.k_seq_stride == 1 ? format_tag::ab : format_tag::ba;
-        const dim_t k_src_ld = k_tag == format_tag::ab ? conf.k_hs_stride
-                                                       : conf.k_seq_stride;
         kernels.k_packer.reset(new sdpa_brgemm_copy::b_packer_t());
-        CHECK(kernels.k_packer->init(hs_qk, seq_kv, k_src_ld, conf.kt_ld,
-                conf.kt_k_pad, p_.mm_dt, k_tag));
+        CHECK(kernels.k_packer->init(hs_qk, seq_kv, conf.k_hs_stride,
+                conf.k_seq_stride, conf.kt_ld, conf.kt_k_pad, p_.mm_dt));
     }
     if (pack_b) {
         const dim_t v_row = p_.v_strides[row_dim];
         const dim_t v_col = p_.v_strides[p_.ndims - 1];
-        const format_tag_t v_tag = v_col == 1 ? format_tag::ab : format_tag::ba;
-        const dim_t v_src_ld = v_tag == format_tag::ab ? v_row : v_col;
         kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
-        CHECK(kernels.v_packer->init(seq_kv, hs_v, v_src_ld, conf.vt_ld,
-                conf.vt_k_pad, p_.mm_dt, v_tag));
+        CHECK(kernels.v_packer->init(seq_kv, hs_v, v_row, v_col, conf.vt_ld,
+                conf.vt_k_pad, p_.mm_dt));
     }
 
     auto destroy_kernels = [&]() {
