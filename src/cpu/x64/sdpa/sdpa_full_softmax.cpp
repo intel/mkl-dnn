@@ -54,6 +54,31 @@ inline size_t align64(size_t n) {
     return (n + 63) & ~static_cast<size_t>(63);
 }
 
+// Estimates whether an f32 tile maps too many cache lines to any one L2 cache set
+bool f32_tile_aliases_l2(
+        dim_t tile_rows, dim_t tile_columns, dim_t row_stride) {
+    const size_t sets = platform::get_num_sets_in_cache(2);
+    const size_t ways = platform::get_num_ways_in_cache(2);
+    const size_t line_size = platform::get_cache_line_size();
+    if (!sets || !ways || !line_size || tile_rows <= 0 || tile_columns <= 0)
+        return false;
+
+    const size_t period = sets * line_size;
+    const size_t stride = (row_stride * sizeof(float)) % period;
+    const size_t tile_width = tile_columns * sizeof(float);
+    std::vector<size_t> occupancy(sets);
+    size_t offset = 0;
+    for (dim_t row = 0; row < tile_rows; ++row) {
+        const size_t first_line = offset / line_size;
+        const size_t last_line = (offset + tile_width - 1) / line_size;
+        for (size_t line = first_line; line <= last_line; ++line) {
+            if (++occupancy[line % sets] > ways) return true;
+        }
+        offset = (offset + stride) % period;
+    }
+    return false;
+}
+
 // Down-convert n contiguous f32 elements into dst as data type dt (f16/bf16).
 // Used to materialise P (mm2's A operand) from the f32 softmax output. f32 is
 // handled by the caller (it uses the f32 scores tile directly, no conversion).
@@ -232,7 +257,12 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const bool pack_b = needs_vnni_b;
     const bool transpose_v = p_.v_strides[p_.ndims - 1] != 1;
     const bool need_vt = pack_b || transpose_v;
-    const bool need_kt = mm1_transpose_k || pack_b;
+    const bool pack_k_for_aliasing = p_.mm_dt == data_type::f32
+            && !mm1_transpose_k
+            && f32_tile_aliases_l2(
+                    hs_qk, nstl::min<dim_t>(seq_kv, 64), k_hs_stride);
+    const bool need_kt = mm1_transpose_k || pack_b || pack_k_for_aliasing;
+    conf.pack_k_for_aliasing = pack_k_for_aliasing;
     const dim_t vt_k_pack = p_.mm_dt == data_type::f16 && transpose_v
                     && mayiuse(avx512_core_fp16)
             ? data_type_vnni_granularity(p_.mm_dt)
@@ -246,8 +276,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             : k_pack;
     conf.kt_k_pack = kt_k_pack;
     const dim_t copy_k_block = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
-    const dim_t kt_k_pad
-            = (pack_b || mm1_transpose_k) ? copy_k_block : dim_t(1);
+    const dim_t kt_k_pad = need_kt ? copy_k_block : dim_t(1);
     const dim_t vt_k_pad = need_vt ? copy_k_block : dim_t(1);
 
     conf.b_k_pack = k_pack;
@@ -530,7 +559,7 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     // only for the (rare) select-post-op compile-failure rebuild below.
     const bool pack_b = b_k_pack_ == 2;
     const bool need_vt = pack_b || p_.v_strides[p_.ndims - 1] != 1;
-    const bool need_kt = mm1_transpose_k_ || pack_b;
+    const bool need_kt = mm1_transpose_k_ || pack_b || conf.pack_k_for_aliasing;
     const dim_t mm1_ldb = need_kt ? conf.kt_ld : k_hs_stride_;
 
     if (need_kt) {
@@ -814,7 +843,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // mm1 materialises a dense (VNNI-packed for bf16/f16) [hs_qk, seq_kv] B
     // tile whenever it must transpose or pack K; f32 with contiguous seq_kv
     // reads K in place.
-    const bool need_kt = transpose_b || pack_b;
+    const bool need_kt = transpose_b || pack_b || conf.pack_k_for_aliasing;
     const dim_t hs_qk_pad = utils::rnd_up(hs_qk, kt_k_pad);
     const dim_t seq_kv_pad = utils::rnd_up(seq_kv, vt_k_pad);
     // Element strides to walk the K tensor's seq_kv / hs_qk axes when

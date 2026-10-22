@@ -166,6 +166,7 @@ struct sdpa_full_softmax_conf_t {
     dim_t kt_ld = 0, vt_ld = 0;
     dim_t v_block = 0, v_tail = 0;
     bool mm1_transpose_k = false;
+    bool pack_k_for_aliasing = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
     // a binary_select post-op; the descriptors are built accordingly.
