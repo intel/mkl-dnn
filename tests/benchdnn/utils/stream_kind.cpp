@@ -77,8 +77,7 @@ std::ostream &operator<<(std::ostream &s, stream_kind_t stream_kind) {
     return s;
 }
 
-stream_t::stream_t(
-        const engine_t &engine, void *interop_obj, bool enable_profiling) {
+stream_t::stream_t(const engine_t &engine, void *interop_obj) {
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
     if (is_cpu(engine)) {
         auto tp = static_cast<dnnl::threadpool_interop::threadpool_iface *>(
@@ -89,19 +88,11 @@ stream_t::stream_t(
     }
 #endif
 
-    const bool use_profiling = enable_profiling
-            && has_bench_mode_bit(mode_bit_t::perf) && is_gpu(engine)
-            && !is_nvidia_gpu(engine) && !is_amd_gpu(engine);
+    const bool use_profiling = has_bench_mode_bit(mode_bit_t::perf)
+            && is_gpu(engine) && !is_nvidia_gpu(engine) && !is_amd_gpu(engine);
     const auto flags = static_cast<dnnl::stream::flags>(
             stream_kind2stream_flags(stream_kind, use_profiling));
     stream_ = dnnl::stream(engine, flags);
-}
-
-stream_guard_t get_test_stream() {
-    static const stream_t instance(get_test_engine(),
-            /* interop_obj = */ nullptr,
-            /* enable_profiling = */ false);
-    return stream_guard_t(instance);
 }
 
 stream_staller_t::stream_staller_t(stream_t &stream) {
