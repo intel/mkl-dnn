@@ -219,7 +219,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const bool mm1_transpose_k = k_seq_stride != 1;
 
     const bool needs_vnni_b = p_.mm_dt == data_type::bf16
-            || (p_.mm_dt == data_type::f16 && mayiuse(avx512_core_amx_fp16));
+            || (p_.mm_dt == data_type::f16
+                    && (mayiuse(avx512_core_amx_fp16)
+                            || (mayiuse(avx2_vnni_2)
+                                    && !mayiuse(avx512_core_fp16))));
 
     const dim_t k_pack = needs_vnni_b ? 2 : 1;
     const bool pack_b = needs_vnni_b;
