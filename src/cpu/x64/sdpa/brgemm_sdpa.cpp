@@ -226,11 +226,6 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
             val_mdw.strides(), val_mdw.strides() + sdpa_pd_t::ndims);
     bp_.o_strides.assign(
             dst_mdw.strides(), dst_mdw.strides() + sdpa_pd_t::ndims);
-    // key_md()'s logical dim order is fixed by the pd contract to
-    // [batch, kv_heads, head_size, keys] (keys() reads the *last* dim), i.e.
-    // head_size is already the row axis and keys the inner axis -- the
-    // "non-transposed" orientation the full-softmax path expects.
-    bp_.mm1_transpose_b = false;
     bp_.has_select = with_select_mask();
     bp_.invert_select = desc()->invert_select;
     if (with_select_mask()) {

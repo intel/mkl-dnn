@@ -99,10 +99,6 @@ struct sdpa_full_softmax_params_t {
     // When true, keep scores where cond == 0; otherwise keep where cond != 0.
     bool invert_select = false;
 
-    // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
-    // and the mm1 BRGEMM transposes it; otherwise K is [.., head_size, seq_kv].
-    bool mm1_transpose_b = false;
-
     // SoftMax "inf_as_zero" mode: a fully-masked row (all -inf) produces an
     // all-zero probability row instead of NaN. Selects the softmax primitive
     // alg_kind (softmax_accurate_inf_as_zero vs softmax_accurate).

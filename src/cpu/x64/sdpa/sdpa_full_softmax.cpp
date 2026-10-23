@@ -241,10 +241,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t hs_qk = p_.head_size_qk;
     const dim_t hs_v = p_.head_size_v;
     const int row_dim = p_.ndims - 2;
-    const dim_t k_seq_stride = p_.mm1_transpose_b ? p_.k_strides[row_dim]
-                                                  : p_.k_strides[p_.ndims - 1];
-    const dim_t k_hs_stride = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
-                                                 : p_.k_strides[row_dim];
+    const dim_t k_seq_stride = p_.k_strides[p_.ndims - 1];
+    const dim_t k_hs_stride = p_.k_strides[row_dim];
     const bool mm1_transpose_k = k_seq_stride != 1;
 
     const bool needs_vnni_b = p_.mm_dt == data_type::bf16
