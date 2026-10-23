@@ -1,0 +1,235 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+
+# Builds oneDNN binary packages for a release tag and attaches them, together
+# with SHA256 checksums and build provenance attestations, to the GitHub
+# release.
+
+name: "Release Binaries"
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (for example, v3.14)"
+        required: true
+        type: string
+      upload:
+        description: "Upload packages to the GitHub release for the tag"
+        required: false
+        type: boolean
+        default: false
+
+# Declare default permissions as read only.
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  prepare:
+    name: Prepare
+    # Skip releases published in forks, but allow manual runs there.
+    if: github.repository == 'uxlfoundation/oneDNN' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      # Uploads must run from the release tag, so that the build automation and
+      # the provenance match the released sources.
+      - name: Validate release tag
+        id: tag
+        env:
+          UPLOAD: ${{ github.event_name == 'release' || inputs.upload }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Unexpected release tag format: '$RELEASE_TAG'"
+            exit 1
+          fi
+          if [[ "$UPLOAD" == "true" && "$GITHUB_REF" != "refs/tags/$RELEASE_TAG" ]]; then
+            echo "::error::Upload requires running from refs/tags/$RELEASE_TAG (got $GITHUB_REF)"
+            exit 1
+          fi
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check release exists
+        if: github.event_name == 'release' || inputs.upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+
+  # manylinux_2_28 container ensures compatibility with RHEL 8 baseline.
+  linux:
+    name: Linux x64, ${{ matrix.config.name }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    container: quay.io/pypa/manylinux_2_28_x86_64:2026.11.01-2@sha256:7e41b1c7fd64dfc69703a1124b43c404382973ee06ec5d764b85c34d2221fded
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { name: omp, cpu_runtime: OMP, gpu_runtime: NONE, compiler: gcc }
+          - { name: sycl, cpu_runtime: OMP, gpu_runtime: SYCL, compiler: icx }
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMPILER: ${{ matrix.config.compiler }}
+      CPU_RUNTIME: ${{ matrix.config.cpu_runtime }}
+      GPU_RUNTIME: ${{ matrix.config.gpu_runtime }}
+      PKG_NAME: onednn-${{ needs.prepare.outputs.tag }}-${{ matrix.config.name }}-linux-x64
+    steps:
+      # Build scripts come from the workflow's own commit, so that older tags
+      # without them can be built too.
+      - name: Checkout release automation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci
+          sparse-checkout: .github/automation/release
+          persist-credentials: false
+
+      - name: Checkout oneDNN
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          path: oneDNN
+          persist-credentials: false
+
+      - name: Install build tools
+        run: pipx install ninja==1.13.2
+
+      - name: Install Intel oneAPI DPC++/C++ Compiler
+        if: matrix.config.compiler == 'icx'
+        run: ci/.github/automation/release/install_dpcpp.sh
+
+      - name: Build and test
+        working-directory: oneDNN
+        # The workspace is owned by a different user than the container one.
+        # Mark it as safe so that CMake can record the commit hash.
+        run: |
+          git config --global --add safe.directory "$PWD"
+          ../ci/.github/automation/release/build.sh "$GITHUB_WORKSPACE/$PKG_NAME"
+
+      - name: Package
+        run: tar -czf "$PKG_NAME.tar.gz" "$PKG_NAME"
+
+      - name: Upload package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-linux-${{ matrix.config.name }}
+          path: ${{ env.PKG_NAME }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows x64, ${{ matrix.config.name }}
+    needs: prepare
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { name: omp, cpu_runtime: OMP, gpu_runtime: NONE, compiler: cl }
+          - { name: sycl, cpu_runtime: OMP, gpu_runtime: SYCL, compiler: icx }
+    env:
+      CPU_RUNTIME: ${{ matrix.config.cpu_runtime }}
+      GPU_RUNTIME: ${{ matrix.config.gpu_runtime }}
+      COMPILER: ${{ matrix.config.compiler }}
+      PKG_NAME: onednn-${{ needs.prepare.outputs.tag }}-${{ matrix.config.name }}-windows-x64
+    steps:
+      - name: Checkout release automation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ci
+          sparse-checkout: .github/automation/release
+          persist-credentials: false
+
+      - name: Checkout oneDNN
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          path: oneDNN
+          persist-credentials: false
+
+      - name: Install Intel oneAPI DPC++/C++ Compiler
+        if: matrix.config.compiler == 'icx'
+        shell: cmd
+        run: call ci\.github\automation\release\install_dpcpp.bat
+
+      - name: Build and test
+        shell: cmd
+        working-directory: oneDNN
+        run: call ..\ci\.github\automation\release\build.bat "%GITHUB_WORKSPACE%\%PKG_NAME%"
+
+      - name: Package
+        shell: pwsh
+        run: 7z a -tzip "$env:PKG_NAME.zip" "$env:PKG_NAME"
+
+      - name: Upload package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package-windows-${{ matrix.config.name }}
+          path: ${{ env.PKG_NAME }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [prepare, linux, windows]
+    if: >-
+      (github.event_name == 'release' || inputs.upload) &&
+      github.ref == format('refs/tags/{0}', needs.prepare.outputs.tag)
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write # upload release assets
+      id-token: write # sign attestations
+      attestations: write # store attestations
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          {
+            echo "# oneDNN $RELEASE_TAG; build automation commit: $GITHUB_SHA"
+            sha256sum onednn-*
+          } > "onednn-$RELEASE_TAG-sha256sums.txt"
+          cat "onednn-$RELEASE_TAG-sha256sums.txt"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/onednn-*
+
+      # Existing assets are not replaced, so that they keep matching their
+      # attestations. Delete them manually to re-spin the binaries.
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" dist/onednn-* --repo "$GITHUB_REPOSITORY"
