@@ -905,6 +905,31 @@ std::ostream &operator<<(std::ostream &s, const policy_t &policy) {
     return s;
 }
 
+// A single optional trailing field of an attribute dump: `chunk` is its text and
+// `non_default` tells whether it carries information worth emitting.
+struct dump_field_t {
+    bool non_default;
+    std::string chunk;
+};
+
+// Assembles the trailing ':'-separated portion of an attribute dump. Fields are
+// listed from the right-most (last parsed) to the left-most; each is emitted
+// when `canonical` requests the fully explicit form, when it is non-default, or
+// when any field already emitted (hence any field to its right) is present.
+// Building right-to-left keeps each condition flat, so a new trailing parser
+// field only needs a new entry at the front of the list.
+static std::string dump_fields_backward(
+        std::initializer_list<dump_field_t> fields) {
+    std::string str;
+    for (const auto &f : fields) {
+        if (canonical || f.non_default || !str.empty()) {
+            str.insert(0, f.chunk);
+            str.insert(0, 1, ':');
+        }
+    }
+    return str;
+}
+
 std::ostream &operator<<(
         std::ostream &s, const attr_t::arg_scales_t::entry_t &scale) {
     using ::operator<<;
@@ -917,26 +942,12 @@ std::ostream &operator<<(
     }
     if (scale.has_single_element()) s << ":" << scale.scale;
 
-    // TODO: generalize this backward dumping into a common helper shared with
-    // zero-points and dropout operator<<.
-    // Update the string in backward direction to prevent multiple nesting
-    // condition for each next dumping part.
-    std::string str, str_tmp;
-    if (scale.qmode != dnnl_quantization_mode_static_sazp) {
-        str_tmp = std::string(":") + quantization_mode2str(scale.qmode);
-        str = str_tmp + str;
-    }
-    if (!str.empty() || !scale.groups.empty()) {
-        str_tmp = ":"
-                + (scale.groups.empty() ? std::string()
-                                        : dims2str(scale.groups));
-        str = str_tmp + str;
-    }
-    if (!str.empty() || scale.dt != dnnl_f32) {
-        str_tmp = std::string(":") + dt2str(scale.dt);
-        str = str_tmp + str;
-    }
-    s << str;
+    s << dump_fields_backward({
+            {scale.qmode != dnnl_quantization_mode_static_sazp,
+                    quantization_mode2str(scale.qmode)},
+            {!scale.groups.empty(), dims2str(scale.groups)},
+            {scale.dt != dnnl_f32, dt2str(scale.dt)},
+    });
     return s;
 }
 
@@ -956,24 +967,12 @@ std::ostream &operator<<(
         }
         if (e.has_single_element()) s << ":" << e.value;
 
-        // TODO: generalize this backward dumping into a common helper shared
-        // with scales and dropout operator<<.
-        // Update the string in backward direction to prevent multiple nesting
-        // condition for each next dumping part.
-        std::string str;
-        if (e.qmode != dnnl_quantization_mode_static_sazp) {
-            str.insert(0, std::string(":") + quantization_mode2str(e.qmode));
-        }
-        if (!str.empty() || !e.groups.empty()) {
-            str.insert(0,
-                    ":"
-                            + (e.groups.empty() ? std::string()
-                                                : dims2str(e.groups)));
-        }
-        if (!str.empty() || e.dt != dnnl_s32) {
-            str.insert(0, std::string(":") + dt2str(e.dt));
-        }
-        s << str;
+        s << dump_fields_backward({
+                {e.qmode != dnnl_quantization_mode_static_sazp,
+                        quantization_mode2str(e.qmode)},
+                {!e.groups.empty(), dims2str(e.groups)},
+                {e.dt != dnnl_s32, dt2str(e.dt)},
+        });
         delim = "+";
     }
 
@@ -986,17 +985,19 @@ std::ostream &operator<<(std::ostream &s,
 
     const char *delim = "";
     for (const auto &entry : precomputed_reductions.entries) {
+        const auto &e = entry.second;
         s << delim << arg2str(entry.first);
-        if (entry.second.mask_input == attr_t::mask_input_t::mask) {
-            s << ":" << entry.second.mask;
+        if (e.mask_input == attr_t::mask_input_t::mask) {
+            s << ":" << e.mask;
         } else {
-            assert(entry.second.mask_input == attr_t::mask_input_t::policy);
-            s << ":" << entry.second.policy;
+            assert(e.mask_input == attr_t::mask_input_t::policy);
+            s << ":" << e.policy;
         }
-        if (entry.second.dt != dnnl_s32 || !entry.second.groups.empty())
-            s << ':' << entry.second.dt;
-        if (!entry.second.groups.empty())
-            s << ":" << dims2str(entry.second.groups);
+
+        s << dump_fields_backward({
+                {!e.groups.empty(), dims2str(e.groups)},
+                {e.dt != dnnl_s32, dt2str(e.dt)},
+        });
         delim = "+";
     }
 
@@ -1131,29 +1132,14 @@ std::ostream &operator<<(std::ostream &s, const attr_t::deterministic_t &d) {
 }
 
 std::ostream &operator<<(std::ostream &s, const attr_t::dropout_t &drop) {
-    // TODO: generalize this backward dumping into a common helper shared with
-    // scales and zero-points operator<<.
-    // Update the string in backward direction to prevent multiple nesting
-    // condition for each next dumping part.
-    std::string str, str_tmp;
-    if (drop.use_host_scalars) {
-        str_tmp = ":" + std::to_string(drop.use_host_scalars);
-        str = str_tmp + str;
-    }
-    if (!str.empty() || drop.offset != 0) {
-        str_tmp = ":" + std::to_string(drop.offset);
-        str = str_tmp + str;
-    }
-    if (!str.empty() || drop.tag != tag::any) {
-        str_tmp = ":" + drop.tag;
-        str = str_tmp + str;
-    }
-    if (!str.empty() || drop.seed != 0) {
-        str_tmp = ":" + std::to_string(drop.seed);
-        str = str_tmp + str;
-    }
     // Use ostream to dump `p` for nicer output.
-    s << drop.p << str;
+    s << drop.p
+      << dump_fields_backward({
+                 {drop.use_host_scalars, std::to_string(drop.use_host_scalars)},
+                 {drop.offset != 0, std::to_string(drop.offset)},
+                 {drop.tag != tag::any, drop.tag},
+                 {drop.seed != 0, std::to_string(drop.seed)},
+         });
     return s;
 }
 
