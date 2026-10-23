@@ -240,6 +240,49 @@ static int check_attr() {
                 dnnl_quantization_mode_static_sbzp);
     }
 
+    // `mx` and `dynamic_fp` are accepted both in the first (policy) token and,
+    // following the sbzp pattern, as the trailing quantization mode on top of a
+    // regular policy. Both spellings must be recognized as dynamic.
+    {
+        base_settings_t s;
+        std::vector<attr_t::arg_scales_t> &sc = s.scales;
+
+        // First-token spelling maps onto a per_tensor policy plus the matching
+        // quantization mode.
+        SELF_CHECK_EQ(
+                parse_attributes(s, def, "--attr-scales=dst:mx:e8m0:1x32"),
+                true);
+        SELF_CHECK_EQ(sc.size(), 1);
+        const auto &sc_mx_first = sc[0].get(DNNL_ARG_DST);
+        SELF_CHECK_EQ(sc_mx_first.policy, policy_t::PER_TENSOR);
+        SELF_CHECK_EQ(sc_mx_first.qmode, dnnl_quantization_mode_dynamic_mx);
+        SELF_CHECK_EQ(sc_mx_first.is_mx(), true);
+        SELF_CHECK_EQ(sc_mx_first.is_dynamic(), true);
+
+        // Trailing quantization-mode form: a regular policy plus the `mx` mode.
+        SELF_CHECK_EQ(parse_attributes(s, def,
+                              "--attr-scales=dst:per_tensor:e8m0:1x32:mx"),
+                true);
+        SELF_CHECK_EQ(sc.size(), 1);
+        const auto &sc_mx = sc[0].get(DNNL_ARG_DST);
+        SELF_CHECK_EQ(sc_mx.policy, policy_t::PER_TENSOR);
+        SELF_CHECK_EQ(sc_mx.qmode, dnnl_quantization_mode_dynamic_mx);
+        SELF_CHECK_EQ(sc_mx.is_mx(), true);
+        SELF_CHECK_EQ(sc_mx.is_dynamic(), true);
+
+        // Trailing quantization-mode form for `dynamic_fp`.
+        SELF_CHECK_EQ(
+                parse_attributes(s, def,
+                        "--attr-scales=dst:per_tensor:f8_e4m3:1x16:dynamic_fp"),
+                true);
+        SELF_CHECK_EQ(sc.size(), 1);
+        const auto &sc_fp = sc[0].get(DNNL_ARG_DST);
+        SELF_CHECK_EQ(sc_fp.policy, policy_t::PER_TENSOR);
+        SELF_CHECK_EQ(sc_fp.qmode, dnnl_quantization_mode_dynamic_fp);
+        SELF_CHECK_EQ(sc_fp.is_dynamic_fp(), true);
+        SELF_CHECK_EQ(sc_fp.is_dynamic(), true);
+    }
+
     {
         base_settings_t s;
         std::vector<attr_t::arg_scales_t> &sc = s.scales;

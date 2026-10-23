@@ -145,8 +145,6 @@ policy_t attr_t::str2policy(const std::string &str) {
     if (s.compare(STRINGIFY(_plc)) == 0) return _plc
     CASE(COMMON);
     CASE(HOST_SCALAR);
-    CASE(MX);
-    CASE(DYNAMIC_FP);
     CASE(PER_OC);
     CASE(PER_OCIC);
     CASE(PER_DIM_0);
@@ -163,8 +161,6 @@ policy_t attr_t::str2policy(const std::string &str) {
 const char *attr_t::policy2str(policy_t policy) {
     if (policy == COMMON) return "common";
     if (policy == HOST_SCALAR) return "host_scalar";
-    if (policy == MX) return "mx";
-    if (policy == DYNAMIC_FP) return "dynamic_fp";
     if (policy == PER_OC) return "per_oc";
     if (policy == PER_OCIC) return "per_ocic";
     if (policy == PER_DIM_0) return "per_dim_0";
@@ -198,8 +194,6 @@ static int get_default_mask(policy_t policy, int ndims) {
         case attr_t::policy_t::PER_DIM_01: return (1 << 0) + (1 << 1);
         case attr_t::policy_t::PER_DIM_2: return (1 << 2);
         case attr_t::policy_t::PER_DIM_3: return (1 << 3);
-        case attr_t::policy_t::MX:
-        case attr_t::policy_t::DYNAMIC_FP:
         case attr_t::policy_t::PER_TENSOR:
             assert(ndims > 0 && ndims <= DNNL_MAX_NDIMS);
             return (1 << ndims) - 1;
@@ -208,14 +202,6 @@ static int get_default_mask(policy_t policy, int ndims) {
         case attr_t::policy_t::HOST_SCALAR: return 0;
         default: SAFE(FAIL, CRIT); return INT_MIN;
     }
-}
-
-dnnl_quantization_mode_t attr_t::policy2quantization_mode(policy_t policy) {
-    if (policy == policy_t::MX) return dnnl_quantization_mode_dynamic_mx;
-    if (policy == policy_t::DYNAMIC_FP)
-        return dnnl_quantization_mode_dynamic_fp;
-
-    return dnnl_quantization_mode_undef;
 }
 
 int attr_t::policy2mask(int arg, policy_t policy, int ndims,
@@ -250,8 +236,6 @@ int attr_t::policy2mask(int arg, policy_t policy, int ndims,
             case PER_DIM_1:
             case PER_OC: return (1 << (ndims - 1));
             case PER_OCIC: return (1 << (ndims - 1)) + (1 << (ndims - 2));
-            case MX:
-            case DYNAMIC_FP:
             case PER_TENSOR: return get_default_mask(policy, ndims);
             default: SAFE_V(FAIL); return -1;
         }
@@ -311,13 +295,23 @@ int attr_t::arg_scales_t::entry_t::from_str(const std::string &s) {
         this->mask_input = attr_t::mask_input_t::mask;
         this->mask = parser::utils::stoll_safe(mask_input_str);
     } else {
-        // Otherwise, re-direct to policy parsing.
+        // `mx` and `dynamic_fp` select dynamic quantization modes that imply a
+        // per_tensor mask. They are accepted in the policy token as a shorthand
+        // and mapped onto a per_tensor policy plus the matching mode.
+        const auto first_token_qmode
+                = parser::parsers::str2quantization_mode(mask_input_str);
         this->mask_input = attr_t::mask_input_t::policy;
-        this->policy = attr_t::str2policy(mask_input_str);
-        if (this->policy == POLICY_TOTAL) {
-            BENCHDNN_PRINT(0, "%s \'%s\' %s\n", "Error: Scale entry policy",
-                    mask_input_str.c_str(), "is not recognized.");
-            SAFE_V(FAIL);
+        if (first_token_qmode == dnnl_quantization_mode_dynamic_mx
+                || first_token_qmode == dnnl_quantization_mode_dynamic_fp) {
+            this->policy = attr_t::policy_t::PER_TENSOR;
+            this->qmode = first_token_qmode;
+        } else {
+            this->policy = attr_t::str2policy(mask_input_str);
+            if (this->policy == POLICY_TOTAL) {
+                BENCHDNN_PRINT(0, "%s \'%s\' %s\n", "Error: Scale entry policy",
+                        mask_input_str.c_str(), "is not recognized.");
+                SAFE_V(FAIL);
+            }
         }
     }
     HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
@@ -1598,15 +1592,9 @@ dnnl_primitive_attr_t create_dnnl_attr(
                     ? args_mask
                     : as.get_mask(arg_name, dnnl_undefined_primitive, ndims);
 
-            // The `mx` and `dynamic_fp` modes are still carried by the policy;
-            // the explicit quantization mode carries the rest. Prefer the
-            // policy-derived mode until those migrate to the quantization mode.
-            auto qmode = attr_t::policy2quantization_mode(e.policy);
-            if (qmode == dnnl_quantization_mode_undef) qmode = e.qmode;
-
             DNN_SAFE_V(dnnl_primitive_attr_set_scales_v3(dnnl_attr, arg_name,
                     mask, static_cast<int>(e.groups.size()), e.groups.data(),
-                    e.dt, is_on_host, qmode));
+                    e.dt, is_on_host, e.qmode));
         }
     }
 

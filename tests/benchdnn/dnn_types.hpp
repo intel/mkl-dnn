@@ -74,8 +74,6 @@ struct attr_t {
         PER_DIM_3, // ... dims[3] point.
         PER_TENSOR, // ... point in the tensor.
         HOST_SCALAR, // same as COMMON, but uses host-side scalar memory
-        MX, // uses {1, ..., 32} groups and dynamic_mx formula
-        DYNAMIC_FP, // uses {1, ..., 16} groups and dynamic_fp formula
         POLICY_TOTAL // guard
     };
 
@@ -90,7 +88,6 @@ struct attr_t {
     static int policy2mask(int arg, policy_t policy, int ndims = -1,
             dnnl_primitive_kind_t prim_kind = dnnl_undefined_primitive,
             bool has_groups = false);
-    static dnnl_quantization_mode_t policy2quantization_mode(policy_t policy);
 
     struct zero_points_t {
         struct entry_t {
@@ -249,11 +246,13 @@ struct attr_t {
             bool is_def() const { return mask_input == mask_input_t::none; }
 
             bool is_host_scalar() const { return policy == HOST_SCALAR; }
-            bool is_dynamic() const {
-                return policy == MX || policy == DYNAMIC_FP;
+            bool is_mx() const {
+                return qmode == dnnl_quantization_mode_dynamic_mx;
             }
-            bool is_mx() const { return policy == MX; }
-            bool is_dynamic_fp() const { return policy == DYNAMIC_FP; }
+            bool is_dynamic_fp() const {
+                return qmode == dnnl_quantization_mode_dynamic_fp;
+            }
+            bool is_dynamic() const { return is_mx() || is_dynamic_fp(); }
             bool is_sbzp() const {
                 return qmode == dnnl_quantization_mode_static_sbzp;
             }
