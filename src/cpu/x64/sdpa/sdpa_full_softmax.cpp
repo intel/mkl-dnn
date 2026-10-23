@@ -785,18 +785,10 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
 
     // Q, output, and select-condition tensors use query-head/group coordinates;
     // K and V use batch/KV-head coordinates shared by each GQA group.
-    const auto query_tensor_base_offset
+    const auto tensor_base_offset
             = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
-                      dim_t query_head_idx, dim_t kv_head_idx,
-                      dim_t group_idx) -> dim_t {
-        return ndims == 4 ? batch_idx * strides[0] + query_head_idx * strides[1]
-                          : batch_idx * strides[0] + kv_head_idx * strides[1]
-                        + group_idx * strides[2];
-    };
-    const auto kv_tensor_base_offset
-            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
-                      dim_t kv_head_idx) -> dim_t {
-        return batch_idx * strides[0] + kv_head_idx * strides[1];
+                      dim_t head_idx) -> dim_t {
+        return batch_idx * strides[0] + head_idx * strides[1];
     };
 
     const dim_t q_row = p_.q_strides[row_dim];
@@ -872,13 +864,11 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
             const char *kp = k_base
-                    + kv_tensor_base_offset(
-                              p_.k_strides, batch_idx, kv_head_idx)
+                    + tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
                             * qk_dt_sz;
             char *kt = kt_all
-                    + (static_cast<size_t>(batch_idx) * num_head_kv
-                              + kv_head_idx)
-                            * kt_head_elems * qk_dt_sz;
+                    + (batch_idx * num_head_kv + kv_head_idx) * kt_head_elems
+                            * qk_dt_sz;
             kernels.k_packer->execute(kp, kt);
         });
     }
@@ -886,13 +876,11 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
             const char *vp = v_base
-                    + kv_tensor_base_offset(
-                              p_.v_strides, batch_idx, kv_head_idx)
+                    + tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
                             * qk_dt_sz;
             char *vt = vt_all
-                    + (static_cast<size_t>(batch_idx) * num_head_kv
-                              + kv_head_idx)
-                            * vt_head_elems * qk_dt_sz;
+                    + (batch_idx * num_head_kv + kv_head_idx) * vt_head_elems
+                            * qk_dt_sz;
             kernels.v_packer->execute(vp, vt);
         });
     }
@@ -909,26 +897,23 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         const bool is_tail = m != q_block;
 
         const char *q_ptr = q_base
-                + (query_tensor_base_offset(p_.q_strides, batch_idx,
-                           query_head_idx, kv_head_idx, group_idx)
+                + (tensor_base_offset(p_.q_strides, batch_idx, query_head_idx)
                           + q0 * q_row)
                         * qk_dt_sz;
         const char *k_ptr = k_base
-                + kv_tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
+                + tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
                         * qk_dt_sz;
         const char *v_ptr = v_base
-                + kv_tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
+                + tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
                         * qk_dt_sz;
         char *o_ptr = o_base
-                + (query_tensor_base_offset(p_.o_strides, batch_idx,
-                           query_head_idx, kv_head_idx, group_idx)
+                + (tensor_base_offset(p_.o_strides, batch_idx, query_head_idx)
                           + q0 * o_row)
                         * o_dt_sz;
         const uint8_t *c_ptr = has_select
                 ? reinterpret_cast<const uint8_t *>(cond_base
-                          + (query_tensor_base_offset(eff_cond_strides,
-                                     batch_idx, query_head_idx, kv_head_idx,
-                                     group_idx)
+                          + (tensor_base_offset(eff_cond_strides, batch_idx,
+                                     query_head_idx)
                                     + q0 * cond_row)
                                   * sizeof(uint8_t))
                 : nullptr;
