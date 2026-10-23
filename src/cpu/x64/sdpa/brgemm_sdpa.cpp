@@ -208,7 +208,6 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
     auto &bp_ = full_conf_.params;
     bp_ = sdpa_full_softmax_params_t();
-    bp_.ndims = sdpa_pd_t::ndims;
     bp_.batch = desc()->batch();
     bp_.num_head_q = desc()->num_q_heads();
     bp_.group_head = desc()->num_q_heads() / desc()->num_kv_heads();

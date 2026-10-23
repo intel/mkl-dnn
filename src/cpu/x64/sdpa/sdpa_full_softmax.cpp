@@ -240,8 +240,9 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
     const dim_t hs_v = p_.head_size_v;
-    const int row_dim = p_.ndims - 2;
-    const dim_t k_seq_stride = p_.k_strides[p_.ndims - 1];
+    constexpr int ndims = sdpa_pd_t::ndims;
+    constexpr int row_dim = ndims - 2;
+    const dim_t k_seq_stride = p_.k_strides[ndims - 1];
     const dim_t k_hs_stride = p_.k_strides[row_dim];
     const bool mm1_transpose_k = k_seq_stride != 1;
 
@@ -253,7 +254,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     const dim_t k_pack = needs_vnni_b ? 2 : 1;
     const bool pack_b = needs_vnni_b;
-    const bool transpose_v = p_.v_strides[p_.ndims - 1] != 1;
+    const bool transpose_v = p_.v_strides[ndims - 1] != 1;
     const bool need_vt = pack_b || transpose_v;
     const bool pack_k_for_aliasing = p_.mm_dt == data_type::f32
             && !mm1_transpose_k
@@ -331,7 +332,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // down-convert/scatter, when the output is f32 with unit-stride rows. All
     // other cases (bf16/f16 output or a strided output column) keep pv+scatter.
     const dim_t o_row = p_.o_strides[row_dim];
-    const dim_t o_col = p_.o_strides[p_.ndims - 1];
+    const dim_t o_col = p_.o_strides[ndims - 1];
     const bool mm2_direct = p_.out_dt == data_type::f32 && o_col == 1;
     conf.mm2_direct = mm2_direct;
     const dim_t mm2_ldc = mm2_direct ? o_row : hs_v;
@@ -406,8 +407,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             ? (p_.cond_dims[row_dim] == 1 ? 0 : p_.cond_strides[row_dim])
             : 0;
     const dim_t cond_col_stride = p_.has_select
-            ? (p_.cond_dims[p_.ndims - 1] == 1 ? 0
-                                               : p_.cond_strides[p_.ndims - 1])
+            ? (p_.cond_dims[ndims - 1] == 1 ? 0 : p_.cond_strides[ndims - 1])
             : 0;
     const bool try_select_postop = p_.has_select && !p_.invert_select
             && cond_row_stride == seq_kv && cond_col_stride == 1;
@@ -552,11 +552,12 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
     const dim_t hs_v = p_.head_size_v;
-    const int row_dim = p_.ndims - 2;
+    constexpr int ndims = sdpa_pd_t::ndims;
+    constexpr int row_dim = ndims - 2;
     // Packing / transpose / leading-dim decisions mirror configure(); needed
     // only for the (rare) select-post-op compile-failure rebuild below.
     const bool pack_b = b_k_pack_ == 2;
-    const bool need_vt = pack_b || p_.v_strides[p_.ndims - 1] != 1;
+    const bool need_vt = pack_b || p_.v_strides[ndims - 1] != 1;
     const bool need_kt = mm1_transpose_k_ || pack_b || conf.pack_k_for_aliasing;
     const dim_t mm1_ldb = need_kt ? conf.kt_ld : k_hs_stride_;
 
@@ -567,7 +568,7 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     }
     if (need_vt) {
         const dim_t v_row = p_.v_strides[row_dim];
-        const dim_t v_col = p_.v_strides[p_.ndims - 1];
+        const dim_t v_col = p_.v_strides[ndims - 1];
         kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
         CHECK(kernels.v_packer->init(
                 seq_kv, hs_v, v_row, v_col, conf.vt_ld, p_.mm_dt, true));
@@ -721,10 +722,10 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     // tiles. The condition is dense along seq_kv (cond_col == 1) because the
     // pd requires the key axis to be full and plain.
     if (p_.has_select && !mm1_select_postop_) {
-        const int ndims = p_.ndims;
         std::vector<dim_t> eff = p_.cond_strides;
         for (int d = 0; d < ndims; ++d)
             if (p_.cond_dims[d] == 1) eff[d] = 0;
+
         const dim_t cond_row = eff[ndims - 2];
         std::shared_ptr<jit_generator_t> k(
                 sdpa_full_softmax_select_ir::create_select_ir_kernel(isa,
@@ -764,8 +765,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const auto &select_kernel_ = kernels.select_kernel;
     const bool mm1_select_postop_ = kernels.mm1_select_postop;
 
-    const int ndims = p_.ndims;
-    const int row_dim = ndims - 2;
+    constexpr int ndims = sdpa_pd_t::ndims;
+    constexpr int row_dim = ndims - 2;
     const dim_t seq_q = p_.seq_q;
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_v = p_.head_size_v;

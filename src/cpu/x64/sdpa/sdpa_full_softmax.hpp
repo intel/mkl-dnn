@@ -22,6 +22,7 @@
 
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
+#include "common/sdpa_pd.hpp"
 
 #include "cpu/x64/brgemm/brgemm_types.hpp"
 
@@ -69,7 +70,6 @@ struct sdpa_mm1_post_op_t {
 };
 
 struct sdpa_full_softmax_params_t {
-    int ndims = 0;
     dim_t batch = 0;
     dim_t num_head_q = 0;
     // GQA group size: num_head_q / num_head_kv (>= 1).
