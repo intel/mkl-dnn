@@ -221,19 +221,21 @@ status_t brgemm_matmul_t<isa>::pd_t::init(const engine_t *engine) {
             VDISPATCH_MATMUL(
                     !is_runtime_value(N()), VERBOSE_UNSUPPORTED_SCALES_CFG);
         }
-        // Impl suppports f32 scales only for non-weight decompression
-        if (!(is_bf16_with_int_wei || is_f16_with_int_wei || is_f32_with_int_wei
-                    || with_int8_grouped_quantization)) {
-            VDISPATCH_MATMUL(
-                    one_of(asc.get_data_type(DNNL_ARG_SRC), undef, f32),
-                    VERBOSE_UNSUPPORTED_SCALES_CFG);
-            VDISPATCH_MATMUL(
-                    one_of(asc.get_data_type(DNNL_ARG_WEIGHTS), undef, f32),
-                    VERBOSE_UNSUPPORTED_SCALES_CFG);
-            VDISPATCH_MATMUL(
-                    one_of(asc.get_data_type(DNNL_ARG_DST), undef, f32),
+        // Decompression and grouped quantization also support xf16 source and
+        // weights scales. ISA-specific restrictions are checked in init_conf.
+        const bool supports_xf16_scales = is_bf16_with_int_wei
+                || is_f16_with_int_wei || is_f32_with_int_wei
+                || with_int8_grouped_quantization;
+        for (const int arg : {DNNL_ARG_SRC, DNNL_ARG_WEIGHTS}) {
+            const auto scales_dt = asc.get_data_type(arg);
+            VDISPATCH_MATMUL(one_of(scales_dt, undef, f32)
+                            || (supports_xf16_scales
+                                    && one_of(scales_dt, bf16, f16)),
                     VERBOSE_UNSUPPORTED_SCALES_CFG);
         }
+        // The driver reads destination scales as float to compute the reciprocal.
+        VDISPATCH_MATMUL(one_of(asc.get_data_type(DNNL_ARG_DST), undef, f32),
+                VERBOSE_UNSUPPORTED_SCALES_CFG);
         // Implementation has limited support w.r.t. scales groups.
         if (!asc.has_default_values(DNNL_ARG_WEIGHTS)) {
             if (!asc.get(DNNL_ARG_WEIGHTS).has_default_groups()) {
