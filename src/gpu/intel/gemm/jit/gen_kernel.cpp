@@ -124,13 +124,20 @@ status_t gen_desc_t::apply_kernel_override(
         if (val != "gemm") throw std::runtime_error("expected 'gemm' prefix");
         ss >> val;
         const char *pstr = val.c_str();
-        // Cannot modify external data types
+        // Cannot modify external data types; f32 data may be read as tf32.
+        auto ext_ok = [](Type &t, Type ovr) {
+            bool f32 = utils::one_of(t, Type::f32, Type::tf32)
+                    && utils::one_of(ovr, Type::f32, Type::tf32);
+            if (t != ovr && !f32) return false;
+            t = ovr;
+            return true;
+        };
         Type ext_dt;
         pstr = parsePrecisions(pstr, ext_dt, problem_.Ta);
-        if (ext_dt != problem_.Ta_ext)
+        if (!ext_ok(problem_.Ta_ext, ext_dt))
             throw std::runtime_error("invalid external A data type");
         pstr = parsePrecisions(pstr, ext_dt, problem_.Tb);
-        if (ext_dt != problem_.Tb_ext)
+        if (!ext_ok(problem_.Tb_ext, ext_dt))
             throw std::runtime_error("invalid external B data type");
         if (*pstr == '[') {
             pstr = parsePrecisions(pstr, problem_.Tc, ext_dt);
