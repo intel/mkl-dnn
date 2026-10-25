@@ -601,16 +601,7 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (wg[loopOrder[0]] <= 0) wg[loopOrder[0]] = defaultWGX;
     if (wg[loopOrder[1]] <= 0) wg[loopOrder[1]] = defaultWGY;
     auto ssThreads = threadsPerEU(problem.product, *this) * eusPerSubslice(hw);
-    if (wg[LoopK] <= 0) {
-        if (kParallelLocal)
-            wg[LoopK] = ssThreads / (wg[LoopM] * wg[LoopN]);
-        else
-            wg[LoopK] = 1;
-    }
-
-    kParallelLocal &= (wg[LoopK] > 1);
-    if (!kParallelLocal)
-        wg[LoopK] = 1;
+    if (!kParallelLocal || wg[LoopK] <= 1) setKParallelLocal(1);
 
     if (wgPadFactor < 1) stub("Invalid workgroup padding factor");
     if (ssThreads && wg[LoopM] * wg[LoopN] * wg[LoopK] * (splitCopy ? 2 : 1) * wgPadFactor > ssThreads)
