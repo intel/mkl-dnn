@@ -17,6 +17,7 @@
 #include "gpu/intel/gemm/config.hpp"
 #include "gpu/intel/primitive_attr.hpp"
 #include "gpu/intel/primitive_conf.hpp"
+#include "gpu/intel/utils.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -29,6 +30,13 @@ int append_post_ops_to_arg_list(const exec_args_t &args,
         const post_ops_t &post_ops, memory_desc_wrapper dst_mdw) {
     return intel::append_post_ops_to_arg_list_base(
             args, arg_list, post_op_idx, post_ops, dst_mdw);
+}
+
+std::string kernel_override(const primitive_attr_t *attr) {
+    auto *gpu_attr = utils::downcast<const gpu_primitive_attr_t *>(
+            attr->gpu_attr_.get());
+    return gpu_utils::dev_getenv("GEMM_KERNEL",
+            gpu_attr ? gpu_attr->kernel_override() : std::string());
 }
 
 int kernel_rank(const primitive_attr_t *attr) {

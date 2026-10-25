@@ -20,6 +20,7 @@
 #include "common/type_helpers.hpp"
 #include "common/verbose_msg.hpp"
 #include "gpu/intel/compute/utils.hpp"
+#include "gpu/intel/gemm/config.hpp"
 #include "gpu/intel/gemm/jit/walk_orders.hpp"
 #include "gpu/intel/gemm/utils.hpp"
 #include "gpu/intel/gemm/xe_systolic_copy_kernel.hpp"
@@ -46,6 +47,9 @@ status_t xe_hp_systolic_t::pd_t::init(const impl::engine_t *engine) {
             VERBOSE_UNSUPPORTED_DEVICE_FEATURE, "ngen kernels");
     VDISPATCH_GEMM(intel_engine->mayiuse_large_grf_mode(),
             VERBOSE_UNSUPPORTED_DEVICE_FEATURE, "large grf mode");
+    // Overrides target jit:gemm kernels.
+    VDISPATCH_GEMM(kernel_override(attr()).empty(),
+            "kernel override is not supported");
 
     dev_info_ = intel_engine->device_info();
     auto arch = dev_info_->gpu_arch();
