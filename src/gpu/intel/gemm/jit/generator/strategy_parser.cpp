@@ -377,24 +377,8 @@ void parseStrategy(const std::string &str, const GEMMProblem &problem, GEMMStrat
         {"fp", [](ParserContext& ctx) { ctx.strategy.fusePostOps = true; }},
         {"zt", [](ParserContext& ctx) { ctx.strategy.zeroTempC = true; }},
         {"rx", [](ParserContext& ctx) { ctx.strategy.relaxedAccumulation = true; }},
-        {"kb", [](ParserContext& ctx) {
-            auto &strategy = ctx.strategy;
-            strategy.kParallel = true;
-            strategy.C.atomic = true;
-            strategy.CO.atomic = ctx.problem.sumA || ctx.problem.sumB;
-            if (strategy.CO.atomic)
-                strategy.CO.base = AddressBase::createA64(true);
-        }},
-        {"kv", [](ParserContext& ctx) {
-            auto &strategy = ctx.strategy;
-            strategy.kParallelVariable = true;
-            strategy.fuseBeta = true;
-            strategy.fusePostOps = true;
-            strategy.C.atomic = true;
-            strategy.CO.atomic = ctx.problem.sumA || ctx.problem.sumB;
-            if (strategy.CO.atomic)
-                strategy.CO.base = AddressBase::createA64(true);
-        }},
+        {"kb", [](ParserContext& ctx) { ctx.strategy.kParallel = true; }},
+        {"kv", [](ParserContext& ctx) { ctx.strategy.kParallelVariable = true; }},
 
         /* Systolic Settings */
         {"sys", [](ParserContext& ctx) { ctx.strategy.systolic = true; }},
@@ -765,7 +749,9 @@ void adjustStrategy(HW hw, const GEMMProblem &problem, GEMMStrategy &strategy, c
         strategy.remHandling[LoopM] = strategy.remHandling[LoopN] = RemainderHandling::Split;
 
     // ... and always use split remainder handling on later GPUs when panel checks are active.
-    if (strategy.panelCheck && strategy.lateExit() && hw >= HW::XeHP && !strategy.fixedSystolic) {
+    // kv late-exits through the fused beta/post-ops preflight derives.
+    bool lateExit = strategy.lateExit() || strategy.kParallelVariable;
+    if (strategy.panelCheck && lateExit && hw >= HW::XeHP && !strategy.fixedSystolic) {
         if (isPacked(problem.A.layout)) strategy.remHandling[LoopM] = RemainderHandling::Split;
         if (isPacked(problem.B.layout)) strategy.remHandling[LoopN] = RemainderHandling::Split;
     }
