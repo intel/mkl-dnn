@@ -102,6 +102,16 @@ int GEMMStrategy::defaultBlockK(HW hw, const GEMMProblem &problem) const
     return std::min(2048, (2048 * points) / problem.Ta);
 }
 
+void GEMMStrategy::setKParallelLocal(int wgK)
+{
+    kParallelLocal = (wgK > 1);
+    if (!kParallelLocal) {
+        shrinkWGK = kInterleave = false;
+        kInterleaveChunk = 0;
+    }
+    wg[LoopK] = kParallelLocal ? wgK : 1;
+}
+
 // Validate a GEMM strategy, correcting settings as necessary.
 void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 {
@@ -131,9 +141,22 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (isBlock2D(B_prefetch.accessType) && !isPacked(problem.B.layout) && !B_prefetch.address2D)
         downgradeBPFAccess(problem, *this);
 
+    if (kParallelVariable)
+        fuseBeta = fusePostOps = true;
+    bool kb = kParallel && problem.batch == BatchMode::None;
+    if ((kb || kParallelVariable) && autoatomic) {
+        C.atomic = true;
+        if (problem.sumA || problem.sumB) {
+            CO.atomic = true;
+            CO.base = AddressBase::createA64(true);
+        }
+    }
+
     // Remove variable k-parallelization when batching.
-    if (kParallelVariable && problem.batch != BatchMode::None)
-        C.atomic = CO.atomic = kParallelVariable = kParallelLocal = false;
+    if (kParallelVariable && problem.batch != BatchMode::None) {
+        C.atomic = CO.atomic = kParallelVariable = false;
+        setKParallelLocal(1);
+    }
 
     // Stream-K combines per-workgroup partial C via atomic add, which is
     // safe for plain grouped scaling (no cross-workgroup shared state) but
@@ -141,8 +164,10 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     bool aLateScale = usesLateScale(problem, *this, /*isA=*/true);
     bool bLateScale = usesLateScale(problem, *this, /*isA=*/false);
     bool lateScaleHazard = (aLateScale || bLateScale) && problem.Tc_ext.isInteger();
-    if (kParallelVariable && lateScaleHazard)
-        C.atomic = CO.atomic = kParallelVariable = kParallelLocal = false;
+    if (kParallelVariable && lateScaleHazard) {
+        C.atomic = CO.atomic = kParallelVariable = false;
+        setKParallelLocal(1);
+    }
 
     // Only A/B sums computed in the outer product (systolic, or dp4a with C repacking) are
     // scaled by late 2D scales; other sums are accumulated unscaled, which is wrong when
