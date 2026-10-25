@@ -284,7 +284,7 @@ struct GEMMStrategyPOD : public CommonStrategy {
     int repackC = 0;                             // Repack C every repackC k loops.
     bool cAccumulators = false;                  // Use accumulator registers for part of C (to save a few registers)?
     bool cLoadAhead = false;                     // Load C before doing FMAs?
-    bool autoatomic = true;                      // Automatically use C atomics for beta = 1 kernels?
+    bool autoatomic = true;                      // Automatically use C atomics for beta = 1 or k-parallel kernels?
     bool forceCopyC = false;                     // Force C to be copied before the update step?
     bool noJumpTables = false;                   // Disallow jump tables?
     RemainderHandling remHandling[3] = {         // m, n, k remainder handling.
@@ -341,6 +341,7 @@ struct GEMMStrategy : public GEMMStrategyPOD
     void trimKChain(ngen::HW hw, int k, const GEMMProblem &problem);
 
     void disableAtomics()                                   { C.atomic = CO.atomic = autoatomic = false; }
+    void setKParallelLocal(int wgK);
 
     int wgTile(LoopType l)                            const { return unroll[l] * wg[l]; }
     int cInterleaveChunk(Type Tc_ext)                 const { return cInterleave ? 64 / Tc_ext : 1; }

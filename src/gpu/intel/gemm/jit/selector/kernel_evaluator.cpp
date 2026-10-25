@@ -590,9 +590,12 @@ double evaluate(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, Evalu
 
 void modifyStrategy(GEMMStrategy &strategy, const EvaluateAuxOutput &aux)
 {
+    // kv -> kb keeps kv's fused beta/post-ops; dropping both drops them.
+    if (aux.kParallel && strategy.kParallelVariable)
+        strategy.fuseBeta = strategy.fusePostOps = true;
+    if (!aux.kParallel && !aux.kParallelVariable)
+        strategy.fuseBeta = strategy.fusePostOps = false;
     strategy.kParallel = aux.kParallel;
-    if (strategy.kParallelVariable && !aux.kParallelVariable && !aux.kParallel)
-        strategy.C.atomic = strategy.CO.atomic = strategy.fuseBeta = strategy.fusePostOps = false;
     strategy.kParallelVariable = aux.kParallelVariable;
     if (aux.disableAtomics)
         strategy.disableAtomics();
