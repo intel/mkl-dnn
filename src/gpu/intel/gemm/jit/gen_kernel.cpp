@@ -90,12 +90,14 @@ decisions_t decisions_of(const GEMMStrategy &s) {
     return d;
 }
 
-// Model's kv/kb.
 decisions_t selector_decisions(
         const GEMMStrategy &row, const EvaluateAuxOutput &aux) {
     auto d = decisions_of(row);
     d.kv = aux.kParallelVariable;
     d.kb = aux.kParallel;
+    bool by_rule = row.fixedWGK() || row.shrinkWGK || aux.kParallelVariable
+            || (aux.kParallel && row.kParallel);
+    if (!by_rule && aux.wgK < d.wgK) d.wgK = std::max(aux.wgK, 1);
     return d;
 }
 
