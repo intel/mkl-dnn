@@ -389,7 +389,7 @@ status_t gen_desc_t::finalize(
             dim_t n_tiles = dim_t(utils::div_up(n_, wg_tile_n));
             dim_t thread_per_tg = strategy_.wg[LoopM] * strategy_.wg[LoopN];
             if (!strategy_.kParallelVariable)
-                thread_per_tg *= std::max(strategy_.wg[LoopK], 1);
+                thread_per_tg *= std::max(aux_params_.wgK, 1);
             dim_t thread_gpu = eu_count_
                     * compute::device_info_t::threads_per_eu(
                             product_, strategy_.GRFs);
