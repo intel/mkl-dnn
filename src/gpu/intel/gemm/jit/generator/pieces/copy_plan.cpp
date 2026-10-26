@@ -107,6 +107,7 @@ static bool isSubsetOf(DataType dt1, DataType dt2)
     if (dt1 == dt2) return true;
     if (isFP(dt1) && isInt(dt2)) return false;
     if (isW(dt1) && dt2 == DataType::tf32) return false;
+    if (isInt(dt1) && isInt(dt2) && isSigned(dt1) && !isSigned(dt2)) return false;
     if (isSubByteInt(dt1) && (isB(dt2) || dt2 == DataType::hf8)) return true;
     if (dt1 == DataType::s2 && dt2 == DataType::bf8) return true;
     if (dt1 == DataType::s4 && dt2 == DataType::bf8) return true;

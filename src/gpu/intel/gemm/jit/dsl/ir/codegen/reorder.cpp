@@ -569,7 +569,8 @@ void reorder_impl_t::emit(copy_plan_t &plan, const reorder_operand_t &src,
         if (src == dst) return;
         if (!try_emit_2d(plan, dst, src)) emit_1d(plan, dst, src);
         if (is_subset(src.type(), dst.type()))
-            dst.buffer.range = src.buffer.type;
+            dst.buffer.range
+                    = to_ngen(src.type()); // src.type() forwards src range
     };
 
     const bool direct_copy = layouts_compatible(src.layout, dst.layout);
