@@ -324,6 +324,13 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScalesBeforeZeroPointsMatmul) {
         attr.set_zero_points(wei, mask_kn, {32, 1}, data_type::u8);
         EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
     }
+    // Zero-points without scales.
+    {
+        auto attr = base_attr();
+        attr.set_zero_points(
+                wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    }
     // Weights only.
     for (auto arg : {DNNL_ARG_SRC, DNNL_ARG_DST}) {
         EXPECT_ANY_THROW({

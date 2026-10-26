@@ -543,14 +543,14 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
                                     data_type::bf16, data_type::f16)),
                     VERBOSE_UNSUPPORTED_ZP_CFG);
             // Weights scales and zero-points must share the quantization mode.
+            // Unset scales have the default mode, so static_sbzp zero-points
+            // also require static_sbzp scales.
             // TODO: (postponed till more similar places appear) consolidate
             // cross-argument checks in a common space.
-            if (!attr->scales_.has_default_values(DNNL_ARG_WEIGHTS)) {
-                const auto wei_sc_qmode
-                        = attr->scales_.get_quantization_mode(DNNL_ARG_WEIGHTS);
-                VCHECK_MATMUL_UNIMPL(wei_zp_qmode == wei_sc_qmode,
-                        VERBOSE_UNSUPPORTED_ZP_CFG);
-            }
+            VCHECK_MATMUL_UNIMPL(wei_zp_qmode
+                            == attr->scales_.get_quantization_mode(
+                                    DNNL_ARG_WEIGHTS),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
 
             const int mask_wei = zp.get_mask(DNNL_ARG_WEIGHTS);
 
