@@ -165,11 +165,6 @@ The `mask` and `groups` parameters for scales and zero-points follow the
 conventions described in the
 [quantization guide](@ref dgaq_constructing_mask_and_groups).
 
-For weight-only quantization, weights scales and zero-points can use the
-`static_sbzp` quantization mode, where the floating-point zero-point is
-subtracted after the scale is applied (see the
-[quantization guide](@ref dev_guide_attributes_quantization)).
-
 Scales, zero-points, and dropout require additional memory arguments at
 execution time. See the
 [quantization guide](@ref dgaq_execution) and the

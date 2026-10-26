@@ -22,7 +22,7 @@ See also:
 oneDNN supports two main categories of quantization:
 - Static Quantization (see @ref quantization_mode::dnnl_quantization_mode_static_sazp)
   with scales only (symmetric) or scales and zero-points (asymmetric),
-  where scales are applied after zero-point. For weights decompression,
+  where scales are applied after zero-point. For weight-only quantization,
   scales can also be applied before a floating-point zero-point (see
   @ref quantization_mode::dnnl_quantization_mode_static_sbzp).
 - Dynamic Quantization, where the library computes the scales at execution time,
@@ -55,8 +55,32 @@ Refer to the materials in the [Introduction](@ref dgaq_intro).
 
 ### Static Quantization
 
-The only formula for static quantization currently supported
-by oneDNN is with scales applied after zero-point as follows:
+In static quantization, oneDNN assumes that quantization parameters are inputs
+provided by the user and the library does not compute those scaling
+factors and zero-points as part of primitive computation.
+
+These quantization parameters can either be computed ahead of time
+using calibration tools or at runtime based on the actual minimum and
+maximum values of a tensor. Either method can be used in conjunction
+with oneDNN static quantization, as long as the quantization
+parameters are passed as input to the oneDNN primitives at execution
+time.
+
+oneDNN supports two formulas for static quantization, selected by the
+quantization mode. Both are defined in the dequantization direction (from the
+quantized value to the floating-point one):
+
+| Mode | Formula | Zero-point data types |
+|:-----|:--------|:----------------------|
+| `static_sazp` (default) | \f$scale \cdot (x_{quant} - zp)\f$ | `s32`, `s8`, `u8`, `s4`, `u4`, `u2` |
+| `static_sbzp` | \f$scale \cdot x_{quant} - zp\f$ | `f16`, `bf16` |
+
+@warning The scales and the zero-points of an argument must use the same mode.
+
+#### Scales Applied After Zero-Points
+
+The main formula for integer quantization applies the scales after the
+zero-point:
 
 \f[
 x_{f32}[:] = scale_{x} \cdot (x_{quant}[:] - zp_{x})
@@ -68,42 +92,30 @@ scaling factor in a floating-point format, \f$zp_{x}\f$ is a zero
 point (typically in integral format), and \f$[:]\f$ is used to denote
 element-wise application of the formula to the arrays.
 
-In this model, oneDNN assumes that quantization parameters are inputs
-provided by the user and the library does not compute those scaling
-factors and zero-points as part of primitive computation.
-
-These quantization parameters can either be computed ahead of time
-using calibration tools or at runtime based on the actual minimum and
-maximum values of a tensor. Either method can be used in conjunction
-with oneDNN static quantization, as long as the quantization
-parameters are passed as input to the oneDNN primitives at execution
-time.
-
 #### Scales Applied Before Zero-Points
 
 Some weight quantization formats define the dequantized value as the scaled
 quantized value plus an offset, rather than as a scaled difference with an
-integer zero-point. For weights decompression in matmul, oneDNN supports this
-formula with the `static_sbzp` quantization mode:
+integer zero-point. For
+[weight-only quantization](#matrix-multiplication-with-weight-only-quantization-woq),
+oneDNN supports this formula with the `static_sbzp` quantization mode:
 
 \f[
 x_{f32}[:] = scale_{x} \cdot x_{quant}[:] - zp_{x}
 \f]
 
 The zero-point applies to a value already multiplied by the scale, so it is a
-floating-point number (`f16` or `bf16`) rather than an integer. Both quantization
-modes are defined in the dequantization direction (from the quantized value to
-the floating-point one):
-
-| Mode | Formula | Zero-point data types |
-|:-----|:--------|:----------------------|
-| `static_sazp` | \f$scale \cdot (x_{quant} - zp)\f$ | `s32`, `s8`, `u8`, `s4`, `u4`, `u2` |
-| `static_sbzp` | \f$scale \cdot x_{quant} - zp\f$ | `f16`, `bf16` |
-
-The mode is set on both the scales and the zero-points of the argument, and
-must be the same for both. The quantization of the destination,
+floating-point number (`f16` or `bf16`) rather than an integer. The
+quantization of the destination,
 \f$\dst = x_{f32} / scale_{\dst} + zp_{\dst}\f$, is the inverse of
 `static_sazp` and is not affected by this mode.
+
+Restrictions:
+- Only the weights of a matmul with
+  [weight-only quantization](#matrix-multiplication-with-weight-only-quantization-woq)
+  support `static_sbzp`; see that section for its requirements.
+- Scales and zero-points are `f16` or `bf16`.
+- Zero-points require `static_sbzp` scales.
 
 Examples of formats that map to `static_sbzp`:
 - GGUF K-quants (for example, Q4_K and Q5_K) dequantize a group of weights as
