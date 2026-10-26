@@ -820,16 +820,20 @@ status_t pd_t::init_GEMMProblem(
     // Mixed s8/s4 DPAS support:
     // - Xe3p: Not supported, require s4->s8 upconversion
     // - pre-Xe3p: supported, but only when s4 matrix doesn't have zero points
-    // There is no native s8/s3 DPAS support, so int3 is unconditionally
-    // upconverted to s8 when paired with an int8 matrix.
+    // There is no native s8/s3 or s8/s2 DPAS support, so int3 and int2 are
+    // unconditionally upconverted to s8 when paired with an int8 matrix.
     bool has_s8s4_dpas = getCore(problem.product.family) != ngen::HW::Xe3p;
-    if (problem.Ta_ext.is3() && problem.Tb_ext.isInt8()) {
+    if ((problem.Ta_ext.is3()
+                || (problem.Ta_ext.is2() && problem.Ta_ext.isInteger()))
+            && problem.Tb_ext.isInt8()) {
         problem.Ta = Type::s8;
     } else if (problem.Ta_ext.isInt4() && problem.Tb_ext.isInt8()) {
         bool s8s4_dpas_ok = has_s8s4_dpas && (a_quant.zp_ndims < 0);
         if (!s8s4_dpas_ok) problem.Ta = Type::s8;
     }
-    if (problem.Tb_ext.is3() && problem.Ta_ext.isInt8()) {
+    if ((problem.Tb_ext.is3()
+                || (problem.Tb_ext.is2() && problem.Tb_ext.isInteger()))
+            && problem.Ta_ext.isInt8()) {
         problem.Tb = Type::s8;
     } else if (problem.Tb_ext.isInt4() && problem.Ta_ext.isInt8()) {
         bool s8s4_dpas_ok = has_s8s4_dpas && (b_quant.zp_ndims < 0);
