@@ -145,6 +145,8 @@ status_t gen_t::launch_nocopy(const exec_ctx_t &ctx,
         auto ldaq = into<int32_t>(isColMajor(layout)
                         ? utils::div_up(m, problem->aqGroupM)
                         : utils::div_up(pd()->desc()->k(), problem->aqGroupK));
+        if (swap_ab ? pd()->b_q2d_k_broadcast() : pd()->a_q2d_k_broadcast())
+            ldaq = 0;
         arg_list.set(argn++, ldaq);
     }
     if (problem->bOffset2D() || problem->bScale2D()
@@ -155,6 +157,8 @@ status_t gen_t::launch_nocopy(const exec_ctx_t &ctx,
         auto ldbq = into<int32_t>(!isColMajor(layout)
                         ? utils::div_up(n, problem->bqGroupN)
                         : utils::div_up(pd()->desc()->k(), problem->bqGroupK));
+        if (swap_ab ? pd()->a_q2d_k_broadcast() : pd()->b_q2d_k_broadcast())
+            ldbq = 0;
         arg_list.set(argn++, ldbq);
     }
     if (pd()->with_mx_scale()) {

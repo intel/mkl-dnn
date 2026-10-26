@@ -50,6 +50,8 @@ struct quant_params {
     bool zp_host_scalar = false;
     // Zero-points applied after the scales (static_sbzp quantization mode).
     bool zp_after_scale = false;
+    // static_sbzp parameters that do not vary over K, read with a zero K stride.
+    bool k_broadcast = false;
 };
 
 status_t transfer_post_ops(
@@ -279,6 +281,8 @@ struct pd_t : public gemm::pd_t {
     int a_q2d_group_m() const { return a_quant.group_m; }
     int b_q2d_group_k() const { return b_quant.group_k; }
     int b_q2d_group_n() const { return b_quant.group_n; }
+    bool a_q2d_k_broadcast() const { return a_quant.k_broadcast; }
+    bool b_q2d_k_broadcast() const { return b_quant.k_broadcast; }
     int c_q2d_group_m() const { return c_quant.group_m; }
     int c_q2d_group_n() const { return c_quant.group_n; }
     int align(int arg) const {

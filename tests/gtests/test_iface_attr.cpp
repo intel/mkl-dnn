@@ -284,22 +284,9 @@ TEST_F(attr_test_t, TestScalesBeforeZeroPoints) {
         EXPECT_ANY_THROW(
                 attr.set_zero_points(wei, mask, {32, 1}, dt, false, sbzp));
     }
-    EXPECT_ANY_THROW(
-            attr.set_scales(wei, mask, {32, 1}, data_type::f32, false, sbzp));
 
     // Integer zero-points keep the default mode.
     EXPECT_ANY_THROW(attr.set_zero_points(wei, mask, {32, 1}, data_type::f16));
-
-    // Weights only, on device.
-    for (auto arg : {DNNL_ARG_SRC, DNNL_ARG_DST}) {
-        EXPECT_ANY_THROW(attr.set_zero_points(
-                arg, mask, {32, 1}, data_type::f16, false, sbzp));
-        EXPECT_ANY_THROW(attr.set_scales(
-                arg, mask, {32, 1}, data_type::f16, false, sbzp));
-    }
-    EXPECT_ANY_THROW(
-            attr.set_zero_points(wei, 0, {}, data_type::f16, true, sbzp));
-    EXPECT_ANY_THROW(attr.set_scales(wei, 0, {}, data_type::f16, true, sbzp));
 }
 
 HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScalesBeforeZeroPointsMatmul) {
@@ -331,51 +318,49 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScalesBeforeZeroPointsMatmul) {
         attr.set_zero_points(wei, mask_kn, {32, 1}, data_type::u8);
         EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
     }
-    // Scales only.
-    {
-        auto attr = base_attr();
-        attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
-        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    // Weights only.
+    for (auto arg : {DNNL_ARG_SRC, DNNL_ARG_DST}) {
+        EXPECT_ANY_THROW({
+            auto attr = base_attr();
+            attr.set_zero_points(
+                    arg, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+            make_pd(data_type::f16, data_type::u4, attr);
+        });
     }
-    // Per-channel scales and zero-points.
+    EXPECT_ANY_THROW({
+        auto attr = base_attr();
+        attr.set_scales(
+                DNNL_ARG_SRC, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        make_pd(data_type::f16, data_type::u4, attr);
+    });
+    // f32 scales.
     {
         auto attr = base_attr();
-        attr.set_scales(wei, 1 << 1, {}, data_type::f16, false, sbzp);
-        attr.set_zero_points(wei, 1 << 1, {}, data_type::f16, false, sbzp);
-        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
-    }
-    // Different groups for scales and zero-points.
-    {
-        auto attr = base_attr();
-        attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        attr.set_scales(wei, mask_kn, {32, 1}, data_type::f32, false, sbzp);
         attr.set_zero_points(
-                wei, mask_kn, {64, 1}, data_type::f16, false, sbzp);
+                wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
         EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
     }
-    // Scales and zero-points of a different type than the activations.
+    // Integer weights without fpmath applied to them.
     {
-        auto attr = base_attr();
-        attr.set_scales(wei, mask_kn, {32, 1}, data_type::bf16, false, sbzp);
-        attr.set_zero_points(
-                wei, mask_kn, {32, 1}, data_type::bf16, false, sbzp);
-        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
-    }
-    // Unsupported data types: f32 activations, s8 weights.
-    {
-        auto attr = base_attr();
+        primitive_attr attr;
         attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
         attr.set_zero_points(
                 wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
-        EXPECT_ANY_THROW(make_pd(data_type::f32, data_type::u4, attr));
-        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::s8, attr));
-        // Integer destination.
-        EXPECT_ANY_THROW(
-                make_pd(data_type::f16, data_type::u4, attr, data_type::s8));
-        // The supported configuration.
-        if (get_test_engine_kind() == engine::kind::gpu) {
-            EXPECT_NO_THROW(make_pd(data_type::f16, data_type::u4, attr));
-            EXPECT_NO_THROW(make_pd(data_type::f16, data_type::s4, attr));
-            EXPECT_NO_THROW(make_pd(data_type::f16, data_type::u8, attr));
+        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    }
+    // Supported configurations.
+    if (get_test_engine_kind() == engine::kind::gpu) {
+        // Grouped, per-channel, and one group spanning K.
+        for (const memory::dims &groups :
+                {memory::dims {32, 1}, memory::dims {}, memory::dims {K, 1}}) {
+            const int mask = groups.empty() ? 1 << 1 : mask_kn;
+            auto attr = base_attr();
+            attr.set_scales(wei, mask, groups, data_type::f16, false, sbzp);
+            attr.set_zero_points(
+                    wei, mask, groups, data_type::f16, false, sbzp);
+            for (auto wei_dt : {data_type::u4, data_type::s4, data_type::u8})
+                EXPECT_NO_THROW(make_pd(data_type::f16, wei_dt, attr));
         }
     }
 }

@@ -330,6 +330,23 @@ status_t pd_t::init_attrs(const impl::engine_t *engine) {
     CHECK(set_a_groups(a_quant, a_gs));
     CHECK(set_a_groups(a_quant, a_scales));
 
+    // static_sbzp needs 2D quantization. Parameters that do not vary over K are
+    // passed as small groups with a zero K stride: one group spanning K is read
+    // past its row and slows down kernel generation. A fallback: the row is
+    // reloaded per group, which source reductions would avoid.
+    const dim_t k_broadcast_group = 32;
+    const dim_t k = desc()->k();
+    if (a_quant.zp_after_scale && a_quant.zp_ndims > 0
+            && k != DNNL_RUNTIME_DIM_VAL
+            && utils::one_of(dim_t(a_quant.group_k), dim_t(0), k)) {
+        // gemmstone expects the K group to divide K.
+        a_quant.group_k = into<int>(math::gcd(k, k_broadcast_group));
+        a_quant.group_m = std::max(a_quant.group_m, 1);
+        a_quant.k_broadcast = true;
+        a_quant.zp_ndims = 2;
+        if (a_quant.scale_ndims > 0) a_quant.scale_ndims = 2;
+    }
+
     b_quant.scales_type = b_scales.get_data_type();
     b_quant.zp_type = b_zps.get_data_type();
     b_quant.gs_type = b_gs.get_data_type();
@@ -893,6 +910,14 @@ status_t pd_t::init_GEMMProblem(
         problem.Ag.transpose();
         problem.Bg.transpose();
     }
+
+    // A zero K stride needs the quantization rows laid out along M (A) or N (B).
+    VDISPATCH_GEMM(
+            IMPLICATION(a_quant.k_broadcast, isColMajor(problem.AO.layout)),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
+    VDISPATCH_GEMM(
+            IMPLICATION(b_quant.k_broadcast, !isColMajor(problem.BO.layout)),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
 
     return status::success;
 }
