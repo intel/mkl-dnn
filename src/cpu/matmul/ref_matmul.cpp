@@ -81,8 +81,8 @@ status_t ref_matmul_t::execute_ref(const exec_ctx_t &ctx) const {
     auto dst_dynamic_scales
             = CTX_OUT_MEM(float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
 
-    const int32_t *wei_zero_points = CTX_IN_MEM(
-            const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS);
+    const void *wei_zero_points = CTX_IN_MEM(
+            const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS);
 
     const auto src_d = ctx.memory_mdw(DNNL_ARG_SRC, pd()->src_md());
     const auto weights_d = ctx.memory_mdw(DNNL_ARG_WEIGHTS, pd()->weights_md());
