@@ -1801,6 +1801,19 @@ void CopyPlan::planInt4Upconversion(CopyInstruction &i)
 
     bool s4 = (i.src0.type == DataType::s4);
 
+    // 2D-aware region normalization for stride expansion
+    // E.g., every other element of a <8; 2, 1> region is <8>
+    auto reregion = [](CopyOperand& op, uint8_t gap) {
+        op.stride *= gap;
+        if (op.width > 1) {
+            if (op.width > gap) op.width /= gap;
+            else op.vs *= gap / op.width, op.width = 1;
+        }
+        if (op.width == 1) op.stride = op.vs;
+        if (op.vs == op.width * op.stride) op.width = 0;
+        if (op.width == 0) op.vs = 0;
+    };
+
     if (i.src0.stride == 1 && i.simd > 1) {
         // Split into high and low nybble conversions first, if needed.
         // If dst stride is too large, copy through uw<1>.
@@ -1810,15 +1823,10 @@ void CopyPlan::planInt4Upconversion(CopyInstruction &i)
             auto t = newTemp(DataType::uw, i.simd, 1);
             ie[0]->simd /= 2;
             ie[0]->op = s4 ? Opcode::shl : Opcode::and_;
+            reregion(ie[0]->src0, 2);
             ie[0]->src0.type = DataType::ub;
+            ie[0]->src0.stride /= 2;
             ie[0]->src0.offset /= 2;
-            if (ie[0]->src0.width > 1) {
-                ie[0]->src0.width /= 2;
-                if (ie[0]->src0.width == 1) {
-                    ie[0]->src0.stride = ie[0]->src0.vs / 2;
-                    ie[0]->src0.vs = ie[0]->src0.width = 0;
-                }
-            }
             ie[0]->src1 = s4 ? 4 : 0xF;
             ie[0]->dst = t;
             ie[0]->dst.stride *= 2;
@@ -1839,11 +1847,12 @@ void CopyPlan::planInt4Upconversion(CopyInstruction &i)
         } else {
             auto &i0 = i;
             i0.dst.stride *= 2;
-            i0.src0.stride *= 2;
+            auto s0s = i0.src0.stride;
+            reregion(i0.src0, 2);
             i0.simd /= 2;
             split(i, true);
             i0.dst.offset += i0.dst.stride / 2;
-            i0.src0.offset += i0.src0.stride / 2;
+            i0.src0.offset += s0s;
         }
     } else {
         bool even = (i.src0.offset % 2 == 0);
