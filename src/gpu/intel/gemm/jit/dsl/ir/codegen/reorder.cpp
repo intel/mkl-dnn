@@ -677,25 +677,36 @@ bool reorder_impl_t::layouts_compatible(
     // Test to see if all of the non-size-1 blocks of the two layouts are
     // listed in the same order, ignoring strides.
     using iterator_t = decltype(a.blocks().begin());
+    using block_t = layout_t::block_t;
     iterator_t a_block_it = a.blocks().begin();
     iterator_t b_block_it = b.blocks().begin();
     const iterator_t a_block_end = a.blocks().end();
     const iterator_t b_block_end = b.blocks().end();
 
-    auto skip_size_1_blocks = [](iterator_t &it, const iterator_t &end) {
+    // Skips size-1 blocks and loads the next real block, if any.
+    auto load = [](iterator_t &it, const iterator_t &end, block_t &block) {
         while (it != end && it->size == 1)
-            it++;
+            ++it;
+        if (it != end) block = *it;
     };
 
-    while (true) {
-        skip_size_1_blocks(a_block_it, a_block_end);
-        skip_size_1_blocks(b_block_it, b_block_end);
-        if (a_block_it == a_block_end || b_block_it == b_block_end) break;
+    // Consumes `size` from the current block, moving on once it is used up.
+    auto consume = [&](iterator_t &it, const iterator_t &end, block_t &block,
+                           int64_t size) {
+        block.size /= size;
+        if (block.size == 1) load(++it, end, block);
+    };
 
-        if (a_block_it->idx != b_block_it->idx) return false;
-        if (a_block_it->size != b_block_it->size) return false;
-        a_block_it++;
-        b_block_it++;
+    block_t a_block, b_block;
+    load(a_block_it, a_block_end, a_block);
+    load(b_block_it, b_block_end, b_block);
+
+    while (a_block_it != a_block_end && b_block_it != b_block_end) {
+        if (a_block.idx != b_block.idx) return false;
+        auto size = std::min(a_block.size, b_block.size);
+        if (std::max(a_block.size, b_block.size) % size) return false;
+        consume(a_block_it, a_block_end, a_block, size);
+        consume(b_block_it, b_block_end, b_block, size);
     }
 
     return a_block_it == a_block_end && b_block_it == b_block_end;
