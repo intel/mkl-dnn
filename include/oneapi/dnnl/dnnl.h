@@ -662,6 +662,10 @@ dnnl_status_t DNNL_API dnnl_primitive_attr_set_zero_points_v2(
 /// Sets primitive attributes zero points for primitive operations for a given
 /// memory argument and quantization mode. The zero points must be passed at
 /// execution time as an argument with index #DNNL_ARG_ATTR_ZERO_POINTS | arg.
+/// If `is_on_host` is true, sets a single host-side scalar zero point
+/// for the specified memory argument. In this case, the zero point must
+/// be provided as a host scalar memory object at execution time with index
+/// #DNNL_ARG_ATTR_ZERO_POINTS | arg.
 ///
 /// With #dnnl_quantization_mode_static_sazp, zero points are integers and
 /// are subtracted before scaling: \f$x_{f32} = scale * (x_{quant} - zp)\f$.

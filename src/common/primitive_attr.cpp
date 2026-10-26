@@ -734,7 +734,7 @@ status_t dnnl_primitive_attr_set_zero_points_v3(dnnl_primitive_attr_t attr,
     if (is_on_host) { // host-side zero point is only supported as single scalar value
         VCHECK_ATTR(mask == 0, VERBOSE_BAD_PARAM, "mask");
         VCHECK_ATTR(group_ndims == 0, VERBOSE_BAD_PARAM, "group_ndims");
-        return attr->zero_points_.set(arg, 0, data_type, 0, {}, true);
+        return attr->zero_points_.set(arg, 0, data_type, 0, {}, true, qmode);
     } else {
         VCHECK_ATTR(mask >= 0, VERBOSE_BAD_PARAM, "mask");
         VCHECK_ATTR(group_ndims >= 0, VERBOSE_BAD_PARAM, "group_ndims");

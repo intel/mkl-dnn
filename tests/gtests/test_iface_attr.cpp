@@ -287,6 +287,12 @@ TEST_F(attr_test_t, TestScalesBeforeZeroPoints) {
 
     // Integer zero-points keep the default mode.
     EXPECT_ANY_THROW(attr.set_zero_points(wei, mask, {32, 1}, data_type::f16));
+
+    // Host-side scalar zero-points follow the same data type rules.
+    EXPECT_NO_THROW(
+            attr.set_zero_points(wei, 0, {}, data_type::f16, true, sbzp));
+    EXPECT_ANY_THROW(
+            attr.set_zero_points(wei, 0, {}, data_type::s32, true, sbzp));
 }
 
 HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScalesBeforeZeroPointsMatmul) {
@@ -361,6 +367,13 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScalesBeforeZeroPointsMatmul) {
                     wei, mask, groups, data_type::f16, false, sbzp);
             for (auto wei_dt : {data_type::u4, data_type::s4, data_type::u8})
                 EXPECT_NO_THROW(make_pd(data_type::f16, wei_dt, attr));
+        }
+        // Host-side scalar zero-point keeps its mode.
+        {
+            auto attr = base_attr();
+            attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+            attr.set_zero_points(wei, 0, {}, data_type::f16, true, sbzp);
+            EXPECT_NO_THROW(make_pd(data_type::f16, data_type::u4, attr));
         }
     }
 }
