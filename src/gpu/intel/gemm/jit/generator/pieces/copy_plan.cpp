@@ -613,8 +613,12 @@ void CopyPlan::copyThrough(CopyInstruction &i, DataType type, int stride, bool s
         i0.dst = i1.src0;
     } else {
         // No space for in-place conversion -- create temporary.
-        if (stride == 0)
+        if (stride == 0) {
             stride = std::max(1, ssize * sstride / isize);
+            // Favor the vertical striding for byte-aligned subbyte 2d regions
+            if (ssize * i.src0.width % 8 == 0 && dsize * dstride == ssize * i.src0.vs)
+                stride = std::max(stride, dsize * dstride / isize);
+        }
         i0.dst = newTemp(type, i.simd, stride);
         i1.src0 = i0.dst;
         i1.src0.overwriteStride = true;
@@ -2158,7 +2162,8 @@ void CopyPlan::planInt4Downconversion(CopyInstruction &i)
     auto ddst = CopyOperand(i.dst);
     auto ssrc = CopyOperand(i.src0);
     int tmp_elems = ddst.stride > 4 ? simd * 2 : simd;
-    auto tmp = newTemp(DataType::uw, tmp_elems, 1);
+    auto tmp_stride = std::max<int>(1, ddst.stride / 4);
+    auto tmp = newTemp(DataType::uw, tmp_elems, tmp_stride);
 
     int sStride = ssrc.stride * getBytes(ssrc.type) * 2;
     int dStride = ddst.stride / (getBytes(ssrc.type) * 2);
@@ -2199,13 +2204,13 @@ void CopyPlan::planInt4Downconversion(CopyInstruction &i)
 
     auto ie = splitMultiple<5>(i);
     auto osrc = i.src0;
-    auto stmp = newTemp(DataType::uw, simd, 1);
+    auto stmp = newTemp(DataType::uw, simd, tmp_stride);
 
     ie[0]->op = Opcode::mov;
     ie[0]->dst = stmp;
     ie[0]->src0 = osrc;
 
-    if (isW(osrc.type) && osrc.stride == 1 && osrc.overwrite) {
+    if (isW(osrc.type) && osrc.stride == tmp_stride && osrc.overwrite) {
         stmp = osrc;
         ie[0]->invalidate();
     }
@@ -2355,46 +2360,60 @@ void CopyPlan::planInt4Downconversion(CopyInstruction &i)
             ie[4]->invalidate();
         }
     } else {
+        const bool aligned = (getBits(ddst.type) * ddst.stride == getBits(tmp.type) * tmp.stride);
         const auto stride = ddst.stride / 2;
-        const auto offset = ddst.offset & 1;
+        const auto offset = ddst.offset & (aligned ? 3 : 1);
         const auto mask = (uint16_t)(0xF << (4 * offset));
 
-        ie[1]->op = Opcode::mov;
-        ie[1]->dst = tmp;
-        ie[1]->src0 = ddst;
-        ie[1]->src0.type = DataType::ub;
-        ie[1]->src0.stride = stride;
-        ie[1]->src0.offset /= 2;
+        if (!aligned) {
+            ie[1]->op = Opcode::mov;
+            ie[1]->dst = tmp;
+            ie[1]->src0 = ddst;
+            ie[1]->src0.type = DataType::ub;
+            ie[1]->src0.stride = stride;
+            ie[1]->src0.offset /= 2;
+        } else {
+            ie[1]->invalidate();
+        }
 
         if (offset) {
             ie[2]->op = Opcode::shl;
             ie[2]->simd = simd;
             ie[2]->dst = stmp;
-            ie[2]->dst.stride = 1;
             ie[2]->src0 = stmp;
-            ie[2]->src0.stride = 1;
-            ie[2]->src1 = 4;
+            ie[2]->src1 = 4 * offset;
         } else {
             ie[2]->invalidate();
+        }
+
+        if (aligned) {
+            tmp = ddst;
+            tmp.type = DataType::uw;
+            tmp.offset /= 4;
+            tmp.stride /= 4;
         }
 
         ie[3]->op = Opcode::bfn;
         ie[3]->ctrl = 0xCA;
         ie[3]->simd = simd;
         ie[3]->dst = tmp;
-        ie[3]->src0 = stmp;
-        ie[3]->src1 = tmp;
-        ie[3]->src2 = 0xFFFF ^ mask;
+        ie[3]->src0 = tmp;
+        ie[3]->src1 = stmp;
+        ie[3]->src2 = mask;
 
-        ie[4]->op = Opcode::mov;
-        ie[4]->simd = simd;
-        ie[4]->dst = ddst;
-        ie[4]->dst.type = DataType::ub;
-        ie[4]->dst.stride = stride;
-        ie[4]->dst.offset /= 2;
-        ie[4]->src0 = tmp;
-        ie[4]->src0.type = DataType::ub;
-        ie[4]->src0.stride *= 2;
+        if (!aligned) {
+            ie[4]->op = Opcode::mov;
+            ie[4]->simd = simd;
+            ie[4]->dst = ddst;
+            ie[4]->dst.type = DataType::ub;
+            ie[4]->dst.stride = stride;
+            ie[4]->dst.offset /= 2;
+            ie[4]->src0 = tmp;
+            ie[4]->src0.type = DataType::ub;
+            ie[4]->src0.stride *= 2;
+        } else {
+            ie[4]->invalidate();
+        }
     }
 }
 
