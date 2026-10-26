@@ -20,15 +20,11 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
-#include <sstream>
 #include <string>
-#include <thread>
-#include <tuple>
 #include <utility>
 #include <vector>
 #include <unordered_map>
 
-#include "common/memory_desc_wrapper.hpp"
 #include "gemmstone/../../dsl/ir/pass/simplify.hpp"
 #include "gpu/intel/block_structure.hpp"
 #include "gpu/intel/jit/ir/legacy.hpp"
@@ -281,15 +277,6 @@ inline layout_t make_strided(
     }
     return layout.with(new_blocks);
 }
-
-layout_t reinterpret(const layout_t &layout, const dsl::type_t &new_type,
-        bool do_normalize = true);
-
-// Reinterprets layouts to wider data type (up to 4 bytes).
-// Example: 16a16b (s8 type) -> 16a4b (s32 type)
-bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
-        const tile_t &tile = {}, bool do_update = true,
-        int *new_size_out = nullptr);
 
 tile_coord_t split(const layout_t &layout, const grid_info_t &grid_info,
         grid_info_t *out_grid = nullptr);

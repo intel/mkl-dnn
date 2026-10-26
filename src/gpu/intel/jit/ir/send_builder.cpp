@@ -397,7 +397,7 @@ bool access_builder_t::try_build_2d(send_params_t &send_params) {
     auto vlayout = mem_view_.create_pseudo_vlayout();
     auto &hint = send_params.hint_2d;
     // The data may be loaded in a wider data type to get a proper GRF layout.
-    if (!hint.type.is_undef()) vlayout = reinterpret(vlayout, hint.type);
+    if (!hint.type.is_undef()) vlayout = ir::reinterpret(vlayout, hint.type);
 
     bool is_store = (send_op_ == send_op_t::store);
     bool is_prefetch = (send_op_ == send_op_t::prefetch);

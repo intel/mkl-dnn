@@ -40,121 +40,6 @@ int64_t size_in_bytes(const dsl::layout_t &layout) {
             / layout.type().packing();
 }
 
-layout_t reinterpret(const layout_t &layout, const type_t &new_type,
-        bool do_normalize = true) {
-    int old_size = layout.type().size();
-    int new_size = new_type.size();
-    if (new_size == old_size) return layout;
-
-    expr_t new_offset = 0;
-    if (!layout.offset().is(0)) {
-        dsl_assert(is_const(layout.offset())) << "Expected constant offset.";
-        int64_t off = to_cpp<int64_t>(layout.offset()) * old_size;
-        dsl_assert(off % new_size == 0);
-        new_offset = off / new_size;
-    }
-
-    if (old_size % new_size != 0 && new_size % old_size != 0) {
-        dsl_error();
-        return layout_t();
-    }
-
-    auto new_blocks = layout.blocks();
-    if (new_blocks.empty()) {
-        dsl_error() << "Can't reinterpret.";
-        return layout_t();
-    }
-
-    auto &b0 = new_blocks.front();
-    if (int64_t(b0.stride) != 1) {
-        dsl_error();
-        return layout_t();
-    }
-
-    if (new_size < old_size) {
-        int factor = (old_size / new_size);
-        b0.size *= factor;
-        // Recompute strides.
-        for (auto &b : new_blocks) {
-            if (&b == &b0) continue;
-            b.stride *= factor;
-        }
-    } else {
-        int factor = (new_size / old_size);
-        if (b0.size % factor != 0) {
-            dsl_error();
-            return layout_t();
-        }
-        b0.size /= factor;
-        // Recompute strides.
-        for (auto &b : new_blocks) {
-            if (&b == &b0) continue;
-            if (b.stride % factor != 0) {
-                dsl_error();
-                return layout_t();
-            }
-            b.stride /= factor;
-        }
-    }
-
-    return layout_t(new_type, new_blocks, new_offset, layout.ndims(false),
-            do_normalize);
-}
-
-// Reinterprets layouts to wider data type (up to 4 bytes).
-// Example: 16a16b (s8 type) -> 16a4b (s32 type)
-bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
-        const tile_t &tile = {}, bool do_update = true,
-        int *new_size_out = nullptr) {
-    if (src.blocks().empty() || dst.blocks().empty()) return false;
-    if (src.type() != dst.type()) return false;
-
-    auto &s0 = src[0];
-    auto &d0 = dst[0];
-    if (s0.idx != d0.idx) return false;
-    if (int(s0.stride) != 1) return false;
-    if (int(d0.stride) != 1) return false;
-
-    int old_size = src.type().size();
-    int s0_old_size = int(s0.size) * old_size;
-    int d0_old_size = int(d0.size) * old_size;
-
-    int new_size = gcd(s0_old_size, d0_old_size);
-    new_size = gcd(new_size, 4); // Try types up to 4 bytes.
-    if (new_size <= old_size) return false;
-
-    auto tile_ok = [&](const layout_t &l) {
-        if (tile.is_empty()) return true;
-        int factor = new_size / old_size;
-        if (tile[l[0].idx] % factor != 0) return false;
-        return true;
-    };
-
-    auto strides_ok = [&](const layout_t &l) {
-        for (int i = 1; i < int(l.blocks().size()); i++) {
-            auto &b = l[i];
-            if (int(b.stride) * old_size % new_size != 0) return false;
-        }
-        return true;
-    };
-
-    while (new_size > old_size) {
-        bool ok = true;
-        ok &= (tile_ok(src) && tile_ok(dst));
-        ok &= (strides_ok(src) && strides_ok(dst));
-        if (ok) {
-            if (do_update) {
-                src = reinterpret(src, type_t::s(new_size * 8));
-                dst = reinterpret(dst, type_t::s(new_size * 8));
-            }
-            if (new_size_out) *new_size_out = new_size;
-            return true;
-        }
-        new_size /= 2;
-    }
-    return false;
-}
-
 void align_layouts(layout_t &a, layout_t &b) {
     for (auto &d : a.tile()) {
         auto a_blocks = a.blocks();
@@ -657,13 +542,8 @@ int reorder_2d_impl_t::vertex_t::cost(
 reorder_impl_t::reorder_impl_t(ngen::HW hw, const dsl::layout_t &src_layout,
         const dsl::layout_t &dst_layout)
     : hw_(hw), src_layout_(src_layout), dst_layout_(dst_layout) {
+    move_to_integer_pipe(src_layout_, dst_layout_);
     try_reinterpret_to_wider_type(src_layout_, dst_layout_);
-
-    if (src_layout_.type() == dst_layout_.type()) {
-        auto type = type_t::u(src_layout_.type().bitsize());
-        src_layout_ = src_layout_.with(type);
-        dst_layout_ = dst_layout_.with(type);
-    }
 }
 
 void reorder_impl_t::emit(copy_plan_t &plan, const reorder_operand_t &src,

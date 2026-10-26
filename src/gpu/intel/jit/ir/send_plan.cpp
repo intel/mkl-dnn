@@ -839,7 +839,7 @@ struct send_2d_params_t {
         add_block(vnni_factor > 1 ? h_vidx : w_vidx, c);
         l = add_padded_block(w_vidx, w_rcount, grf_size);
         l = add_padded_block(h_vidx, h_rcount, grf_size);
-        if (type != mem_type) l = reinterpret(l, mem_type);
+        if (type != mem_type) l = ir::reinterpret(l, mem_type);
         return l;
     }
 
