@@ -228,7 +228,7 @@ void reorder_2d_impl_t::emit(
         dsl_assert(y_blocks.size() <= 1);
         int x_stride = (x_blocks.empty() ? 1 : int(x_blocks[0].stride));
         int y_stride = (y_blocks.empty() ? 1 : int(y_blocks[0].stride));
-        int width = int(tile.elems()) * orig_type.size() / type.size();
+        int width = int(tile.elems()) * orig_bits / type_bits;
 
         const auto &src_layout = *prev_layout, &dst_layout = *next_layout;
         auto swizzle = [&](const icoord_t &start) {
@@ -458,7 +458,7 @@ void reorder_2d_impl_t::generate_all_layouts_impl(
 
 void reorder_2d_impl_t::vertex_t::set_edges(const std::vector<edge_t> &edges) {
     adj_edge_type_masks.resize(edges.size());
-    int type_size = layout.type().size();
+    int type_size = layout.type().bitsize();
     for (int i = 0; i < int(edges.size()); i++) {
         auto &e = edges[i];
         auto tile = e.tile();
@@ -469,7 +469,7 @@ void reorder_2d_impl_t::vertex_t::set_edges(const std::vector<edge_t> &edges) {
         int from = ilog2(type_size);
         int to = ilog2(max_type_size);
         for (int j = from; j <= to; j++) {
-            type_t type = type_t::u(8 << j);
+            type_t type = type_t::u(1 << j);
             if (can_reorder(tile, type)) adj_edge_type_masks[i] |= (1 << j);
         }
     }
@@ -520,20 +520,20 @@ int reorder_2d_impl_t::vertex_t::cost(
         const edge_t &e, const vertex_t &v, type_t &type) const {
     uint32_t mask = (adj_edge_type_masks[e.idx] & v.adj_edge_type_masks[e.idx]);
     if (mask == 0) return std::numeric_limits<int>::max();
-    int cur_size = layout.type().size();
+    int cur_bits = layout.type().bitsize();
     int cur_cost = into<int>(layout.elems() / (e.a * e.b));
-    int min_log_bytes = ilog2(cur_size);
-    int max_log_bytes = 3;
+    int min_log_bits = ilog2(cur_bits);
+    int max_log_bits = 6;
     int min_cost = std::numeric_limits<int>::max();
-    for (int i = min_log_bytes; i <= max_log_bytes; i++) {
+    for (int i = min_log_bits; i <= max_log_bits; i++) {
         if ((mask & (1 << i)) == 0) continue;
-        if (i > min_log_bytes) {
+        if (i > min_log_bits) {
             dsl_assert(!layout.blocks().empty());
             dsl_assert(!v.layout.blocks().empty());
             if (layout[0].idx != v.layout[0].idx) continue;
         }
         min_cost = cur_cost;
-        type = type_t::u(8 << i);
+        type = type_t::u(1 << i);
         break;
     }
     return min_cost;
