@@ -54,6 +54,7 @@
 /third_party/level_zero/ @uxlfoundation/onednn-gpu-intel
 /third_party/mdapi/ @uxlfoundation/onednn-gpu-intel
 /third_party/ngen/ @uxlfoundation/onednn-gpu-intel
+/third_party/rvjit/ @uxlfoundation/onednn-cpu-rv64
 /third_party/xbyak/ @uxlfoundation/onednn-cpu-x64
 /third_party/xbyak_aarch64/ @uxlfoundation/onednn-cpu-aarch64
 /third_party/xbyak_riscv/ @uxlfoundation/onednn-cpu-rv64
