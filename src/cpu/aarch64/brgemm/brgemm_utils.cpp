@@ -112,8 +112,8 @@ status_t init_mmla_wei_md(
 
 void set_mmla_attr(brgemm_attr_t &attr, dim_t M) {
     attr.use_mmla = true;
-    attr.hint_ld_block2 = mmla_ld_block2();
-    attr.hint_bd_block = nstl::min<dim_t>(mmla_max_native_bd_block(), M);
+    attr.hint_ld_block2 = mmla_default_ld_block2_plain_a();
+    attr.hint_bd_block = nstl::min<dim_t>(mmla_default_bd_block_plain_a(), M);
 }
 
 bool can_dispatch_uker(const brgemm_desc_t *brg) {
@@ -328,13 +328,6 @@ status_t brdgmm_blocking(brgemm_desc_t *brg) {
 
     if (brg->isa_impl == isa_undef) return status::unimplemented;
 
-    const int requires_permute_dst_vmm = brg->isa_impl == sve_512
-            && jit_brdgmm_kernel_base_t::is_fast_vnni_int8(*brg);
-    const int max_vregs = isa_num_vregs(brg->isa_impl);
-    const int compute_vregs = 2; // b_vmm + a_vmm
-    const int aux_vregs
-            = nstl::max(brg->is_bf16_emu * 4, 2) + requires_permute_dst_vmm;
-    const int max_acc_vmms = max_vregs - aux_vregs - compute_vregs;
     const int simd_w = isa_max_vlen(brg->isa_impl) / brg->typesize_C;
 
     auto &M = brg->bcast_dim;
@@ -366,6 +359,14 @@ status_t brdgmm_blocking(brgemm_desc_t *brg) {
     n_block2 = nstl::min(max_n_block2, nb_n_block1);
     nb_n_block2 = div_up(nb_n_block1, n_block2);
     n_block2_tail = nb_n_block1 % n_block2;
+
+    const int requires_permute_dst_vmm = brg->isa_impl == sve_512
+            && jit_brdgmm_kernel_base_t::is_fast_vnni_int8(*brg);
+    const int max_vregs = isa_num_vregs(brg->isa_impl);
+    const int compute_vregs = 2; // b_vmm + a_vmm
+    const int aux_vregs
+            = nstl::max(brg->is_bf16_emu * 4, 2) + requires_permute_dst_vmm;
+    const int max_acc_vmms = max_vregs - aux_vregs - compute_vregs;
 
     m_block1 = 1;
     nb_m_block1 = M / m_block1;

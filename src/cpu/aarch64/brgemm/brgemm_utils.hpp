@@ -101,15 +101,15 @@ inline constexpr int mmla_rd_chunks_per_block(int dt_a_sz) {
     return mmla_rd_block() / mmla_rd_chunk_elems(dt_a_sz);
 }
 
-// Four f32 output vectors per row x six rows = 24 accumulator registers.
-inline constexpr int mmla_ld_block2() {
+// Preferred blocking for large plain-A problems: 24 accumulator registers.
+inline constexpr int mmla_default_ld_block2_plain_a() {
     return 4;
 }
-inline constexpr int mmla_max_native_bd_block() {
+inline constexpr int mmla_default_bd_block_plain_a() {
     return 6;
 }
 inline int mmla_n_block(cpu_isa_t isa) {
-    return mmla_ld_block2() * simd_elems(data_type::f32, isa);
+    return mmla_default_ld_block2_plain_a() * simd_elems(data_type::f32, isa);
 }
 
 // Small OpenMP workloads can favor BFDOT. Scale the measured crossover by

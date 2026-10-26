@@ -1005,7 +1005,8 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     const int mmla_m_block = brgemm_utils::mmla_bd_blk();
     const int mmla_n_block = brgemm_utils::mmla_n_block(isa);
     const int mmla_k_block = brgemm_utils::mmla_rd_block();
-    // MMLA permits M tails; N and K require full tiles.
+    // MMLA packing and blocking in matmul currently assume full N/K tiles.
+    // TODO: Enable N/K tails, which are already supported by the BRGEMM kernel.
     if (one_of(isa, sve_128, sve_256) && bm_conf_utils.is_bf16()
             && bgmmc.M >= mmla_m_block && bgmmc.N >= mmla_n_block
             && bgmmc.K >= mmla_k_block && bgmmc.N % mmla_n_block == 0

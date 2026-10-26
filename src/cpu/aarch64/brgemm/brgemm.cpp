@@ -185,8 +185,6 @@ status_t brgemm_desc_init(brgemm_desc_t *brg, cpu_isa_t isa,
                 false, brg->is_int8, brg->is_bf16, brg->is_f32, brg->is_f16))
         return status::unimplemented;
 
-    CHECK(brgemm_blocking(brg));
-
     return status::success;
 }
 
@@ -209,8 +207,6 @@ status_t brdgmm_desc_init(brgemm_desc_t *brg, cpu_isa_t isa,
     if (utils::everyone_is(
                 false, brg->is_int8, brg->is_bf16, brg->is_f32, brg->is_f16))
         return status::unimplemented;
-
-    CHECK(brdgmm_blocking(brg));
 
     return status::success;
 }
@@ -355,13 +351,6 @@ status_t brgemm_desc_set_postops(brgemm_desc_t *brg,
     init_zp_type(brg->zp_type_b, DNNL_ARG_WEIGHTS);
     init_zp_type(brg->zp_type_c, DNNL_ARG_DST);
 
-    // src zero points require additional register in brgemm kernel
-    const bool is_zp_src = brg->zp_type_a != brgemm_broadcast_t::none;
-    if (brg->is_dgmm) {
-        if (is_zp_src) CHECK(brdgmm_blocking(brg));
-    } else if (is_zp_src || brg->is_bf16_emu)
-        CHECK(brgemm_blocking(brg));
-
     return status::success;
 }
 
@@ -395,21 +384,33 @@ status_t brgemm_desc_set_attr(
 
     if (brgattr.fpmath_mode != fpmath_mode::strict) maybe_try_bf32(brg);
 
-    const int max_vpad = nstl::max(brgattr.max_top_vpad,
-            brgattr.max_bottom_vpad); // these should be equal
-    bool hint_blocking_set
-            = (brgattr.hint_bd_block != 0 || brgattr.hint_bd_block2 != 0
-                    || brgattr.hint_ld_block != 0 || brgattr.hint_ld_block2 != 0
-                    || brgattr.hint_load_nt_A != brgemm_hint_nt_undef
-                    || brgattr.hint_load_nt_B != brgemm_hint_nt_undef);
-    if (brgattr.use_uker || hint_blocking_set || brgattr.bd_mask_level
-            || brgattr.fpmath_mode != fpmath_mode::strict || max_vpad > 0
-            || brgattr.use_mmla) {
-        if (brg->is_dgmm)
-            CHECK(brdgmm_blocking(brg));
-        else
-            CHECK(brgemm_blocking(brg));
-    }
+    brg->prfA = brgattr.hint_prfA;
+    brg->prfB = brgattr.hint_prfB;
+    brg->prfC = brgattr.hint_prfC;
+    if (brgattr.hint_innermost_loop != brgemm_innermost_undef)
+        brg->innermost_loop = brgattr.hint_innermost_loop;
+
+    if (brgattr.hint_prefetching == brgemm_kernel_prefetching_t::brgemm_prf1
+            && brg->prfC.dist1 < 0)
+        brg->prfC.dist1 = 0;
+    if (brgattr.hint_prefetching == brgemm_kernel_prefetching_t::brgemm_prf2
+            && brg->prfC.dist2 < 0)
+        brg->prfC.dist2 = 0;
+
+    return status::success;
+}
+
+status_t brgemm_desc_finalize(brgemm_desc_t *brg) {
+    if (brg == nullptr) return status::invalid_arguments;
+
+    const auto &brgattr = brg->brgattr;
+    const int max_vpad
+            = nstl::max(brgattr.max_top_vpad, brgattr.max_bottom_vpad);
+
+    if (brg->is_dgmm)
+        CHECK(brdgmm_blocking(brg));
+    else
+        CHECK(brgemm_blocking(brg));
 
     if (!brg->is_dgmm) {
         // virtual padding is restricted by bd_block size due to
@@ -443,24 +444,6 @@ status_t brgemm_desc_set_attr(
     if (!IMPLICATION(brg->is_blocked, brg->layout == brgemm_row_major))
         return status::invalid_arguments;
 
-    brg->prfA = brgattr.hint_prfA;
-    brg->prfB = brgattr.hint_prfB;
-    brg->prfC = brgattr.hint_prfC;
-    if (brgattr.hint_innermost_loop != brgemm_innermost_undef)
-        brg->innermost_loop = brgattr.hint_innermost_loop;
-
-    if (brgattr.hint_prefetching == brgemm_kernel_prefetching_t::brgemm_prf1
-            && brg->prfC.dist1 < 0)
-        brg->prfC.dist1 = 0;
-    if (brgattr.hint_prefetching == brgemm_kernel_prefetching_t::brgemm_prf2
-            && brg->prfC.dist2 < 0)
-        brg->prfC.dist2 = 0;
-
-    return status::success;
-}
-
-status_t brgemm_desc_finalize(brgemm_desc_t *brg) {
-    // TODO: implement functionality here similar to corresponding one in x64
     return status::success;
 }
 

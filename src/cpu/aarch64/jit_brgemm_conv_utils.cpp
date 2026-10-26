@@ -796,9 +796,8 @@ status_t brg_blocking_t::estimate_brgemm_ur() {
                 = exec_type == exec_vpad ? nstl::max(l_pad, r_pad) : 0;
         brgattr.max_bottom_vpad = brgattr.max_top_vpad;
         CHECK(brgemm_desc_set_attr(&brg, brgattr));
-    } else {
-        CHECK(brgemm_utils::brgemm_blocking(&brg));
     }
+    CHECK(brgemm_desc_finalize(&brg));
     ur = brg.bd_block;
     ur_block = brg.bd_block;
     ur_block_tail = 0;
@@ -847,7 +846,6 @@ status_t brg_blocking_t::get_brgemm_ur(
 
                 brgemm_attr_t brgattr;
                 if (use_mmla) brgemm_utils::set_mmla_attr(brgattr, vM);
-                if (!use_mmla) CHECK(brgemm_utils::brgemm_blocking(&brg));
                 brgattr.max_bs = max_batch;
                 max_vpad = exec_type == exec_vpad ? nstl::max(l_pad, r_pad) : 0;
                 brgattr.max_top_vpad = max_vpad;
@@ -858,6 +856,7 @@ status_t brg_blocking_t::get_brgemm_ur(
                 brg.with_sum = with_sum;
                 CHECK(brgemm_desc_set_postops(
                         &brg, attr, &dst_md, LDD, bia_dt));
+                CHECK(brgemm_desc_finalize(&brg));
             }
         }
     }
