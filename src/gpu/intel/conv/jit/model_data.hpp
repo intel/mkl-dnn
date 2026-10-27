@@ -17,8 +17,8 @@
 #ifndef GPU_INTEL_CONV_JIT_MODEL_DATA_HPP
 #define GPU_INTEL_CONV_JIT_MODEL_DATA_HPP
 
+#include <cstddef>
 #include <cstdint>
-#include <vector>
 
 namespace dnnl {
 namespace impl {
@@ -27,10 +27,10 @@ namespace intel {
 namespace conv {
 namespace jit {
 
-const std::vector<uint64_t> &get_model_xehpc_dw_data();
-const std::vector<uint64_t> &get_model_xehpc_common_data();
-const std::vector<uint64_t> &get_model_xehpg_dw_data();
-const std::vector<uint64_t> &get_model_xehpg_common_data();
+const uint64_t *get_model_xehpc_dw_data(size_t &size);
+const uint64_t *get_model_xehpc_common_data(size_t &size);
+const uint64_t *get_model_xehpg_dw_data(size_t &size);
+const uint64_t *get_model_xehpg_common_data(size_t &size);
 
 } // namespace jit
 } // namespace conv

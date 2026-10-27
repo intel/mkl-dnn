@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/float16.hpp"
 #include "gpu/intel/jit/utils/utils.hpp"
 
 namespace dnnl {
@@ -743,7 +744,8 @@ public:
         s.append(metric_);
 
         std::vector<uint8_t> node_data;
-        serialize_node(node_data);
+        size_t off = 0;
+        serialize_node(node_data, off);
 
         s.append(node_data);
     }
@@ -756,7 +758,8 @@ public:
         d.pop(t.metric_);
         std::vector<uint8_t> node_data;
         d.pop(node_data);
-        t.deserialize_node(node_data);
+        size_t off = 0;
+        t.deserialize_node(node_data, off);
         return t;
     }
 
@@ -916,59 +919,60 @@ private:
         return predict_impl(x, node.right);
     }
 
-    size_t serialize_node(std::vector<uint8_t> &data, int idx = 0) const {
-        auto u8_max = std::numeric_limits<uint8_t>::max();
-        auto u16_max = std::numeric_limits<uint16_t>::max();
-        auto &node = get_node(idx);
-        bool is_leaf = (node.feature_idx == -1);
-        if (is_leaf) {
-            data.push_back(0xFF);
-            size_t off = data.size();
-            data.resize(off + sizeof(node.value));
-            std::memcpy(&data[off], &node.value, sizeof(node.value));
-        } else {
-            gpu_assert(node.feature_idx >= 0 && node.feature_idx <= u8_max);
-            gpu_assert(node.value >= 0 && node.value <= u8_max);
-            data.push_back((uint8_t)node.feature_idx);
-            data.push_back((uint8_t)node.value);
-            size_t right_off_idx = data.size();
-            data.push_back(0);
-            data.push_back(0);
-            size_t right_off = serialize_node(data, node.left);
-            gpu_assert(right_off <= u16_max);
-            std::memcpy(&data[right_off_idx], &right_off, sizeof(uint16_t));
-            serialize_node(data, node.right);
+    static void write_bits(
+            std::vector<uint8_t> &data, size_t &off, uint32_t v, int nbits) {
+        for (int i = 0; i < nbits; i++, off++) {
+            if (off % 8 == 0) data.push_back(0);
+            if ((v >> i) & 1) data.back() |= (uint8_t)(1 << (off % 8));
         }
-        return data.size();
     }
 
-    int deserialize_node(std::vector<uint8_t> &data, size_t off = 0) {
-        auto u8_max = std::numeric_limits<uint8_t>::max();
-        int idx = create_node();
-        int feature_idx = (data[off] == u8_max) ? -1 : (int)data[off];
-        bool is_leaf = (feature_idx == -1);
-        float value;
-        int left = -1;
-        int right = -1;
-        if (is_leaf) {
-            gpu_assert(off + 1 + sizeof(value) <= data.size());
-            std::memcpy(&value, &data[off + 1], sizeof(value));
-        } else {
-            gpu_assert(off + 3 < data.size());
-            value = (float)data[off + 1];
-            uint8_t right_off_u8[2] = {data[off + 2], data[off + 3]};
-            uint16_t right_off;
-            std::memcpy(&right_off, right_off_u8, sizeof(right_off_u8));
-            left = deserialize_node(data, off + 4);
-            right = deserialize_node(data, right_off);
-        }
+    static uint32_t read_bits(
+            const std::vector<uint8_t> &data, size_t &off, int nbits) {
+        gpu_assert(off + nbits <= data.size() * 8);
+        uint32_t v = 0;
+        for (int i = 0; i < nbits; i++, off++)
+            v |= (uint32_t)((data[off / 8] >> (off % 8)) & 1) << i;
+        return v;
+    }
+
+    // Bit-packed pre-order: leaf flag (omitted at depth > max_depth_, always a
+    // leaf), then f16 leaf value or feature/threshold.
+    void serialize_node(std::vector<uint8_t> &data, size_t &off, int idx = 0,
+            int depth = 0) const {
         auto &node = get_node(idx);
-        node.feature_idx = feature_idx;
-        node.value = value;
-        node.left = left;
-        node.right = right;
+        bool is_leaf = (node.feature_idx == -1);
+        if (depth <= max_depth_) write_bits(data, off, is_leaf, 1);
+        if (is_leaf) {
+            write_bits(data, off, float16_t(node.value).raw, 16);
+            return;
+        }
+        gpu_assert(depth <= max_depth_);
+        gpu_assert(node.feature_idx < (1 << feature_bits));
+        write_bits(data, off, node.feature_idx, feature_bits);
+        write_bits(data, off, (uint32_t)node.value, threshold_bits);
+        serialize_node(data, off, node.left, depth + 1);
+        serialize_node(data, off, node.right, depth + 1);
+    }
+
+    int deserialize_node(
+            const std::vector<uint8_t> &data, size_t &off, int depth = 0) {
+        int idx = create_node();
+        tree_node_t node;
+        if (depth > max_depth_ || read_bits(data, off, 1)) {
+            node.value = float16_t((uint16_t)read_bits(data, off, 16), true);
+        } else {
+            node.feature_idx = (int)read_bits(data, off, feature_bits);
+            node.value = (float)read_bits(data, off, threshold_bits);
+            node.left = deserialize_node(data, off, depth + 1);
+            node.right = deserialize_node(data, off, depth + 1);
+        }
+        get_node(idx) = node;
         return idx;
     }
+
+    static constexpr int feature_bits = 5;
+    static constexpr int threshold_bits = 8 * sizeof(x_type);
 
     int nfeatures_ = 0;
     int max_depth_ = 0;
