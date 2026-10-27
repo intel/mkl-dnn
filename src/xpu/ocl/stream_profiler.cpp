@@ -79,9 +79,9 @@ status_t verbose_profiler_t::get_aggregate_exec_time(
     if (!active_) return status::success;
 
     if (index >= profiling_data_.size()) {
-        VERROR(primitive, exec,
-                "profiling error: invalid index %zu, profiling_data size is "
-                "%zu",
+        VDEBUGINFO(7, primitive, exec,
+                "profiling error: invalid index %zu, profiling_data size "
+                "is %zu",
                 index, profiling_data_.size());
         return status::success;
     }
@@ -129,7 +129,7 @@ bool verbose_profiler_t::is_event_complete(
             nullptr);
 
     if (err != CL_SUCCESS) {
-        VERROR(primitive, exec, "failed to get event status: %d", err);
+        VDEBUGINFO(7, primitive, exec, "failed to get event status: %d", err);
         return false;
     }
 
@@ -149,7 +149,8 @@ void verbose_profiler_t::wait_for_event_completion(
     if (err != CL_SUCCESS) {
         // Note: Cannot throw from destructor context, so just
         // logging error
-        VERROR(primitive, exec, "failed to wait for event completion: %d", err);
+        VDEBUGINFO(7, primitive, exec,
+                "failed to wait for event completion: %d", err);
     }
 }
 

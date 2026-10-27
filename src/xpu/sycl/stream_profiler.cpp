@@ -97,7 +97,7 @@ status_t verbose_profiler_t::get_aggregate_exec_time(
     if (!active_) return status::success;
 
     if (index >= profiling_data_.size()) {
-        VERROR(primitive, exec,
+        VDEBUGINFO(7, primitive, exec,
                 "profiling error: invalid index %zu, profiling_data size is "
                 "%zu",
                 index, profiling_data_.size());
@@ -168,8 +168,8 @@ void verbose_profiler_t::wait_for_event_completion(
     } catch (const ::sycl::exception &e) {
         // Note: Cannot throw from destructor context, so just
         // logging error
-        VERROR(primitive, exec, "failed to wait for event completion: %s",
-                e.what());
+        VDEBUGINFO(7, primitive, exec,
+                "failed to wait for event completion: %s", e.what());
     }
 }
 

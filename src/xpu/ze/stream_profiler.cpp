@@ -36,7 +36,7 @@ status_t verbose_profiler_t::get_aggregate_exec_time(
     if (!active_) return status::success;
 
     if (index >= profiling_data_.size()) {
-        VERROR(primitive, exec,
+        VDEBUGINFO(7, primitive, exec,
                 "profiling error: invalid index %zu, profiling_data size is "
                 "%zu",
                 index, profiling_data_.size());
@@ -94,8 +94,10 @@ bool verbose_profiler_t::is_event_complete(
     size_t last_idx = ze_event.size() - 1;
 
     ze_result_t result = xpu::ze::zeEventQueryStatus(ze_event[last_idx]);
-
-    return (result == ZE_RESULT_SUCCESS);
+    if (result != ZE_RESULT_SUCCESS)
+        VDEBUGINFO(
+                7, primitive, exec, "failed to get event status: %d", result);
+    return result == ZE_RESULT_SUCCESS;
 }
 
 void verbose_profiler_t::wait_for_event_completion(
@@ -111,7 +113,8 @@ void verbose_profiler_t::wait_for_event_completion(
             ze_event[last_idx], std::numeric_limits<uint64_t>::max());
     if (result != ZE_RESULT_SUCCESS) {
         // Note: Cannot throw from destructor context, so just logging error
-        VWARN(primitive, exec, "ze event synchronization failed");
+        VDEBUGINFO(7, primitive, exec,
+                "failed to wait for event completion: %d", result);
     }
 }
 

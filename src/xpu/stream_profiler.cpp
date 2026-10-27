@@ -79,9 +79,11 @@ void verbose_profiler_t::check_for_completed_primitives() {
         const auto &evts = prof_data.prim_events_;
         double duration_ms = 0.0;
 
-        // Handles primitives with no kernels
+        // Handles primitives with no kernel events
         if (evts.empty()) {
-            // Will be erased in second pass
+            // A profiling data entry with a valid pd_info value but no
+            // events is treated as a zero-kernel primitive and will be
+            // erased in the second pass
             if (!prof_data.pd_info_.empty())
                 log_profile(prof_data, duration_ms);
             continue;
@@ -100,7 +102,8 @@ void verbose_profiler_t::check_for_completed_primitives() {
         if (status == status::success) {
             log_profile(prof_data, duration_ms);
         } else {
-            VERROR(common, runtime,
+            // using debuginfo=7 level for debugging profiler errors, warnings
+            VDEBUGINFO(7, common, runtime,
                     "%s, profiling error: failures in exec time computation",
                     prof_data.pd_info_.c_str());
         }
