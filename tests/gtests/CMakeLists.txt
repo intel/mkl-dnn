@@ -192,9 +192,9 @@ function(register_gtest exe src)
 
     set(DPCPP_HOST_COMPILER_FLAGS)
     # Extract host compiler flags from CMAKE_CXX_FLAGS to DPCPP_HOST_COMPILER_FLAGS
-    string(REGEX MATCH "-fsycl-host-compiler-options=\".*\""  DPCPP_HOST_COMPILER_FLAGS ${CMAKE_CXX_FLAGS})
+    string(REGEX MATCH "-fsycl-host-compiler-options=\"[^\"]*\""  DPCPP_HOST_COMPILER_FLAGS ${CMAKE_CXX_FLAGS})
     # Erase host compiler flags from CMAKE_CXX_FLAGS
-    string(REGEX REPLACE "-fsycl-host-compiler-options=\".*\""  "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+    string(REGEX REPLACE "-fsycl-host-compiler-options=\"[^\"]*\""  "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 
     if(${exe} MATCHES "_buffer")
         if (DNNL_WITH_SYCL)

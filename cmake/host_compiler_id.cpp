@@ -39,6 +39,17 @@ int main() {
     breaks_on_purpose
 #endif
 
+#elif defined(TRY_MSVC)
+
+#if (defined _MSC_VER) && (!defined(__INTEL_COMPILER)) \
+        && (!defined(__INTEL_LLVM_COMPILER)) && (!defined(__clang__))
+// _MSC_VER encodes the version as a single number, e.g. 1942 for 19.42.
+#pragma message("host compiler version: " STRINGIFY(_MSC_VER))
+    return 0;
+#else
+    breaks_on_purpose
+#endif
+
 #else
     breaks_on_purpose
 #endif

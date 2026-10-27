@@ -96,6 +96,22 @@ macro(platform_clang_nowarn_ccxx_flags var)
     append(${var} "-Wno-pass-failed")
 endmacro()
 
+macro(platform_msvc_common_ccxx_flags var)
+    # increase number of sections in obj file
+    append(${var} "/bigobj")
+    # make preprocessor standard compliant
+    append(${var} "/Zc:preprocessor")
+    # Set UTF-8 as default encoding to be consistent with other compilers
+    append(${var} "/utf-8")
+    # Enable __cplusplus macro to align behavior with other compilers
+    append(${var} "/Zc:__cplusplus")
+endmacro()
+
+macro(platform_msvc_nowarn_ccxx_flags var)
+    # workaround: macro outputs defined token in msvs header
+    append(${var} "/wd5105")
+endmacro()
+
 if(DNNL_WITH_SYCL)
     # Clang cannot vectorize some loops with #pragma omp simd and gets
     # very upset. Tell it that it's okay and that we love it
@@ -205,16 +221,8 @@ if(MSVC)
 
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
         append(CMAKE_CCXX_FLAGS "/MP")
-        # increase number of sections in obj file
-        append(CMAKE_CCXX_FLAGS "/bigobj")
-        # make preprocessor standard compliant
-        append(CMAKE_CCXX_FLAGS "/Zc:preprocessor")
-        # Set UTF-8 as default encoding to be consistent with other compilers
-        append(CMAKE_CCXX_FLAGS "/utf-8")
-        # Enable __cplusplus macro to align behavior with other compilers
-        append(CMAKE_CCXX_FLAGS "/Zc:__cplusplus")
-        # workaround: macro outputs defined token in msvs header
-        append(CMAKE_CCXX_NOWARN_FLAGS "/wd5105")
+        platform_msvc_common_ccxx_flags(CMAKE_CCXX_FLAGS)
+        platform_msvc_nowarn_ccxx_flags(CMAKE_CCXX_NOWARN_FLAGS)
     endif()
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
         append(CMAKE_CCXX_FLAGS "/MP")

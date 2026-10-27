@@ -62,19 +62,25 @@ endif()
 include(FindPackageHandleStandardArgs)
 include("cmake/dpcpp_driver_check.cmake")
 
-# Link SYCL library explicitly for open-source compiler on Windows.
+# Link SYCL library explicitly for open-source compiler on Windows and for
+# MSVC host compiler, as host objects produced by MSVC lack the `/DEFAULTLIB`
+# directive for the SYCL library, and at link time the compiler driver selects
+# the release version of the library regardless of the C runtime library used.
 # In other cases, the compiler is able to automatically link it.
-if(WIN32 AND CMAKE_BASE_NAME STREQUAL "clang++")
+if(WIN32 AND (CMAKE_BASE_NAME STREQUAL "clang++"
+        OR DPCPP_HOST_COMPILER_KIND STREQUAL "MSVC"))
     # TODO: we can drop this workaround once an open-source release
     # for Windows has a fix for the issue.
-    foreach(sycl_lib_version 8 7 6 "")
-        if(UPPERCASE_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+    get_filename_component(_sycl_lib_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    foreach(sycl_lib_version 9 8 7 6 "")
+        if(UPPERCASE_CMAKE_BUILD_TYPE MATCHES "^(DEBUG|RELWITHMDD)$")
             set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}d")
         else()
             set(SYCL_LIBRARY_NAME "sycl${sycl_lib_version}")
         endif()
 
-        find_library(SYCL_LIBRARY ${SYCL_LIBRARY_NAME})
+        find_library(SYCL_LIBRARY ${SYCL_LIBRARY_NAME}
+            HINTS "${_sycl_lib_dir}/../lib")
 
         if(EXISTS "${SYCL_LIBRARY}")
             list(APPEND EXTRA_SHARED_LIBS ${SYCL_LIBRARY})

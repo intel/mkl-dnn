@@ -94,11 +94,11 @@ macro(append_host_compiler_options var opts)
         if(${var} MATCHES "-fsycl-host-compiler-options")
             if("${ARGV2}" STREQUAL "BEFORE") # prepend
                 string(REGEX REPLACE
-                    "(.*)(-fsycl-host-compiler-options=)\"(.*)\"(.*)"
+                    "(.*)(-fsycl-host-compiler-options=)\"([^\"]*)\"(.*)"
                     "\\1\\2\"${opts} \\3\"\\4" ${var} ${${var}})
             elseif("${ARGV2}" STREQUAL "") # append
                 string(REGEX REPLACE
-                    "(.*)(-fsycl-host-compiler-options=)\"(.*)\"(.*)"
+                    "(.*)(-fsycl-host-compiler-options=)\"([^\"]*)\"(.*)"
                     "\\1\\2\"\\3 ${opts}\"\\4" ${var} ${${var}})
             else()
                 message(FATAL_ERROR "Unknown argument: ${ARGV2}")
