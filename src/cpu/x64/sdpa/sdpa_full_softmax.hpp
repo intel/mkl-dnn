@@ -151,9 +151,8 @@ struct sdpa_full_softmax_conf_t {
     float mm2_beta = 0.0f;
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
-    // BRGEMM B VNNI pack factor (1 plain, 2 VNNI2).
-    dim_t b_k_pack = 1;
-    // VNNI pack factor of the materialized QK^T weights.
+    bool need_kt = false, need_vt = false;
+    // Independent BRGEMM B pack factors for K and V (1 plain, 2 VNNI2).
     dim_t kt_k_pack = 1;
     dim_t vt_k_pack = 1;
     // Physical reduction extents required by the K and V copy kernels.
