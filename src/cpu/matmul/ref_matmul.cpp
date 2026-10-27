@@ -104,11 +104,22 @@ status_t ref_matmul_t::execute_ref(const exec_ctx_t &ctx) const {
     const dim_t batch = helper.batch();
 
     // Weights decompression
-    const bool with_wei_decompression
+    // TODO: consolidate the weights-decompression detection into a pd() helper
+    // shared across the library instead of recomputing it per implementation.
+    const bool wei_is_int
             = utils::one_of(weights_d.data_type(), data_type::s8, data_type::u8,
-                      data_type::s4, data_type::u4, data_type::u2,
-                      data_type::u3)
-            && pd()->attr()->fpmath_.apply_to_int_;
+                    data_type::s4, data_type::u4, data_type::u2, data_type::u3);
+    // Low-precision floating-point weights (fp8/fp4) are decompressed whenever
+    // weights scales or zero-points must be folded into the weights before the
+    // multiply, e.g. the static_sbzp mode.
+    const bool wei_is_fp8_fp4 = utils::one_of(weights_d.data_type(),
+            data_type::f8_e5m2, data_type::f8_e4m3, data_type::f4_e2m1);
+    const bool with_wei_quant_entries
+            = !pd()->attr()->scales_.has_default_values(DNNL_ARG_WEIGHTS)
+            || !pd()->attr()->zero_points_.has_default_values(DNNL_ARG_WEIGHTS);
+    const bool with_wei_decompression
+            = (wei_is_int && pd()->attr()->fpmath_.apply_to_int_)
+            || (wei_is_fp8_fp4 && with_wei_quant_entries);
     const auto &attr_zps = pd()->attr()->zero_points_;
     const bool with_wei_zero_points
             = !attr_zps.has_default_values(DNNL_ARG_WEIGHTS);
