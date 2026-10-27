@@ -133,9 +133,9 @@ struct jit_uni_softmax_fwd_t : public primitive_t {
 
             const bool f8_isa_ok
                     = IMPLICATION(utils::one_of(f8_e5m2, src_dt, dst_dt),
-                              is_superset(isa_, avx10_1_512_amx))
+                              is_superset(isa_, avx512_core_fp16))
                     && IMPLICATION(utils::one_of(f8_e4m3, src_dt, dst_dt),
-                            is_superset(isa_, avx10_1_512_amx));
+                            is_superset(isa_, avx512_core_fp16));
             VDISPATCH_SOFTMAX(f8_isa_ok, VERBOSE_ISA_DT_MISMATCH);
 
             VDISPATCH_SOFTMAX(attr()->has_default_values(skip_mask_t::scales
