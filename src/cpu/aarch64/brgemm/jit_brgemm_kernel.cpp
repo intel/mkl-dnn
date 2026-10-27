@@ -64,8 +64,6 @@ struct jit_brgemm_kernel_t : public jit_generator_t {
 
         if (brg.with_eltwise || brg.with_binary || brg.with_sum) {
 
-            static constexpr bool preserve_gpr = true;
-            static constexpr bool preserve_vmm = true;
             static constexpr bool use_exact_tail_scalar_bcast = false;
             const auto dst_md_wrapper = memory_desc_wrapper(brg.dst_md);
 
@@ -78,8 +76,6 @@ struct jit_brgemm_kernel_t : public jit_generator_t {
                             broadcasting_strategy_t::per_w,
                             broadcasting_strategy_t::no_broadcast};
             const binary_injector::rhs_arg_static_params_t rhs_sp {
-                    static_cast<size_t>(Xbyak_aarch64::ZReg(1).getIdx()),
-                    XReg(14), XReg(15), XReg(13), preserve_gpr, preserve_vmm,
                     GET_OFF(post_ops_binary_rhs_arg_vec), GET_OFF(data_C_ptr_),
                     dst_md_wrapper, static_cast<size_t>(brg.ldb_tail),
                     PReg(ld_tail_mask.getIdx()), use_exact_tail_scalar_bcast};
@@ -87,8 +83,8 @@ struct jit_brgemm_kernel_t : public jit_generator_t {
                     XReg(this->param1.getIdx()), enabled_bcast_strategy,
                     rhs_sp};
 
-            postops_injector_ = utils::make_unique<po_injector_t>(
-                    this, brg.attr->post_ops_, bsp);
+            postops_injector_ = utils::make_unique<po_injector_t>(this,
+                    reg_pool(), brg.attr->post_ops_, bsp, X_TMP_0, PReg(1));
 
             with_binary_non_scalar_bcast_ = binary_injector::
                     any_binary_postop_rhs_non_scalar_broadcast(
@@ -905,7 +901,8 @@ void jit_brgemm_kernel_t::apply_post_ops(
         }
     }
 
-    const auto sum_injector = [&] {
+    const auto sum_injector
+            = [&](const injector_utils::vmm_index_set_t &vmm_idxs) {
         const float *p_sum_scale = &brg.sum_scale;
         const int32_t *p_sum_zp = &brg.sum_zp;
         const bool p_sum_scale_reg_set = *p_sum_scale != 1.f;
@@ -938,6 +935,7 @@ void jit_brgemm_kernel_t::apply_post_ops(
             for_(int bd = 0; bd < bd_block; bd++)
             for (int ld = 0; ld < ld_block2; ld++) {
                 const auto vmm = accm(ld_block2, bd, ld);
+                if (vmm_idxs.count(vmm.getIdx()) == 0) continue;
                 const auto vmm_prev_dst = z_tmp_1();
                 const bool is_tail = is_ld_tail && ld + 1 == ld_block2;
                 const auto k_mask = is_tail ? ld_tail_mask : P_ALL_ONE;
@@ -961,9 +959,17 @@ void jit_brgemm_kernel_t::apply_post_ops(
                 primitive_kind::sum, sum_injector);
     }
 
+    const int first_acc = max_effective_vregs - bd_block * ld_block2;
+    auto live_accumulators
+            = claim_reg_range<ZReg>(first_acc, bd_block * ld_block2);
+    // The BRGEMM loop state remains live after post-ops. Keep its complete
+    // physical register set out of the injector pool; aliases are deduplicated
+    // by claim_regs().
+    auto live_gprs = claim_regs<XReg>({x0, x1, x2, x3, x4, x5, x6, x7, x8, x9,
+            x10, x11, x12, x13, x14, x15, x16, x17, X_TMP_0});
+    auto live_preds = claim_regs<PReg>({PReg(1), rd_tail_mask, ld_tail_mask});
     postops_injector_->compute_vector_range(
-            max_effective_vregs - bd_block * ld_block2, max_effective_vregs,
-            rhs_arg_params);
+            first_acc, max_effective_vregs, rhs_arg_params);
 }
 
 static inline bool isa_has_masks(cpu_isa_t isa) {

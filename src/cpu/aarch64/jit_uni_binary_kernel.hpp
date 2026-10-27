@@ -84,7 +84,6 @@ struct jit_uni_binary_kernel_t : public binary_kernel_t {
     const XReg reg_reverse_spat_offt_ = x13;
     const XReg reg_tmp_ = x14;
     const XReg reg_tmp1_ = x6;
-    const XReg reg_elt_inj_table_ = x16;
     const XReg reg_off_rhs_postops_ = x2;
     const XReg reg_scales_src0_ = x3;
     const XReg reg_scales_src1_ = x5;
@@ -115,11 +114,8 @@ struct jit_uni_binary_kernel_t : public binary_kernel_t {
     std::unique_ptr<
             injector::jit_uni_postops_injector_t<to_vla_sve(inject_isa)>>
             postops_injector_;
-    const PReg elt_inj_opmask_ = p1;
-    const PReg elt_inj_p_tmp0_ = p2;
-    const PReg elt_inj_p_all_ = p3;
-
-    void init_post_ops_injector();
+    void init_post_ops_injector(
+            const XReg &eltwise_table, const PReg &eltwise_mask);
     void apply_postops(int unroll, bool tail);
     void load_kernel_params();
     XReg prepare_xaddr_reg_with_src0_ptr(size_t offt = 0);

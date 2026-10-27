@@ -665,16 +665,25 @@ void jit_softmax_sve_t::restore_mask() {
 }
 
 void jit_softmax_sve_t::generate() {
+    auto live_gprs = claim_regs<XReg>(
+            {reg_exp_injector_table, reg_log_injector_table, reg_src, reg_dst,
+                    reg_diff_dst, reg_src_spat_offt, reg_process_n_elems,
+                    reg_reverse_n_elems, reg_tmp, reg_dst_spat_offt,
+                    reg_interim_spat_offt, reg_src_scales, reg_dst_scales});
+    auto live_preds = claim_regs<PReg>({injector_mask, tail_opmask, p_shuff1});
+    auto live_vmms = claim_reg_range<ZReg>(
+            data_vreg_start_idx, v_tmp0_idx - data_vreg_start_idx + 1);
+
     if (pd_->is_fwd() || is_logsoftmax_) {
         exp_injector_.reset(new jit_uni_eltwise_injector_t<sve>(this,
-                alg_kind::eltwise_exp, 0.0f, 0.0f, 1.0f, false,
-                reg_exp_injector_table, injector_mask, injector_tmp));
+                reg_pool(), alg_kind::eltwise_exp, 0.0f, 0.0f, 1.0f,
+                reg_exp_injector_table, injector_mask));
         exp_injector_->set_input_range(-INFINITY, 0.f);
     }
     if (pd_->is_fwd() && is_logsoftmax_) {
         log_injector_.reset(new jit_uni_eltwise_injector_t<sve>(this,
-                alg_kind::eltwise_log, 0.0f, 0.0f, 1.0f, true,
-                reg_log_injector_table, injector_mask, injector_tmp));
+                reg_pool(), alg_kind::eltwise_log, 0.0f, 0.0f, 1.0f,
+                reg_log_injector_table, injector_mask));
     }
 
     compute_predefined_variables();
@@ -924,17 +933,26 @@ void jit_softmax_asimd_t::compute_dst() {
 }
 
 void jit_softmax_asimd_t::generate() {
+    auto live_gprs = claim_regs<XReg>({reg_exp_injector_table,
+            reg_log_injector_table, reg_src, reg_dst, reg_diff_dst, reg_interim,
+            reg_src_spat_offt, reg_process_n_elems, reg_reverse_n_elems,
+            reg_tmp, reg_dst_spat_offt, reg_interim_spat_offt, reg_src_scales,
+            reg_dst_scales});
+    auto live_injector_mask = claim_reg(injector_mask);
+    auto live_vmms = claim_reg_range<VReg>(
+            data_vreg_start_idx, v_tmp0_idx - data_vreg_start_idx + 1);
+
     assert(pd_->is_fwd());
 
-    exp_injector_.reset(new jit_uni_eltwise_injector_t<asimd>(this,
-            alg_kind::eltwise_exp, 0.0f, 0.0f, 1.0f, false,
-            reg_exp_injector_table, injector_mask, injector_tmp));
+    exp_injector_.reset(new jit_uni_eltwise_injector_t<asimd>(this, reg_pool(),
+            alg_kind::eltwise_exp, 0.0f, 0.0f, 1.0f, reg_exp_injector_table,
+            injector_mask));
     exp_injector_->set_input_range(-INFINITY, 0.f);
 
     if (is_logsoftmax_) {
         log_injector_.reset(new jit_uni_eltwise_injector_t<asimd>(this,
-                alg_kind::eltwise_log, 0.0f, 0.0f, 1.0f, true,
-                reg_log_injector_table, injector_mask, injector_tmp));
+                reg_pool(), alg_kind::eltwise_log, 0.0f, 0.0f, 1.0f,
+                reg_log_injector_table, injector_mask));
     }
 
     compute_predefined_variables();

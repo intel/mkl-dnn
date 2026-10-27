@@ -67,29 +67,22 @@ struct jit_brgemm_kernel_post_ops_t : public jit_generator_t {
                                   memory_desc_wrapper(brg.dst_md))) {
 
         if (brg.beta != 0) {
-            static constexpr bool preserve_gpr = true;
-            static constexpr bool preserve_vmm = true;
             static constexpr bool use_exact_tail_scalar_bcast = false;
 
             const binary_injector::rhs_arg_static_params_t rhs_sp {
-                    static_cast<size_t>(vmm_tmp(4).getIdx()), XReg(14),
-                    XReg(15), XReg(13), preserve_gpr, preserve_vmm,
                     GET_OFF(ptr_binary_post_ops_rhs), GET_OFF(dst_orig),
                     memory_desc_wrapper(brg.dst_md),
                     static_cast<size_t>(brg.load_dim % brg.ld_block),
                     k_tail_mask, use_exact_tail_scalar_bcast};
             const binary_injector::static_params_t bsp {this->param1, rhs_sp};
 
-            const bool save_state = jcp.with_eltwise;
             const auto &reserved_eltwise_gpr = reg_reserved_eltwise;
             const auto reserved_eltwise_maskr = PReg(1);
 
-            const eltwise_injector::static_params_t esp {
-                    save_state, reserved_eltwise_gpr, reserved_eltwise_maskr};
-
             postops_injector_ = utils::make_unique<
-                    injector::jit_uni_postops_injector_t<to_vla_sve(isa)>>(
-                    this, attr.post_ops_, bsp, esp);
+                    injector::jit_uni_postops_injector_t<to_vla_sve(isa)>>(this,
+                    reg_pool(), attr.post_ops_, bsp, reserved_eltwise_gpr,
+                    reserved_eltwise_maskr);
         }
 
         const auto &wei_scales = attr.scales_.get(DNNL_ARG_WEIGHTS);
@@ -276,7 +269,8 @@ private:
         const auto k_mask = tail == 0 ? k_full_mask : k_tail_mask;
         const auto sum_dt = p.get_sum_dt(out_dt_);
 
-        const auto sum_injector = [&] {
+        const auto sum_injector
+                = [&](const injector_utils::vmm_index_set_t &vmm_idxs) {
             const float *p_sum_scale = &p.entry_[sum_idx].sum.scale;
             const int32_t *p_sum_zp = &p.entry_[sum_idx].sum.zero_point;
             if (*p_sum_scale != 1.f)
@@ -291,6 +285,7 @@ private:
             for_(int m = 0; m < m_block; m++)
             for (int n = 0; n < n_block; n++) {
                 const auto vmm = vector(m, n, n_block);
+                if (vmm_idxs.count(vmm.getIdx()) == 0) continue;
 
                 const auto vmm_prev_dst = vmm_tmp(0);
                 const auto vmm_tmp2 = vmm_tmp(2);
@@ -331,6 +326,11 @@ private:
             }
         }
 
+        auto live_results = claim_reg_range<ZReg>(0, m_block * n_block);
+        auto live_gprs = claim_regs<XReg>({reg_reserved_eltwise, param1, reg_in,
+                reg_out, aux_reg_in, aux_reg_out, reg_mb_loop, reg_bias,
+                aux_reg_bias, reg_scales, aux_reg_scales});
+        auto live_preds = claim_regs<PReg>({PReg(1), k_full_mask, k_tail_mask});
         postops_injector_->compute_vector_range(
                 0, m_block * n_block, rhs_arg_params);
     }

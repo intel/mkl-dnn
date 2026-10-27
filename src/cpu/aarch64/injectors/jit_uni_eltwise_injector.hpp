@@ -36,35 +36,6 @@ namespace cpu {
 namespace aarch64 {
 
 namespace eltwise_injector {
-struct static_params_t {
-
-    static_params_t(bool save_state = true,
-            Xbyak_aarch64::XReg x_table = Xbyak_aarch64::XReg(0),
-            Xbyak_aarch64::PReg p_mask = Xbyak_aarch64::PReg(1),
-            Xbyak_aarch64::PReg p_tmp0 = Xbyak_aarch64::PReg(4),
-            bool is_fwd = true, bool use_dst = false, bool preserve_vmm = true,
-            bool preserve_p_table = true, data_type_t d_type = data_type::f32)
-        : save_state(save_state)
-        , x_table(x_table)
-        , p_mask(p_mask)
-        , p_tmp0(p_tmp0)
-        , is_fwd(is_fwd)
-        , use_dst(use_dst)
-        , preserve_vmm(preserve_vmm)
-        , preserve_p_table(preserve_p_table)
-        , d_type(d_type) {}
-
-    bool save_state;
-    Xbyak_aarch64::XReg x_table;
-    Xbyak_aarch64::PReg p_mask;
-    Xbyak_aarch64::PReg p_tmp0;
-    bool is_fwd;
-    bool use_dst;
-    bool preserve_vmm;
-    bool preserve_p_table;
-    data_type_t d_type;
-};
-
 /*
  * Checks if isa is supported by eltwise injector.
  */
@@ -88,55 +59,38 @@ struct jit_uni_eltwise_injector_t {
     using TRegS = typename cpu_isa_traits<isa>::TRegS;
     using TRegH = typename cpu_isa_traits<isa>::TRegH;
 
-    // Arguments description:
-    // host - jit generator which is filled with instructions
-    // alg, alpha, beta, scale - user eltwise arguments
-    // save_state - when true, preserves on stack vmm_aux registers preventing
-    //   results spoiling. Restores them when done in injector_postamble().
-    // p_table - GPR where table label is stored to get access for pre-defined
-    //   constants used in alg codes.
-    // k_mask - k_register to operate with masks in alg codes.
-    // is_fwd - when true, computes d = alg(s), otherwise, computes ds = alg'(s)
-    //   - algorithm derivative.
-    // use_dst - defines whether source or destination point is passed to alg
-    //   code. Depends on algorithm. See `_use_dst_for_bwd` algs definition.
-    jit_uni_eltwise_injector_t(jit_generator_t *host, alg_kind_t alg,
-            float alpha, float beta, float scale, bool save_state = true,
-            Xbyak_aarch64::XReg x_table = Xbyak_aarch64::XReg(0),
-            Xbyak_aarch64::PReg p_mask = Xbyak_aarch64::PReg(1),
-            Xbyak_aarch64::PReg p_tmp0 = Xbyak_aarch64::PReg(4),
-            bool is_fwd = true, bool use_dst = false, bool preserve_vmm = true,
-            bool preserve_p_table = true, data_type_t d_type = data_type::f32)
+    // The caller must claim every register live across an injector call in
+    // reg_pool. All injector scratch is allocated from that pool.
+    jit_uni_eltwise_injector_t(jit_generator_t *host,
+            Xbyak_aarch64::RegPoolManager &reg_pool, alg_kind_t alg,
+            float alpha, float beta, float scale, Xbyak_aarch64::XReg x_table,
+            Xbyak_aarch64::PReg p_mask, bool is_fwd = true,
+            bool use_dst = false, data_type_t d_type = data_type::f32)
         : alg_(alg)
         , alpha_(alpha)
         , beta_(beta)
         , scale_(scale)
         , h(host)
-        , save_state_(save_state)
         , x_table(x_table)
         , p_mask(p_mask)
-        , p_tmp0(p_tmp0)
         , is_fwd_(is_fwd)
         , use_dst_(use_dst)
-        , preserve_vmm_(preserve_vmm)
-        , preserve_p_table_(preserve_p_table)
-        , d_type_(d_type) {
+        , d_type_(d_type)
+        , reg_pool_(reg_pool) {
         assert(eltwise_injector::is_supported(isa, alg_));
 
+        p_all = h->P_ALL_ONE;
         register_table_entries();
     }
 
     jit_uni_eltwise_injector_t(jit_generator_t *host,
+            Xbyak_aarch64::RegPoolManager &reg_pool,
             const post_ops_t::entry_t::eltwise_t &eltwise,
-            bool save_state = true,
-            Xbyak_aarch64::XReg x_table = Xbyak_aarch64::XReg(0),
-            Xbyak_aarch64::PReg p_mask = Xbyak_aarch64::PReg(1),
-            Xbyak_aarch64::PReg p_tmp0 = Xbyak_aarch64::PReg(4),
-            bool is_fwd = true, bool use_dst = false, bool preserve_vmm = true,
-            bool preserve_p_table = true, data_type_t d_type = data_type::f32)
-        : jit_uni_eltwise_injector_t(host, eltwise.alg, eltwise.alpha,
-                  eltwise.beta, eltwise.scale, save_state, x_table, p_mask,
-                  p_tmp0, is_fwd, use_dst, preserve_vmm, preserve_p_table,
+            Xbyak_aarch64::XReg x_table, Xbyak_aarch64::PReg p_mask,
+            bool is_fwd = true, bool use_dst = false,
+            data_type_t d_type = data_type::f32)
+        : jit_uni_eltwise_injector_t(host, reg_pool, eltwise.alg, eltwise.alpha,
+                  eltwise.beta, eltwise.scale, x_table, p_mask, is_fwd, use_dst,
                   d_type) {}
 
     void compute_vector_range(size_t start_idx, size_t end_idx);
@@ -145,6 +99,7 @@ struct jit_uni_eltwise_injector_t {
     void prepare_table(bool gen_table = true);
     void load_table_addr() { h->adr(x_table, l_table); }
     void set_input_range(float min_value, float max_value);
+    size_t scratch_vmm_count() const;
 
 private:
     const alg_kind_t alg_;
@@ -156,61 +111,30 @@ private:
 
     jit_generator_t *const h;
 
-    const bool save_state_;
     const Xbyak_aarch64::XReg x_table;
-    // 99 is dummy and must be replaced meaningfull value at runtime.
     Xbyak_aarch64::PReg p_all = Xbyak_aarch64::PReg(99);
     const Xbyak_aarch64::PReg p_mask;
-    const Xbyak_aarch64::PReg p_tmp0;
     const bool is_fwd_;
     const bool use_dst_;
-    const bool preserve_vmm_;
-    const bool preserve_p_table_;
 
     Xbyak_aarch64::Label l_table;
 
     const data_type_t d_type_;
 
     const size_t vlen = get_vec_len();
-    static constexpr size_t preserved_vecs_max = 9;
-    static constexpr size_t preserved_gprs_max = 4;
     static constexpr size_t vecs_count = cpu_isa_traits<isa>::n_vregs;
     static constexpr int n_mantissa_bits = 23;
     static constexpr int k_mask_size = 8;
 
-    size_t vecs_to_preserve = 0;
-    size_t preserved_vecs_count = 0;
-    size_t preserved_vec_idxs[preserved_vecs_max] = {0};
-    size_t preserved_gpr_idxs[preserved_gprs_max] = {0};
-    injector_utils::vmm_index_set_iterator_t start_idx_tail;
+    Xbyak_aarch64::RegPoolManager &reg_pool_;
+    mutable size_t scratch_vmm_count_ = static_cast<size_t>(-1);
 
-    /* These vector register must be assigned proper index. */
-    TRegS vmm_mask {0}, vmm_aux0 {0}, vmm_aux1 {0}, vmm_aux2 {0}, vmm_aux3 {0},
-            vmm_aux4 {0}, vmm_aux5 {0}, vmm_aux6 {0}, vmm_aux7 {0}, vmm_tmp {0};
-    /* Default tempooral index. Chose a SVE register
-     not to be same as jit_uni_eltwise.(cpp|hpp).
-     This index is changed by assign_regs() in case of eltwise injection.
-  */
-    TRegS z_tmp {31};
-
-    size_t aux_vecs_count();
-    size_t aux_gprs_count();
-
-    void compute_body(
-            const injector_utils::vmm_index_set_iterator_t &start_idx_it,
-            const injector_utils::vmm_index_set_iterator_t &end_idx_it);
-    void injector_preamble(const injector_utils::vmm_index_set_t &vmm_idxs);
-    void injector_preamble_tail(
-            const injector_utils::vmm_index_set_iterator_t start_idx_it);
-    void injector_postamble();
-    void assign_regs();
-    void store_preserved_vec(size_t slot, size_t vmm_idx);
-    void load_preserved_vec(size_t slot, size_t vmm_idx);
-    void set_coef_to_regs();
+    void compute_body(const injector_utils::vmm_index_set_t &vmm_idxs);
+    void compute_vector_range_no_spill(
+            const injector_utils::vmm_index_set_t &vmm_idxs);
     void compute_cmp_mask(const TRegS &vmm_src, const TRegS &vmm_cmpare,
             alg_kind_t cmp_predicate);
     void blend_with_mask(const TRegS &vmm_dst, const TRegS &src);
-    void test_mask();
 
     size_t get_vec_len();
     void exp_compute_vector_fwd(const TRegS &vmm_src);
@@ -384,16 +308,18 @@ private:
         const auto scale = te.bcast ? vlen : sizeof(table_entry_val_t);
         const auto off = te.off + key_off_val_shift * scale;
 
-        Xbyak_aarch64::XReg x_addr(h->X_DEFAULT_ADDR);
-        if (off) {
-            h->add_imm(x_addr, x_table, off, h->X_TMP_0);
+        const auto load = [&](const Xbyak_aarch64::XReg &table_addr) {
+            if (te.bcast)
+                load_vector(zreg, table_addr);
+            else
+                load_1word_replicate(zreg, table_addr);
+        };
+        if (off == 0) {
+            load(x_table);
         } else {
-            x_addr = x_table;
-        }
-        if (te.bcast) {
-            load_vector(zreg, x_addr);
-        } else {
-            load_1word_replicate(zreg, x_addr);
+            auto table_addr = reg_pool_.allocScoped<Xbyak_aarch64::XReg>();
+            h->add_imm(table_addr.get(), x_table, off, table_addr.get());
+            load(table_addr.get());
         }
         return zreg;
     }

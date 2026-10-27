@@ -37,12 +37,16 @@ namespace injector {
 /*
  * Allows specifying custom injector function for given post-op type - one
  * function per primitive. There are post-ops type (example: sum) that don't
- * have specialized injector. They heavily rely on kernel specific intrnals,
- * which makes the generalization unreasonable. As so user can prepare internal
- * kernel lambda and pass it explicitly to injector.
+ * have specialized injector. They heavily rely on kernel-specific internals,
+ * which makes the generalization unreasonable. As such, users can prepare an
+ * internal kernel lambda and pass it explicitly to injector. The lambda must
+ * process only the supplied vmm set because the injector may choose invoke the
+ * lambda on disjoint sets due to lack of register scratch space. It must also
+ * not address kernel-local stack slots relative to stack pointer, because it
+ * may temporarily be adjusted for vector spills.
  */
-using lambda_jit_injectors_t
-        = std::map<dnnl_primitive_kind_t, std::function<void()>>;
+using lambda_jit_injectors_t = std::map<dnnl_primitive_kind_t,
+        std::function<void(const injector_utils::vmm_index_set_t &)>>;
 
 struct post_ops_ok_args_t;
 /*
@@ -61,6 +65,8 @@ public:
     /*
      * @param host <required> - user primitive where post-ops generated code is
      * injected
+     * @param reg_pool <required> - callers must use this to tell the injector which
+     * registers it is allowed to clobber
      * @param post_ops <required> - struct representing requested post-ops chain
      * @binary_static_params <reguired> - static params needed for binary_injector.
      * see: jit_uni_binary_injector.hpp for more info.
@@ -70,20 +76,17 @@ public:
      * function for given post-op type
      */
     jit_uni_postops_injector_t(jit_generator_t *host,
-            const post_ops_t &post_ops,
-            const binary_injector::static_params_t &binary_static_params);
-    jit_uni_postops_injector_t(jit_generator_t *host,
-            const post_ops_t &post_ops,
+            Xbyak_aarch64::RegPoolManager &reg_pool, const post_ops_t &post_ops,
             const binary_injector::static_params_t &binary_static_params,
-            const lambda_jit_injectors_t &lambda_jit_injectors);
+            const Xbyak_aarch64::XReg &eltwise_table,
+            const Xbyak_aarch64::PReg &eltwise_mask, bool is_fwd = true,
+            bool use_dst = false, data_type_t d_type = data_type::f32);
     jit_uni_postops_injector_t(jit_generator_t *host,
-            const post_ops_t &post_ops,
+            Xbyak_aarch64::RegPoolManager &reg_pool, const post_ops_t &post_ops,
             const binary_injector::static_params_t &binary_static_params,
-            const eltwise_injector::static_params_t &eltwise_static_params);
-    jit_uni_postops_injector_t(jit_generator_t *host,
-            const post_ops_t &post_ops,
-            const binary_injector::static_params_t &binary_static_params,
-            const eltwise_injector::static_params_t &eltwise_static_params,
+            const Xbyak_aarch64::XReg &eltwise_table,
+            const Xbyak_aarch64::PReg &eltwise_mask, bool is_fwd, bool use_dst,
+            data_type_t d_type,
             const lambda_jit_injectors_t &lambda_jit_injectors);
 
     /*
@@ -122,12 +125,18 @@ public:
      * Thin wrapper for eltwise injector specific function
      */
     void prepare_table(bool gen_table = true);
+    size_t scratch_vmm_count() const;
     void set_lambda_injector(lambda_jit_injectors_t::key_type,
             const lambda_jit_injectors_t::mapped_type &jit_injector);
 
 private:
+    void compute_vector_range_no_spill(
+            const injector_utils::vmm_index_set_t &vmm_idxs,
+            const binary_injector::rhs_arg_dynamic_params_t &rhs_arg_params);
+
     post_ops_t post_ops_;
     jit_generator_t *host_;
+    Xbyak_aarch64::RegPoolManager &reg_pool_;
     // Key is a numerical order of a post-op in attributes.
     std::map<int, jit_uni_eltwise_injector_t<to_vla_sve(isa)>>
             alg_to_eltwise_injector_;

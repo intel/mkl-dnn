@@ -50,14 +50,10 @@ jit_sve_1x1_conv_kernel_t<isa>::jit_sve_1x1_conv_kernel_t(
     : jcp(ajcp), attr_(attr) {
     if (jcp.with_eltwise || jcp.with_binary) {
         using namespace binary_injector;
-        static constexpr bool preserve_gpr = true;
-        static constexpr bool preserve_vmm = false;
-        static constexpr size_t helper_vmm_idx = 31;
         const size_t tail_size = jcp.oc_without_padding % isa_simd_width_;
         static constexpr bool use_exact_tail_scalar_bcast = true;
 
-        const rhs_arg_static_params_t rhs_arg_static_params {helper_vmm_idx,
-                x14, x15, x13, preserve_gpr, preserve_vmm,
+        const rhs_arg_static_params_t rhs_arg_static_params {
                 GET_OFF(post_ops_binary_rhs_arg_vec), GET_OFF(dst_orig),
                 memory_desc_wrapper(dst_md), tail_size, k_load_dim_mask,
                 use_exact_tail_scalar_bcast};
@@ -65,8 +61,8 @@ jit_sve_1x1_conv_kernel_t<isa>::jit_sve_1x1_conv_kernel_t(
                 this->param1, rhs_arg_static_params};
 
         postops_injector_ = utils::make_unique<
-                injector::jit_uni_postops_injector_t<to_vla_sve(isa)>>(
-                this, jcp.post_ops, static_params);
+                injector::jit_uni_postops_injector_t<to_vla_sve(isa)>>(this,
+                reg_pool(), jcp.post_ops, static_params, X_TMP_0, PReg(1));
     }
 }
 
@@ -156,8 +152,8 @@ template <cpu_isa_t isa>
 void jit_sve_1x1_conv_kernel_t<isa>::apply_postops(
         const bool is_out_layout_nxc, const int load_loop_blk, const int ur) {
     injector_utils::vmm_index_set_t vmm_idxs;
+    binary_injector::rhs_arg_dynamic_params_t rhs_arg_params;
     if (jcp.with_binary) {
-        binary_injector::rhs_arg_dynamic_params_t rhs_arg_params;
         const auto mask_tail = jcp.oc_without_padding % jcp.load_block;
         iterate(load_loop_blk, ur, mask_tail,
                 [&](const bool mask_flag, const int i_load, const int i_ur) {
@@ -173,14 +169,25 @@ void jit_sve_1x1_conv_kernel_t<isa>::apply_postops(
 
         ldr(abi_param1, ptr(sp, reg_abi_param1_backup));
 
-        postops_injector_->compute_vector_range(vmm_idxs, rhs_arg_params);
     } else {
         iterate(load_loop_blk, ur,
                 [&](const bool, const int i_load, const int i_ur) {
             vmm_idxs.emplace(vreg_accum_idx(load_loop_blk, i_load, i_ur));
         });
-        postops_injector_->compute_vector_range(vmm_idxs);
     }
+
+    auto live_accumulators = claim_reg_idxs<ZReg>(vmm_idxs);
+    auto live_gprs = claim_regs<XReg>({reg_reduce_pos_flag, reduce_loop_iter,
+            reg_reduce_loop_work, reg_bcast_loop_iter, reg_bcast_data,
+            reg_load_data, reg_output_data, reg_bias_data, aux1_reg_bcast_data,
+            aux_reg_output_data, aux_reg_bcast_data, aux_reg_load_data,
+            reg_load_loop_work, reg_relu_ns, X_TMP_0});
+    auto live_preds = claim_regs<PReg>(
+            {PReg(1), k_load_dim_mask, k_load_dim_tail_mask});
+    if (jcp.with_binary)
+        postops_injector_->compute_vector_range(vmm_idxs, rhs_arg_params);
+    else
+        postops_injector_->compute_vector_range(vmm_idxs);
 }
 
 template <cpu_isa_t isa>

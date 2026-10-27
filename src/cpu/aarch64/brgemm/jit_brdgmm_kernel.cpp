@@ -45,8 +45,6 @@ jit_brdgmm_kernel_base_t::jit_brdgmm_kernel_base_t(const brgemm_desc_t &abrd)
     , simd_w_(cpu_isa_traits<sve_512>::vlen / brg.typesize_C) {
 
     if (brg.with_eltwise || brg.with_binary || brg.with_sum) {
-        static constexpr bool preserve_gpr = true;
-        static constexpr bool preserve_vmm = false;
         static constexpr bool use_exact_tail_scalar_bcast = false;
         const auto dst_md_wrapper = memory_desc_wrapper(brg.dst_md);
         const size_t tail = tail_length();
@@ -56,15 +54,13 @@ jit_brdgmm_kernel_base_t::jit_brdgmm_kernel_base_t(const brgemm_desc_t &abrd)
                         broadcasting_strategy_t::per_oc,
                         broadcasting_strategy_t::no_broadcast};
         const binary_injector::rhs_arg_static_params_t rhs_sp {
-                static_cast<size_t>(vmm_b().getIdx()), x14, x15, x13,
-                preserve_gpr, preserve_vmm,
                 GET_OFF(post_ops_binary_rhs_arg_vec), GET_OFF(data_C_ptr_),
                 dst_md_wrapper, tail, k_mask, use_exact_tail_scalar_bcast};
         const binary_injector::static_params_t bsp {
                 this->param1, enabled_bcast_strategy, rhs_sp};
 
         postops_injector_ = utils::make_unique<po_injector_t>(
-                this, brg.attr->post_ops_, bsp);
+                this, reg_pool(), brg.attr->post_ops_, bsp, X_TMP_0, PReg(1));
 
         with_binary_non_scalar_bcast_
                 = binary_injector::any_binary_postop_rhs_non_scalar_broadcast(
@@ -288,7 +284,8 @@ void jit_brdgmm_kernel_base_t::apply_post_ops(
         }
     }
 
-    const auto sum_injector = [&] {
+    const auto sum_injector
+            = [&](const injector_utils::vmm_index_set_t &vmm_idxs) {
         const float *p_sum_scale = &brg.sum_scale;
         const int32_t *p_sum_zp = &brg.sum_zp;
         const bool p_sum_scale_reg_set = *p_sum_scale != 1.f;
@@ -321,6 +318,7 @@ void jit_brdgmm_kernel_base_t::apply_post_ops(
             const int substep_simd = get_substep_simd(n_i, v_i, has_n_tail);
             if (substep_simd <= 0) continue;
             const auto vmm = accm(m_blocks, n_blocks, m_i, n_i, v_i);
+            if (vmm_idxs.count(vmm.getIdx()) == 0) continue;
             add_imm(X_DEFAULT_ADDR, reg_aux_D, D_offset(m_i, n_i, v_i),
                     X_TMP_0);
             const auto addr = ptr(X_DEFAULT_ADDR);
@@ -342,6 +340,13 @@ void jit_brdgmm_kernel_base_t::apply_post_ops(
                 primitive_kind::sum, sum_injector);
     }
 
+    auto live_accumulators = claim_reg_idxs<ZReg>(vmm_idxs_param);
+    auto live_gprs = claim_regs<XReg>({param1, reg_A, reg_B, reg_aux_batch_addr,
+            reg_BS, reg_BS_loop, reg_aux_M, reg_aux_D, reg_aux_C, reg_aux_A,
+            reg_aux_B, reg_a_offset, reg_aux_N, reg_aux_A_vpad_top,
+            reg_aux_A_vpad_bottom, reg_table_base, X_TMP_0});
+    auto live_preds
+            = claim_regs<PReg>({PReg(1), k_mask, k_tail_mask, kblend_mask});
     postops_injector_->compute_vector_range(vmm_idxs_param, rhs_arg_params);
 }
 

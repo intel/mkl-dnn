@@ -97,18 +97,9 @@ public:
         with_dst_scales_ = !attr_scales.has_default_values(DNNL_ARG_DST);
 
         if (with_postops_) {
-            static constexpr bool preserve_gpr = true;
-            static constexpr bool preserve_vmm = true;
             static constexpr bool use_exact_tail_scalar_bcast = true;
 
-            const eltwise_injector::static_params_t eltwise_params(
-                    true /*save_state*/, reg_elt_inj_table_, elt_inj_opmask_,
-                    elt_inj_p_tmp0_, true /*is_fwd*/, false /*use_dst*/);
-
             const binary_injector::rhs_arg_static_params_t binary_rhs_params {
-                    static_cast<size_t>(vec_po_helper_.getIdx()),
-                    reg_po_binary_rhs_addr_, reg_po_helper_, reg_po_cache_,
-                    preserve_gpr, preserve_vmm,
                     static_cast<size_t>(
                             offsetof(ker_args_t, post_ops_binary_rhs_arg_vec)),
                     static_cast<size_t>(offsetof(ker_args_t, dst)), dst_d_,
@@ -120,8 +111,9 @@ public:
                     binary_rhs_params};
 
             postops_injector_ = utils::make_unique<
-                    injector::jit_uni_postops_injector_t<isa>>(this,
-                    pd_->attr()->post_ops_, binary_params, eltwise_params);
+                    injector::jit_uni_postops_injector_t<isa>>(this, reg_pool(),
+                    pd_->attr()->post_ops_, binary_params, reg_elt_inj_table_,
+                    elt_inj_opmask_);
         }
     }
 
@@ -206,6 +198,15 @@ private:
     }
 
     void compute_postops(size_t offt_elems, bool is_tail) {
+        auto live_gprs = claim_regs<XReg>({reg_po_binary_rhs_addr_,
+                reg_po_helper_, reg_po_cache_, reg_elt_inj_table_,
+                reg_po_binary_dst_addr_, reg_src_, reg_dst_, reg_scale_,
+                reg_shift_, reg_mean_, reg_var_, reg_block_end_, reg_io_tmp1_,
+                reg_src_scales_, reg_dst_scales_, reg_stat_loop_idx_});
+        auto live_vmms = claim_reg_range<TReg>(0, float_one_.getIdx() + 1);
+        auto live_preds = claim_regs<PReg>(
+                {tail_opmask_, elt_inj_opmask_, elt_inj_p_tmp0_});
+
         add_imm(reg_po_binary_dst_addr_, reg_dst_,
                 static_cast<int>(offt_elems * dst_d_.data_type_size()),
                 X_TMP_0);

@@ -46,12 +46,7 @@ template <cpu_isa_t isa = isa_undef>
 struct jit_sve_conv_fwd_kernel_t : public jit_generator_t {
     jit_sve_conv_fwd_kernel_t(
             const jit_conv_conf_t &ajcp, const primitive_attr_t &attr)
-        : jcp(ajcp), attr_(attr), eltwise_injector_(nullptr) {
-        if (jcp.with_eltwise)
-            eltwise_injector_ = utils::make_unique<
-                    jit_uni_eltwise_injector_t<to_vla_sve(isa)>>(
-                    this, jcp.eltwise);
-    }
+        : jcp(ajcp), attr_(attr), eltwise_injector_(nullptr) {}
 
     ~jit_sve_conv_fwd_kernel_t() override = default;
 

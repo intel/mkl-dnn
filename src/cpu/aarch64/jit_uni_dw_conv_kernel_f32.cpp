@@ -339,6 +339,7 @@ template <cpu_isa_t isa>
 void jit_uni_dw_conv_fwd_kernel_f32_t<isa>::apply_activation(
         int ur_ch_blocks, int ur_w) {
     if (this->jcp.with_eltwise) {
+        eltwise_injector_->load_table_addr();
         if (isa == asimd && jcp.src_dt == data_type::f16) {
             injector_utils::vmm_index_set_t acc_idxs;
             for (int ch = 0; ch < ur_ch_blocks; ch++) {
@@ -578,6 +579,28 @@ void jit_uni_dw_conv_fwd_kernel_f32_t<isa>::ow_loop(int ur_ch_blocks) {
 template <cpu_isa_t isa>
 void jit_uni_dw_conv_fwd_kernel_f32_t<isa>::generate() {
     const int simd_w_ = cpu_isa_traits<isa>::vlen / sizeof(float);
+
+    // Keep the convolution state that is live across eltwise injection out of
+    // the scratch pool. Filter-loop temporaries are dead at that point and are
+    // intentionally left available to the injector.
+    auto live_gprs = claim_regs<XReg>({reg_input, reg_kernel, reg_ch_blocks,
+            reg_output, reg_bias, reg_kh, reg_oi, aux_reg_ch_blocks,
+            reg_input_buffer_ptr, reg_bias_stack});
+
+    // The largest accumulator set is used by the full-width, full-channel
+    // block. Tail paths use a subset of this range.
+    const int max_accumulators = jcp.ur_w * jcp.nb_ch_blocking
+            * ((isa == asimd && jcp.src_dt == data_type::f16) ? 2 : 1);
+    auto live_accumulators = claim_reg_range<TReg>(4, max_accumulators);
+
+    auto eltwise_table = alloc_reg<XReg>();
+    auto eltwise_mask = alloc_reg<PReg>();
+    if (jcp.with_eltwise) {
+        eltwise_injector_ = utils::make_unique<
+                jit_uni_eltwise_injector_t<to_vla_sve(isa)>>(this, reg_pool(),
+                jcp.eltwise, eltwise_table.get(), eltwise_mask.get());
+    }
+
     this->preamble();
     //TO DO : renaming predicate register (P_ALL_ONE)
     if (isa != asimd && simd_w_ != cpu_sveLen / sizeof(float))
@@ -621,6 +644,7 @@ void jit_uni_dw_conv_fwd_kernel_f32_t<isa>::generate() {
 
     this->postamble();
     if (jcp.with_eltwise) { eltwise_injector_->prepare_table(); }
+    eltwise_injector_.reset();
 }
 
 template struct jit_uni_dw_conv_fwd_kernel_f32_t<sve_512>;

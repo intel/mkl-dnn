@@ -40,12 +40,7 @@ struct jit_uni_dw_conv_fwd_kernel_f32_t : public jit_generator_t {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_dw_conv_fwd_kernel_f32_t)
 
     jit_uni_dw_conv_fwd_kernel_f32_t(const jit_conv_conf_t &ajcp)
-        : jcp(ajcp), eltwise_injector_(nullptr) {
-        if (jcp.with_eltwise)
-            eltwise_injector_ = utils::make_unique<
-                    jit_uni_eltwise_injector_t<to_vla_sve(isa)>>(
-                    this, jcp.eltwise);
-    }
+        : jcp(ajcp), eltwise_injector_(nullptr) {}
 
     ~jit_uni_dw_conv_fwd_kernel_f32_t() override = default;
 
@@ -53,6 +48,7 @@ struct jit_uni_dw_conv_fwd_kernel_f32_t : public jit_generator_t {
 
 private:
     using reg64_t = const XReg;
+    using TReg = typename cpu_isa_traits<to_vla_sve(isa)>::TReg;
     const int vlen = cpu_isa_traits<isa>::vlen;
 
     // dw convolution

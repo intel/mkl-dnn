@@ -273,6 +273,16 @@ void jit_generator_t::uni_ldr(const ZReg &dst, const XReg &addr) {
     ldr(dst, ptr(addr));
 }
 
+void jit_generator_t::uni_load_vmm_stack(
+        const VReg &dst, const XReg &base, size_t vmm_slot) {
+    ldr(QReg(dst.getIdx()), ptr(base, static_cast<uint32_t>(vmm_slot * 16)));
+}
+
+void jit_generator_t::uni_load_vmm_stack(
+        const ZReg &dst, const XReg &base, size_t vmm_slot) {
+    ldr(dst, ptr(base, vmm_slot, MUL_VL));
+}
+
 void jit_generator_t::uni_mov(const VReg &d, const VReg &s) {
     if (d.getIdx() != s.getIdx()) { mov(d.b16, s.b16); }
 }
@@ -317,6 +327,32 @@ void jit_generator_t::uni_str(const VReg &src, const XReg &addr) {
 
 void jit_generator_t::uni_str(const ZReg &src, const XReg &addr) {
     str(src, ptr(addr));
+}
+
+void jit_generator_t::uni_store_vmm_stack(
+        const VReg &src, const XReg &base, size_t vmm_slot) {
+    str(QReg(src.getIdx()), ptr(base, static_cast<uint32_t>(vmm_slot * 16)));
+}
+
+void jit_generator_t::uni_store_vmm_stack(
+        const ZReg &src, const XReg &base, size_t vmm_slot) {
+    str(src, ptr(base, vmm_slot, MUL_VL));
+}
+
+void jit_generator_t::uni_reserve_vmm_stack(size_t count, const VReg &) {
+    sub(sp, sp, count * 16);
+}
+
+void jit_generator_t::uni_reserve_vmm_stack(size_t count, const ZReg &) {
+    addvl(sp, sp, -static_cast<int>(count));
+}
+
+void jit_generator_t::uni_release_vmm_stack(size_t count, const VReg &) {
+    add(sp, sp, count * 16);
+}
+
+void jit_generator_t::uni_release_vmm_stack(size_t count, const ZReg &) {
+    addvl(sp, sp, static_cast<int>(count));
 }
 
 void jit_generator_t::jit_breakpoint() {

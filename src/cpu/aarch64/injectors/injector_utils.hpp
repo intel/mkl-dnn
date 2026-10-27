@@ -18,6 +18,7 @@
 #ifndef CPU_AARCH64_INJECTORS_INJECTOR_UTILS_HPP
 #define CPU_AARCH64_INJECTORS_INJECTOR_UTILS_HPP
 
+#include <algorithm>
 #include <cstddef>
 #include <set>
 #include <vector>
@@ -32,6 +33,78 @@ namespace injector_utils {
 
 using vmm_index_set_t = typename std::set<size_t>;
 using vmm_index_set_iterator_t = typename std::set<size_t>::iterator;
+
+// Run an injector which needs scratch_count vector registers. The caller must
+// claim every active result in reg_pool before entering this helper.
+//
+// If scratch is short, exchange equal-sized result subsets through the stack.
+// Other live vectors may be post-op inputs and cannot be spill candidates.
+template <cpu_isa_t isa, typename Compute>
+void compute_vector_range_with_spill(jit_generator_t *host,
+        Xbyak_aarch64::RegPoolManager &reg_pool,
+        const vmm_index_set_t &vmm_idxs, size_t scratch_count,
+        const Compute &compute) {
+    using TReg = typename cpu_isa_traits<isa>::TReg;
+
+    if (vmm_idxs.empty()) return;
+    assert(std::all_of(vmm_idxs.begin(), vmm_idxs.end(), [&](size_t idx) {
+        return reg_pool.vec_idx_in_use(static_cast<int>(idx));
+    }));
+
+    const size_t free_count = reg_pool.get_all_free_vec().size()
+            + reg_pool.get_all_preserved_vec().size();
+
+    // Happy path: enough free registers for injector scratch.
+    if (free_count >= scratch_count) {
+        compute(vmm_idxs);
+        return;
+    }
+
+    const size_t spill_count = scratch_count - free_count;
+
+    // Each spilled result needs a resident result to exchange with.
+    assert(spill_count <= vmm_idxs.size() / 2);
+
+    const auto spill = [&](const vmm_index_set_t &idxs) {
+        size_t slot = 0;
+        for (const auto idx : idxs) {
+            const TReg reg(static_cast<int>(idx));
+            host->uni_store_vmm_stack(reg, host->sp, slot++);
+            reg_pool.free(reg);
+        }
+    };
+    const auto restore = [&](const vmm_index_set_t &idxs) {
+        size_t slot = 0;
+        for (const auto idx : idxs) {
+            const TReg reg(static_cast<int>(idx));
+            reg_pool.alloc<TReg>(reg.getIdx());
+            host->uni_load_vmm_stack(reg, host->sp, slot++);
+        }
+    };
+
+    vmm_index_set_t spilled_idxs;
+    vmm_index_set_t resident_idxs(vmm_idxs);
+    auto spill_it = resident_idxs.begin();
+    for (size_t i = 0; i < spill_count; ++i) {
+        spilled_idxs.insert(*spill_it);
+        spill_it = resident_idxs.erase(spill_it);
+    }
+
+    host->uni_reserve_vmm_stack<TReg>(spill_count);
+    spill(spilled_idxs);
+    compute(resident_idxs);
+
+    vmm_index_set_t swap_idxs;
+    auto swap_it = resident_idxs.begin();
+    for (size_t i = 0; i < spill_count; ++i, ++swap_it)
+        swap_idxs.insert(*swap_it);
+
+    restore(spilled_idxs);
+    spill(swap_idxs);
+    compute(spilled_idxs);
+    restore(swap_idxs);
+    host->uni_release_vmm_stack<TReg>(spill_count);
+}
 
 enum class layout_t { ncsp, c_blocked, nspc, cspn, unsupported };
 

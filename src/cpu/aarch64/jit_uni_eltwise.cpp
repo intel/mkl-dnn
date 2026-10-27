@@ -88,20 +88,23 @@ template <cpu_isa_t isa>
 struct jit_uni_kernel_t : public jit_uni_eltwise_kernel_t {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_uni_kernel)
 
-    jit_uni_kernel_t(const eltwise_pd_t *pd) : jit_uni_eltwise_kernel_t(pd) {
-        const auto &desc = *pd_->desc();
-        // there's no auxiliary vregs on fwd path
-        const bool is_fwd = pd_->is_fwd();
-        const bool save_state = is_fwd ? false : true;
-        eltwise_injector_.reset(new jit_uni_eltwise_injector_t<isa>(this,
-                desc.alg_kind, desc.alpha, desc.beta, 1.f, save_state,
-                reg_injector_table, injector_mask, injector_p_tmp0, is_fwd,
-                pd_->use_dst(), true, true,
-                can_compute_as_f16() ? data_type::f16 : data_type::f32));
-    }
+    jit_uni_kernel_t(const eltwise_pd_t *pd) : jit_uni_eltwise_kernel_t(pd) {}
 
     void generate() override {
+        auto reg_src = alloc_reg<XReg>();
+        auto reg_dst = alloc_reg<XReg>();
+        auto reg_injector_table = alloc_reg<XReg>();
+        auto reg_diff_dst = alloc_reg<XReg>();
+        auto reg_work_amount = alloc_reg<XReg>();
+        auto injector_mask = alloc_reg<PReg>();
+
+        const auto &desc = *pd_->desc();
         const bool is_fwd = pd_->is_fwd();
+        jit_uni_eltwise_injector_t<isa> eltwise_injector(this, reg_pool(),
+                desc.alg_kind, desc.alpha, desc.beta, 1.f, reg_injector_table,
+                injector_mask, is_fwd, pd_->use_dst(),
+                can_compute_as_f16() ? data_type::f16 : data_type::f32);
+
         // Note: load type may not the same as compute type
         const auto simd_elems_per_load = simd_elems(data_type(), isa);
 
@@ -117,59 +120,55 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel_t {
         }
         add_imm(X_TMP_0, param, GET_OFF(work_amount), X_TMP_1);
         ldr(reg_work_amount, ptr(X_TMP_0));
-        eltwise_injector_->load_table_addr();
+        eltwise_injector.load_table_addr();
         Label vectorized_unrolled_loop_start, vectorized_loop_check,
                 vectorized_loop_start, remainder_loop_start, remainder_loop_end;
         static constexpr int unroll_factor = 4;
         const auto unrolled_simd_elems = unroll_factor * simd_elems_per_load;
         const auto unrolled_simd_bytes = unroll_factor * simd_bytes(isa);
-        TReg src_vmm[unroll_factor] = {
-                vmm_src, vmm_src_unroll_0, vmm_src_unroll_1, vmm_src_unroll_2};
-        TReg aux_vmm[unroll_factor]
-                = {tmp0, tmp_unroll_0, tmp_unroll_1, tmp_unroll_2};
         if (is_fwd) {
+            auto src_vmms = alloc_regs<TReg, unroll_factor>();
+
             cmp(reg_work_amount, unrolled_simd_elems);
             b(LT, vectorized_loop_check);
             L(vectorized_unrolled_loop_start);
             injector_utils::vmm_index_set_t vmm_idxs;
             // Unrolled load
-            for (int i = 0; i < unroll_factor; ++i) {
-                auto src_s = TRegS(src_vmm[i].getIdx());
-                load_vector(src_s, reg_src, i);
-            }
+            for (int i = 0; i < unroll_factor; ++i)
+                load_vector(src_vmms[i].get().s, reg_src, i);
 
             if (can_compute_as_f16()) {
                 for (int i = 0; i < unroll_factor; ++i)
-                    vmm_idxs.emplace(src_vmm[i].getIdx());
-                eltwise_injector_->compute_vector_range(vmm_idxs);
+                    vmm_idxs.emplace(src_vmms[i].getIdx());
+                eltwise_injector.compute_vector_range(vmm_idxs);
             } else if (is_bf16()) {
+                auto aux_vmms = alloc_regs<TReg, unroll_factor>();
                 for (int i = 0; i < unroll_factor; ++i) {
-                    unpack_bf16(src_vmm[i], aux_vmm[i]);
-                    vmm_idxs.emplace(src_vmm[i].getIdx());
-                    vmm_idxs.emplace(aux_vmm[i].getIdx());
+                    unpack_bf16(src_vmms[i], aux_vmms[i]);
+                    vmm_idxs.emplace(src_vmms[i].getIdx());
+                    vmm_idxs.emplace(aux_vmms[i].getIdx());
                 }
-                eltwise_injector_->compute_vector_range(vmm_idxs);
+                eltwise_injector.compute_vector_range(vmm_idxs);
                 for (int i = 0; i < unroll_factor; ++i)
-                    pack_bf16(src_vmm[i], aux_vmm[i]);
+                    pack_bf16(src_vmms[i], aux_vmms[i]);
             } else if (is_f16()) {
+                auto aux_vmms = alloc_regs<TReg, unroll_factor>();
                 for (int i = 0; i < unroll_factor; ++i) {
-                    unpack_fp16(src_vmm[i], aux_vmm[i]);
-                    vmm_idxs.emplace(src_vmm[i].getIdx());
-                    vmm_idxs.emplace(aux_vmm[i].getIdx());
+                    unpack_fp16(src_vmms[i], aux_vmms[i]);
+                    vmm_idxs.emplace(src_vmms[i].getIdx());
+                    vmm_idxs.emplace(aux_vmms[i].getIdx());
                 }
-                eltwise_injector_->compute_vector_range(vmm_idxs);
+                eltwise_injector.compute_vector_range(vmm_idxs);
                 for (int i = 0; i < unroll_factor; ++i)
-                    pack_fp16(src_vmm[i], aux_vmm[i]);
+                    pack_fp16(src_vmms[i], aux_vmms[i]);
             } else { // F32
                 for (int i = 0; i < unroll_factor; ++i)
-                    vmm_idxs.emplace(src_vmm[i].getIdx());
-                eltwise_injector_->compute_vector_range(vmm_idxs);
+                    vmm_idxs.emplace(src_vmms[i].getIdx());
+                eltwise_injector.compute_vector_range(vmm_idxs);
             }
             // Unrolled store
-            for (int i = 0; i < unroll_factor; ++i) {
-                auto src_s = TRegS(src_vmm[i].getIdx());
-                store_vector(reg_dst, src_s, i);
-            }
+            for (int i = 0; i < unroll_factor; ++i)
+                store_vector(reg_dst, src_vmms[i].get().s, i);
 
             add_imm(reg_src, reg_src, unrolled_simd_bytes, X_TMP_0);
             add_imm(reg_dst, reg_dst, unrolled_simd_bytes, X_TMP_0);
@@ -194,18 +193,24 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel_t {
         // can be relevantly easy controlled, this will cost much from code
         // perspective and will complicate the compute logic significantly.
 
-        load_vector(vmm_src.s, reg_src);
+        auto vmm_src = alloc_reg<TReg>();
+        VReg4S xmm_src {vmm_src.getIdx()};
+        VReg8H v_bf16 {vmm_src.getIdx()};
+        VReg8H v_f16 {vmm_src.getIdx()};
+
+        load_vector(vmm_src.get().s, reg_src);
         if (can_compute_as_f16()) {
             // For F16-computable algorithms, we keep the data in 16-bit format
             // throughout the computation, avoiding the need for conversion to/from F32.
-            eltwise_injector_->compute_vector(vmm_src.getIdx());
+            eltwise_injector.compute_vector(vmm_src.getIdx());
         } else if (is_bf16()) {
             // Convert BF16 input to F32, apply eltwise op, then convert back to BF16:
             // - unpack BF16 to F32 by zero-extending
             // - compute eltwise alg in F32
             // - down convert back to BF16 using bfcvt, and pack result
+            auto tmp0 = alloc_reg<TReg>();
             unpack_bf16(vmm_src, tmp0);
-            eltwise_injector_->compute_vector_range(
+            eltwise_injector.compute_vector_range(
                     {vmm_src.getIdx(), tmp0.getIdx()});
             pack_bf16(vmm_src, tmp0);
         } else if (is_f16()) {
@@ -213,20 +218,21 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel_t {
             // - upcast F16 to F32 using fcvt
             // - compute eltwise alg in F32
             // - downcast F32 back to F16 using fcvt, and pack result
+            auto tmp0 = alloc_reg<TReg>();
             unpack_fp16(vmm_src, tmp0);
-            eltwise_injector_->compute_vector_range(
+            eltwise_injector.compute_vector_range(
                     {vmm_src.getIdx(), tmp0.getIdx()});
             pack_fp16(vmm_src, tmp0);
         } else { // F32
-            eltwise_injector_->compute_vector(vmm_src.getIdx());
+            eltwise_injector.compute_vector(vmm_src.getIdx());
             if (!is_fwd) {
-                load_vector(vmm_diff_dst, reg_diff_dst);
-                fmul(TRegS(vmm_src.getIdx()), TRegS(vmm_src.getIdx()),
-                        vmm_diff_dst);
+                auto vmm_diff_dst = alloc_reg<TReg>();
+                load_vector(vmm_diff_dst.get().s, reg_diff_dst);
+                fmul(vmm_src.get().s, vmm_src.get().s, vmm_diff_dst.get().s);
             }
         }
 
-        store_vector(reg_dst, vmm_src.s);
+        store_vector(reg_dst, vmm_src.get().s);
         // Update pointers for the next iteration
         // Note: we use X_TMP_0 as a temporary register to avoid conflicts with
         // other registers.
@@ -247,23 +253,27 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel_t {
 
         if (can_compute_as_f16()) {
             ld1(v_f16[0], ptr(reg_src));
-            eltwise_injector_->compute_vector(vmm_src.getIdx());
+            eltwise_injector.compute_vector(vmm_src.getIdx());
         } else if (is_bf16()) {
             ld1(v_bf16[0], ptr(reg_src));
+            auto tmp0 = alloc_reg<TReg>();
             unpack_bf16(vmm_src, tmp0);
-            eltwise_injector_->compute_vector(vmm_src.getIdx());
+            eltwise_injector.compute_vector(vmm_src.getIdx());
             pack_bf16(vmm_src, tmp0);
         } else if (is_f16()) {
             ld1(v_f16[0], ptr(reg_src));
+            auto tmp0 = alloc_reg<TReg>();
             unpack_fp16(vmm_src, tmp0);
-            eltwise_injector_->compute_vector(vmm_src.getIdx());
+            eltwise_injector.compute_vector(vmm_src.getIdx());
             pack_fp16(vmm_src, tmp0);
         } else {
             ld1(xmm_src[0], ptr(reg_src));
-            eltwise_injector_->compute_vector(xmm_src.getIdx());
+            eltwise_injector.compute_vector(xmm_src.getIdx());
             if (!is_fwd) {
-                ld1(xmm_diff_dst[0], ptr(reg_diff_dst));
-                fmul(vmm_src.s, vmm_src.s, vmm_diff_dst);
+                auto vmm_diff_dst = alloc_reg<TReg>();
+                ld1(VReg4S(vmm_diff_dst.getIdx())[0], ptr(reg_diff_dst));
+                fmul(TRegS(vmm_src.getIdx()), TRegS(vmm_src.getIdx()),
+                        TRegS(vmm_diff_dst.getIdx()));
             }
         }
 
@@ -286,42 +296,12 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel_t {
 
         postamble();
 
-        eltwise_injector_->prepare_table();
+        eltwise_injector.prepare_table();
     }
 
 private:
     using TReg = typename cpu_isa_traits<isa>::TReg;
     using TRegS = typename cpu_isa_traits<isa>::TRegS;
-
-    XReg reg_src = x11;
-    XReg reg_dst = x8;
-    XReg reg_injector_table = x9;
-    XReg reg_diff_dst = x10;
-    XReg reg_work_amount = x6;
-    XReg imm_addr64 = x3;
-    PReg injector_mask = p1;
-    PReg injector_p_tmp0 = p4;
-    PReg injector_p_all = p7;
-
-    VReg4S xmm_src {1};
-    VReg8H v_bf16 {1};
-    VReg8H v_f16 {1};
-    VReg4S xmm_diff_dst {2};
-    TRegS vmm_diff_dst {2};
-    TReg vmm_src {1};
-    TReg tmp0 {2};
-    // Use explicit vector registers for src/tmp values because they will are all live at the same time
-    // Avoid register 7 since it's already in used by tmp1
-    TReg vmm_src_unroll_0 {3};
-    TReg tmp_unroll_0 {4};
-    TReg vmm_src_unroll_1 {5};
-    TReg tmp_unroll_1 {6};
-    TReg vmm_src_unroll_2 {8};
-    TReg tmp_unroll_2 {9};
-    TReg tmp1 {7};
-    std::unique_ptr<jit_uni_eltwise_injector_t<isa>> eltwise_injector_;
-
-    PReg p_tmp0 {4}; /* Index is temporal. */
 
     /**
      * @brief Load a vector from memory into a SIMD/SVE register.
@@ -440,9 +420,10 @@ inline void jit_uni_kernel_t<cpu_isa_t::sve>::store_vector(
 template <>
 inline void jit_uni_kernel_t<cpu_isa_t::asimd>::unpack_bf16(
         const TReg &v0, const TReg &v1) {
-    movi(tmp1.s, 0x0);
-    zip2(VReg8H(v1.getIdx()), VReg8H(tmp1.getIdx()), VReg8H(v0.getIdx()));
-    zip1(VReg8H(v0.getIdx()), VReg8H(tmp1.getIdx()), VReg8H(v0.getIdx()));
+    auto tmp = alloc_reg<TReg>();
+    movi(tmp.get().s, 0x0);
+    zip2(VReg8H(v1.getIdx()), VReg8H(tmp.getIdx()), VReg8H(v0.getIdx()));
+    zip1(VReg8H(v0.getIdx()), VReg8H(tmp.getIdx()), VReg8H(v0.getIdx()));
 }
 
 template <>

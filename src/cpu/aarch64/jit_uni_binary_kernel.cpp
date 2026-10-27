@@ -90,36 +90,34 @@ jit_uni_binary_kernel_t<isa>::jit_uni_binary_kernel_t(
     safe_ptr_assign(io_,
             new io::jit_io_helper_t<to_vla_sve(isa)>(
                     this, io_sat_conf_, io_tail_conf_, reg_tmp_));
-
-    if (conf_.with_postops) init_post_ops_injector();
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_kernel_t<isa>::init_post_ops_injector() {
+void jit_uni_binary_kernel_t<isa>::init_post_ops_injector(
+        const XReg &eltwise_table, const PReg &eltwise_mask) {
     const memory_desc_wrapper dst_d(pd_->dst_md(0));
     const auto &po = pd_->attr()->post_ops_;
 
-    const eltwise_injector::static_params_t esp(false /*save_state*/,
-            reg_elt_inj_table_, elt_inj_opmask_, elt_inj_p_tmp0_);
-    const binary_injector::rhs_arg_static_params_t rhs_arg_bsp {10, reg_tmp_,
-            reg_elt_inj_table_, x13, true /*preserve gpr*/,
-            true /*preserve vmm*/, PARAM_OFF(post_ops_binary_rhs_arg_vec),
-            PARAM_OFF(dst_orig), dst_d, tail_size_, tail_opmask_,
-            false /*use_exact_tail_scalar_bcast*/};
+    const binary_injector::rhs_arg_static_params_t rhs_arg_bsp {
+            PARAM_OFF(post_ops_binary_rhs_arg_vec), PARAM_OFF(dst_orig), dst_d,
+            tail_size_, tail_opmask_, false /*use_exact_tail_scalar_bcast*/};
     const binary_injector::static_params_t bsp(this->param1,
             get_supported_postops_bcast_strategies(), rhs_arg_bsp);
 
     postops_injector_ = utils::make_unique<
-            injector::jit_uni_postops_injector_t<to_vla_sve(inject_isa)>>(
-            this, po, bsp, esp);
+            injector::jit_uni_postops_injector_t<to_vla_sve(inject_isa)>>(this,
+            reg_pool(), po, bsp, eltwise_table, eltwise_mask, true /*is_fwd*/,
+            false /*use_dst*/, data_type::f32);
 }
 
 template <cpu_isa_t isa>
 void jit_uni_binary_kernel_t<isa>::apply_postops(int unroll, bool tail) {
-    const auto sum_injector = [&]() {
+    const auto sum_injector
+            = [&](const injector_utils::vmm_index_set_t &vmm_idxs) {
         for (int i = 0; i < unroll; i++) {
             const int offt = simd_w_ * i;
             const Vmm vreg_tmp_src0 = Vmm(i + vmm_start_idx_);
+            if (vmm_idxs.count(vreg_tmp_src0.getIdx()) == 0) continue;
             const Vmm vreg_tmp = conf_.is_src_different_layouts
                     ? vmm_gathered_src_
                     : Vmm(unroll + i + vmm_start_idx_);
@@ -139,9 +137,6 @@ void jit_uni_binary_kernel_t<isa>::apply_postops(int unroll, bool tail) {
     if (conf_.with_binary) {
         binary_injector::rhs_arg_dynamic_params_t rhs_arg_params;
         const XReg &reg_offt_dst = conf_.is_i8 ? reg_offt_dst_ : reg_offt_src0_;
-
-        const injector_utils::register_preserve_guard_t<to_vla_sve(isa)>
-                register_guard {this, {reg_tmp1_}};
 
         mov(reg_tmp1_, reg_dst_);
         add(reg_tmp1_, reg_tmp1_, reg_offt_dst);
@@ -658,6 +653,24 @@ void jit_uni_binary_kernel_t<isa>::forward_over_outer_dims() {
 
 template <cpu_isa_t isa>
 void jit_uni_binary_kernel_t<isa>::generate() {
+    auto live_gprs = claim_regs<XReg>({reg_offt_src1_, reg_off_rhs_postops_,
+            reg_scales_src0_, reg_scales_src1_, reg_tmp1_, reg_src0_, reg_src1_,
+            reg_dst_, reg_offt_src0_, reg_outer_dims_range_,
+            reg_reverse_spat_offt_, reg_tmp_, reg_src1_stride_range_});
+    auto live_vmms = claim_regs<Vmm>({vmm_tail_vmask_, vreg_sum_scale_,
+            vreg_zero_, vreg_one_, vreg_saturation_ubound_, vreg_bcast_src1_,
+            vreg_scales_src0_, vreg_scales_src1_, vreg_saturation_lbound_,
+            vmm_indices_});
+    auto live_tail_opmask = claim_reg(tail_opmask_);
+
+    // All result vectors are live across every post-op in the chain.
+    auto live_results = claim_reg_range<Vmm>(vmm_start_idx_, unroll_regs_);
+
+    auto eltwise_table = alloc_reg<XReg>();
+    auto eltwise_mask = alloc_reg<PReg>();
+    if (conf_.with_postops)
+        init_post_ops_injector(eltwise_table.get(), eltwise_mask.get());
+
     preamble();
 
     if (isa == sve_256)
@@ -680,6 +693,7 @@ void jit_uni_binary_kernel_t<isa>::generate() {
 
     if ((conf_.with_eltwise || conf_.is_i8) && postops_injector_)
         postops_injector_->prepare_table();
+    postops_injector_.reset();
 }
 
 #undef PARAM_OFF
