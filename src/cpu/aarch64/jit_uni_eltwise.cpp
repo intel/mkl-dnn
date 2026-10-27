@@ -335,7 +335,7 @@ private:
      * @param dst  Destination SIMD/SVE register to receive the data.
      * @param addr Source memory address (base register) with aligned vector data.
      */
-    void load_vector(TRegS &dst, const XReg addr, int vl_offset = 0);
+    void load_vector(const TRegS &dst, const XReg addr, int vl_offset = 0);
 
     /**
      * @brief Store a SIMD/SVE vector register to memory.
@@ -353,14 +353,14 @@ private:
 
     /**
      * @brief Unpack two BFloat16 values from a single register into two target registers.
-    *
-    * ASIMD (NEON) version: unpack in low/high half order.
-    * SVE version: unpack in even/odd element order.
-    *
-    * @param v0 Destination register for first (low/even) half.
-    * @param v1 Destination register for second (high/odd) half.
-    */
-    void unpack_bf16(TReg &v0, TReg &v1);
+     *
+     * ASIMD (NEON) version: unpack in low/high half order.
+     * SVE version: unpack in even/odd element order.
+     *
+     * @param v0 Destination register for first (low/even) half.
+     * @param v1 Destination register for second (high/odd) half.
+     */
+    void unpack_bf16(const TReg &v0, const TReg &v1);
 
     /**
      * @brief Pack two BFloat16 values from two registers into a single register.
@@ -371,7 +371,7 @@ private:
      * @param v0 Source register providing first (low/even) half.
      * @param v1 Source register providing second (high/odd) half.
      */
-    void pack_bf16(TReg &v0, TReg &v1);
+    void pack_bf16(const TReg &v0, const TReg &v1);
 
     /**
      * @brief Unpack two IEEE‑754 FP16 values from a single register into two target registers.
@@ -382,7 +382,7 @@ private:
      * @param v0 Destination register for first (low/even) half.
      * @param v1 Destination register for second (high/odd) half.
      */
-    void unpack_fp16(TReg &v0, TReg &v1);
+    void unpack_fp16(const TReg &v0, const TReg &v1);
 
     /**
      * @brief Pack two IEEE‑754 FP16 values from two registers into a single register.
@@ -393,13 +393,13 @@ private:
      * @param v0 Source register providing first (low/even) half.
      * @param v1 Source register providing second (high/odd) half.
      */
-    void pack_fp16(TReg &v0, TReg &v1);
+    void pack_fp16(const TReg &v0, const TReg &v1);
 };
 
 // Template specializations for load_vector
 template <>
 inline void jit_uni_kernel_t<cpu_isa_t::asimd>::load_vector(
-        TRegS &dst, const XReg addr, int vl_offset) {
+        const TRegS &dst, const XReg addr, int vl_offset) {
     if (vl_offset == 0) {
         ld1(dst, ptr(addr));
     } else {
@@ -412,7 +412,7 @@ inline void jit_uni_kernel_t<cpu_isa_t::asimd>::load_vector(
 
 template <>
 inline void jit_uni_kernel_t<cpu_isa_t::sve>::load_vector(
-        TRegS &dst, const XReg addr, int vl_offset) {
+        const TRegS &dst, const XReg addr, int vl_offset) {
     ld1w(dst, P_ALL_ONE / T_z, ptr(addr, vl_offset, MUL_VL));
 }
 
@@ -439,14 +439,15 @@ inline void jit_uni_kernel_t<cpu_isa_t::sve>::store_vector(
 // Template specializations for unpack_bf16
 template <>
 inline void jit_uni_kernel_t<cpu_isa_t::asimd>::unpack_bf16(
-        TReg &v0, TReg &v1) {
+        const TReg &v0, const TReg &v1) {
     movi(tmp1.s, 0x0);
     zip2(VReg8H(v1.getIdx()), VReg8H(tmp1.getIdx()), VReg8H(v0.getIdx()));
     zip1(VReg8H(v0.getIdx()), VReg8H(tmp1.getIdx()), VReg8H(v0.getIdx()));
 }
 
 template <>
-inline void jit_uni_kernel_t<cpu_isa_t::sve>::unpack_bf16(TReg &v0, TReg &v1) {
+inline void jit_uni_kernel_t<cpu_isa_t::sve>::unpack_bf16(
+        const TReg &v0, const TReg &v1) {
     mov(v1.s, P_ALL_ONE, v0.s);
     lsl(v0.s, v0.s, 16);
     and_(v1.s, 0xFFFF0000);
@@ -454,12 +455,14 @@ inline void jit_uni_kernel_t<cpu_isa_t::sve>::unpack_bf16(TReg &v0, TReg &v1) {
 
 // Template specializations for pack_bf16
 template <>
-inline void jit_uni_kernel_t<cpu_isa_t::asimd>::pack_bf16(TReg &v0, TReg &v1) {
+inline void jit_uni_kernel_t<cpu_isa_t::asimd>::pack_bf16(
+        const TReg &v0, const TReg &v1) {
     uzp2(v0.h, v0.h, v1.h);
 }
 
 template <>
-inline void jit_uni_kernel_t<cpu_isa_t::sve>::pack_bf16(TReg &v0, TReg &v1) {
+inline void jit_uni_kernel_t<cpu_isa_t::sve>::pack_bf16(
+        const TReg &v0, const TReg &v1) {
     bfcvt(v0.h, P_ALL_ONE, v0.s);
     bfcvtnt(v0.h, P_ALL_ONE, v1.s);
 }
@@ -467,14 +470,15 @@ inline void jit_uni_kernel_t<cpu_isa_t::sve>::pack_bf16(TReg &v0, TReg &v1) {
 // Template specializations for unpack_fp16
 template <>
 inline void jit_uni_kernel_t<cpu_isa_t::asimd>::unpack_fp16(
-        TReg &v0, TReg &v1) {
+        const TReg &v0, const TReg &v1) {
     mov(VReg16B(v1.getIdx()), VReg16B(v0.getIdx()));
     fcvtl(v0.s, VReg4H(v0.getIdx())); // low 4 float16 to float32
     fcvtl2(v1.s, VReg8H(v1.getIdx())); // high 4 float16 to float32
 }
 
 template <>
-inline void jit_uni_kernel_t<cpu_isa_t::sve>::unpack_fp16(TReg &v0, TReg &v1) {
+inline void jit_uni_kernel_t<cpu_isa_t::sve>::unpack_fp16(
+        const TReg &v0, const TReg &v1) {
     mov(v1.s, P_ALL_ONE, v0.s);
     fcvt(v0.s, P_ALL_ONE, v0.h);
     lsr(v1.s, v1.s, 16);
@@ -483,13 +487,15 @@ inline void jit_uni_kernel_t<cpu_isa_t::sve>::unpack_fp16(TReg &v0, TReg &v1) {
 
 // Template specializations for pack_fp16
 template <>
-inline void jit_uni_kernel_t<cpu_isa_t::asimd>::pack_fp16(TReg &v0, TReg &v1) {
+inline void jit_uni_kernel_t<cpu_isa_t::asimd>::pack_fp16(
+        const TReg &v0, const TReg &v1) {
     fcvtn(VReg4H(v0.getIdx()), v0.s);
     fcvtn2(VReg8H(v0.getIdx()), v1.s);
 }
 
 template <>
-inline void jit_uni_kernel_t<cpu_isa_t::sve>::pack_fp16(TReg &v0, TReg &v1) {
+inline void jit_uni_kernel_t<cpu_isa_t::sve>::pack_fp16(
+        const TReg &v0, const TReg &v1) {
     fcvt(v0.h, P_ALL_ONE, v0.s);
     // Next three lines could be replaced by fcvtnt(vmm_src.h, P_ALL_ONE, tmp0.s)
     // Not currently implemented in xbyak

@@ -216,46 +216,55 @@ private:
     void exp_compute_vector_fwd(const TRegS &vmm_src);
     void exp_compute_vector_fwd(
             const TRegS &vmm_src, float min_input, float max_input);
-    void relu_compute_vector_fwd(const TRegS &vmm_src);
+    void relu_compute_vector_fwd(const TRegS &vmm_src, const TRegS &alpha);
     void relu_zero_ns_compute_vector_fwd(const TReg &vmm_src);
-    void elu_compute_vector_fwd(const TRegS &vmm_src);
+    void elu_compute_vector_fwd(const TRegS &vmm_src, const TRegS &alpha);
     void tanh_compute_vector_fwd(const TRegS &vmm_src);
     void tanh_polynomial_approx_compute_vector_fwd(const TRegS &vmm_src);
     void square_compute_vector_fwd(const TReg &vmm_src);
     void abs_compute_vector_fwd(const TReg &vmm_src);
     void sqrt_compute_vector_fwd(const TReg &vmm_src);
-    void linear_compute_vector_fwd(const TRegS &vmm_src);
+    void linear_compute_vector_fwd(
+            const TRegS &vmm_src, const TRegS &alpha, const TRegS &beta);
     void soft_relu_compute_vector_fwd(const TRegS &vmm_src);
     void mish_compute_vector_fwd(const TRegS &vmm_src);
     void logistic_compute_vector_fwd(const TRegS &vmm_src);
     void gelu_tanh_compute_vector_fwd(const TRegS &vmm_src);
-    void swish_compute_vector_fwd(const TRegS &vmm_src);
+    void swish_compute_vector_fwd(const TRegS &vmm_src,
+            const TRegS &alpha_log2e, const TRegS &exponent_control,
+            const TRegS &polynomial_c1, const TRegS &polynomial_c2);
     void log_compute_vector_fwd(const TRegS &vmm_src);
-    void clip_compute_vector_fwd(const TReg &vmm_src);
+    void clip_compute_vector_fwd(
+            const TReg &vmm_src, const TRegS &lower, const TRegS &upper);
     void gelu_erf_compute_vector_fwd(const TRegS &vmm_src);
     void gelu_erf_minimax_approx_compute_vector_fwd(const TRegS &vmm_src);
     void round_compute_vector_fwd(const TRegS &vmm_src);
-    void hardswish_compute_vector_fwd(const TRegS &vmm_src);
-    void hardsigmoid_compute_vector_fwd(const TRegS &vmm_src);
+    void hardswish_compute_vector_fwd(
+            const TRegS &vmm_src, const TRegS &alpha, const TRegS &beta);
+    void hardsigmoid_compute_vector_fwd(
+            const TRegS &vmm_src, const TRegS &alpha, const TRegS &beta);
 
     void exp_compute_vector_bwd(const TRegS &vmm_src);
-    void relu_compute_vector_bwd(const TRegS &vmm_src);
+    void relu_compute_vector_bwd(const TRegS &vmm_src, const TRegS &alpha);
     void elu_compute_vector_bwd(const TRegS &vmm_src);
     void tanh_compute_vector_bwd(const TRegS &vmm_src);
     void square_compute_vector_bwd(const TRegS &vmm_src);
     void abs_compute_vector_bwd(const TRegS &vmm_src);
     void sqrt_compute_vector_bwd(const TRegS &vmm_src);
-    void linear_compute_vector_bwd(const TRegS &vmm_src);
-    void soft_relu_compute_vector_bwd(const TRegS &vmm_src);
+    void linear_compute_vector_bwd(const TRegS &vmm_src, const TRegS &alpha);
+    void soft_relu_compute_vector_bwd(const TRegS &vmm_src, const TRegS &alpha);
     void logistic_compute_vector_bwd(const TRegS &vmm_src);
     void mish_compute_vector_bwd(const TRegS &vmm_src);
     void gelu_tanh_compute_vector_bwd(const TRegS &vmm_src);
     void swish_compute_vector_bwd(const TRegS &vmm_src);
     void log_compute_vector_bwd(const TRegS &vmm_src);
-    void clip_compute_vector_bwd(const TRegS &vmm_src);
+    void clip_compute_vector_bwd(
+            const TRegS &vmm_src, const TRegS &lower, const TRegS &upper);
     void gelu_erf_compute_vector_bwd(const TRegS &vmm_src);
-    void hardswish_compute_vector_bwd(const TRegS &vmm_src);
-    void hardsigmoid_compute_vector_bwd(const TRegS &vmm_src);
+    void hardswish_compute_vector_bwd(const TRegS &vmm_src, const TRegS &alpha,
+            const TRegS &beta, const TRegS &one);
+    void hardsigmoid_compute_vector_bwd(const TRegS &vmm_src,
+            const TRegS &alpha, const TRegS &beta, const TRegS &one);
     void load_1word_replicate(const TRegS &vmm_src, Xbyak_aarch64::XReg x_addr);
     void load_vector(const TRegS &vmm_src, Xbyak_aarch64::XReg x_addr);
 

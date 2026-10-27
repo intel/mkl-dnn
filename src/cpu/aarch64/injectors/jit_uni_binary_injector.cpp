@@ -559,7 +559,8 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
     if (can_load_scalar_once) {
         const Vmm rhs_vmm(vmm_hint);
         rhs_arg_addr = prepare_rhs_arg_addr(start_idx, rhs_arg_idx, post_op,
-                rhs_arg_params, rhs_broadcasting_strategy);
+                rhs_arg_params, rhs_broadcasting_strategy,
+                rhs_arg_static_params_.rhs_addr_reg);
         execute_broadcast_no_tail(
                 rhs_arg_data_type, rhs_vmm, remove_bcast_bit(rhs_arg_addr));
 
@@ -573,7 +574,7 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
         for (const auto vmm_idx : vmm_idxs) {
             const Vmm dst_vmm(vmm_idx);
             execute_binary(post_op.binary.alg, dst_vmm, host_->P_ALL_ONE,
-                    dst_vmm, rhs_vmm);
+                    dst_vmm, rhs_vmm, rhs_vmm);
         }
 
         return;
@@ -585,7 +586,8 @@ void jit_uni_binary_injector_t<isa>::compute_vector_range(
                 || rhs_arg_params_differ(vmm_idx, vmm_idx - 1, rhs_arg_params,
                         rhs_broadcasting_strategy)) {
             rhs_arg_addr = prepare_rhs_arg_addr(vmm_idx, rhs_arg_idx, post_op,
-                    rhs_arg_params, rhs_broadcasting_strategy);
+                    rhs_arg_params, rhs_broadcasting_strategy,
+                    rhs_arg_static_params_.rhs_addr_reg);
         }
 
         const auto local_vmm_preservation = should_preserve_vmm(
@@ -622,9 +624,10 @@ rhs_address_t jit_uni_binary_injector_t<isa>::prepare_rhs_arg_addr(
         std::size_t vmm_idx, std::size_t rhs_arg_idx,
         const dnnl_post_ops::entry_t &post_op,
         const rhs_arg_dynamic_params_t &rhs_arg_params,
-        const broadcasting_strategy_t rhs_broadcasting_strategy) const {
+        const broadcasting_strategy_t rhs_broadcasting_strategy,
+        const Xbyak_aarch64::XReg &rhs_addr) const {
 
-    const auto &rhs_addr_reg = rhs_arg_static_params_.rhs_addr_reg;
+    const auto &rhs_addr_reg = rhs_addr;
     const auto &abi_param_offset = rhs_arg_static_params_.abi_param_offset;
     host_->ldr_imm(rhs_addr_reg, param1_, abi_param_offset);
 
@@ -728,7 +731,7 @@ template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::append_offset_from_operand(
         const std::map<int, rhs_operand_t> &vmm_idx_to_elem_operand_off,
         int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
-        const Xbyak_aarch64::XReg &tmp_reg, std::size_t elem_size_bytes) const {
+        const Xbyak_aarch64::XReg &tmp, std::size_t elem_size_bytes) const {
 
     const auto it_operand_off = vmm_idx_to_elem_operand_off.find(vmm_idx);
     if (it_operand_off != vmm_idx_to_elem_operand_off.end()
@@ -740,15 +743,15 @@ void jit_uni_binary_injector_t<isa>::append_offset_from_operand(
             const int shift_val = std::log2(elem_size_bytes);
             const auto &op = it_operand_off->second;
             if (it_operand_off->second.isAddress_) {
-                host_->ldr(tmp_reg,
+                host_->ldr(tmp,
                         Xbyak_aarch64::ptr(host_->addr_off(op.address_.base_,
                                 op.address_.offt_, host_->X_DEFAULT_ADDR,
                                 host_->X_TMP_0)));
             } else {
-                host_->mov(tmp_reg, Xbyak_aarch64::XReg(op.idx_));
+                host_->mov(tmp, Xbyak_aarch64::XReg(op.idx_));
             }
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
-            host_->add(addr_reg, addr_reg, tmp_reg);
+            host_->lsl(tmp, tmp, shift_val);
+            host_->add(addr_reg, addr_reg, tmp);
         }
     }
 }
@@ -757,7 +760,7 @@ template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::append_offset_under_mem_addr(
         const std::map<int, rhs_address_t> &vmm_idx_to_elem_addr_off,
         int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
-        const Xbyak_aarch64::XReg &tmp_reg, std::size_t elem_size_bytes) const {
+        const Xbyak_aarch64::XReg &tmp, std::size_t elem_size_bytes) const {
 
     const auto it_off_addr = vmm_idx_to_elem_addr_off.find(vmm_idx);
     if (it_off_addr != vmm_idx_to_elem_addr_off.end()
@@ -767,10 +770,10 @@ void jit_uni_binary_injector_t<isa>::append_offset_under_mem_addr(
                     Xbyak_aarch64::XReg(it_off_addr->second.base_));
         } else {
             const int shift_val = std::log2(elem_size_bytes);
-            host_->add_imm(tmp_reg, it_off_addr->second.base_,
+            host_->add_imm(tmp, it_off_addr->second.base_,
                     it_off_addr->second.offt_, host_->X_TMP_0);
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
-            host_->add(addr_reg, addr_reg, tmp_reg);
+            host_->lsl(tmp, tmp, shift_val);
+            host_->add(addr_reg, addr_reg, tmp);
         }
     }
 }
@@ -793,7 +796,7 @@ void jit_uni_binary_injector_t<isa>::append_no_broadcast_offset(
         const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
         const std::map<int, Xbyak_aarch64::XReg> &vmm_idx_to_out_reg,
         const std::map<int, size_t> &vmm_idx_to_out_elem_off_val, int vmm_idx,
-        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &tmp_reg,
+        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &offset,
         std::size_t elem_size_bytes) const {
 
     const auto it_out_addr = vmm_idx_to_out_addr.find(vmm_idx);
@@ -813,27 +816,27 @@ void jit_uni_binary_injector_t<isa>::append_no_broadcast_offset(
                 it_off_val != vmm_idx_to_out_elem_off_val.end()
                         ? it_off_val->second
                         : 0,
-                tmp_reg);
+                offset);
 
         if (elem_size_bytes > 1) {
             const int shift_val = std::log2(elem_size_bytes);
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
+            host_->lsl(offset, offset, shift_val);
         }
-        host_->add(addr_reg, addr_reg, tmp_reg);
+        host_->add(addr_reg, addr_reg, offset);
     }
 }
 
 template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::calculate_no_broadcast(rhs_address_t addr,
         std::size_t offset, const Xbyak_aarch64::XReg &out_reg) const {
-    const auto &t0 = host_->X_TMP_0;
-    host_->add_imm(out_reg, addr.getBase(), addr.offt_, t0);
-    if (offset > 0) host_->add_imm(out_reg, out_reg, offset, t0);
-    host_->ldr(t0,
+    const auto &tmp = host_->X_TMP_0;
+    const auto &param_addr = host_->X_DEFAULT_ADDR;
+    host_->add_imm(out_reg, addr.getBase(), addr.offt_, tmp);
+    if (offset > 0) host_->add_imm(out_reg, out_reg, offset, tmp);
+    host_->ldr(tmp,
             Xbyak_aarch64::ptr(host_->addr_off(param1_,
-                    rhs_arg_static_params_.dst_orig_offset,
-                    host_->X_DEFAULT_ADDR, t0)));
-    host_->sub(out_reg, out_reg, t0);
+                    rhs_arg_static_params_.dst_orig_offset, param_addr, tmp)));
+    host_->sub(out_reg, out_reg, tmp);
     host_->lsr(out_reg, out_reg,
             std::log2(types::data_type_size(
                     rhs_arg_static_params_.dst_d.data_type())));
@@ -844,8 +847,9 @@ void jit_uni_binary_injector_t<isa>::append_oc_offset(
         const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
         const std::map<int, Xbyak_aarch64::XReg> &vmm_idx_to_out_reg,
         const std::map<int, size_t> &vmm_idx_to_out_elem_off_val, int vmm_idx,
-        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &tmp_reg,
+        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &offset,
         std::size_t elem_size_bytes) const {
+    const auto &result = host_->X_TMP_0;
 
     const auto it_out_addr = vmm_idx_to_out_addr.find(vmm_idx);
     const auto it_out_reg = vmm_idx_to_out_reg.find(vmm_idx);
@@ -864,111 +868,111 @@ void jit_uni_binary_injector_t<isa>::append_oc_offset(
                 it_off_val != vmm_idx_to_out_elem_off_val.end()
                         ? it_off_val->second
                         : 0,
-                tmp_reg);
+                offset);
 
-        const auto X_TMP_0 = host_->X_TMP_0;
         const auto dst_d = rhs_arg_static_params_.dst_d;
         const auto strides = dst_d.blocking_desc().strides;
         const auto layout = injector_utils::get_layout_type(dst_d);
 
-        // c = X_TMP_0
+        // c = result
         switch (layout) {
             case injector_utils::layout_t::ncsp:
-                calculate_oc_ncsp(strides, tmp_reg);
+                calculate_oc_ncsp(strides, offset, result);
                 break;
             case injector_utils::layout_t::c_blocked:
-                calculate_oc_blocked(strides, tmp_reg);
+                calculate_oc_blocked(strides, offset, result);
                 break;
             case injector_utils::layout_t::nspc:
-                calculate_oc_nspc(strides, tmp_reg);
+                calculate_oc_nspc(strides, offset, result);
                 break;
             case injector_utils::layout_t::cspn:
-                calculate_oc_cspn(strides, tmp_reg);
+                calculate_oc_cspn(strides, offset, result);
                 break;
             default: assert(!"Unknown layout");
         }
 
         if (elem_size_bytes == 1) {
-            host_->add(addr_reg, addr_reg, X_TMP_0);
+            host_->add(addr_reg, addr_reg, result);
         } else {
             const int shift_val = std::log2(elem_size_bytes);
-            host_->mov(tmp_reg, X_TMP_0);
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
-            host_->add(addr_reg, addr_reg, tmp_reg);
+            host_->mov(offset, result);
+            host_->lsl(offset, offset, shift_val);
+            host_->add(addr_reg, addr_reg, offset);
         }
     }
 }
 
 template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::calculate_oc_ncsp(const dim_t *strides,
-        const Xbyak_aarch64::XReg &tmp_reg, const bool residue) const {
+        const Xbyak_aarch64::XReg &offset, const Xbyak_aarch64::XReg &result,
+        const bool residue) const {
+    const auto &channel_remainder = host_->X_TMP_1;
+    const auto &spatial_offset = host_->X_TMP_2;
+    const auto &divisor = host_->X_TMP_3;
+    const auto &channel_divisor = host_->X_TMP_4;
     // c = (offset % strides[0]) / strides[1]
     // output = X_TMP_0
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-    const auto X_TMP_2 = host_->X_TMP_2;
-    const auto X_TMP_3 = host_->X_TMP_3;
-    const auto X_TMP_4 = host_->X_TMP_4;
 
-    host_->mov_imm(X_TMP_3, strides[0]);
-    host_->mov_imm(X_TMP_4, strides[1]);
+    host_->mov_imm(divisor, strides[0]);
+    host_->mov_imm(channel_divisor, strides[1]);
 
-    host_->umod(X_TMP_2, tmp_reg, X_TMP_3);
+    host_->umod(spatial_offset, offset, divisor);
     if (residue)
-        host_->udiv_mod(X_TMP_0, X_TMP_1, X_TMP_2, X_TMP_4);
+        host_->udiv_mod(
+                result, channel_remainder, spatial_offset, channel_divisor);
     else
-        host_->udiv(X_TMP_0, X_TMP_2, X_TMP_4);
+        host_->udiv(result, spatial_offset, channel_divisor);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_oc_blocked(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_oc_blocked(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &channel_remainder = host_->X_TMP_1;
+    const auto &blocked_remainder = host_->X_TMP_2;
+    const auto &divisor = host_->X_TMP_3;
     // c = ((offset % strides[0]) / strides[1]) * strides[ndims - 1] + offset % blk_size
     // output = X_TMP_0
     const auto dst_d = rhs_arg_static_params_.dst_d;
     const int simd_w = simd_elems(dst_d.data_type(), isa);
     const int blk_size = dst_d.blocking_desc().inner_blks[0];
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-    const auto X_TMP_2 = host_->X_TMP_2;
-    const auto X_TMP_3 = host_->X_TMP_3;
 
-    calculate_oc_ncsp(strides, tmp_reg, blk_size > simd_w);
+    calculate_oc_ncsp(strides, offset, result, blk_size > simd_w);
 
     if (blk_size > simd_w) {
         // extract c % blk_size
-        host_->mov_imm(X_TMP_3, blk_size);
-        host_->umod(X_TMP_2, X_TMP_1, X_TMP_3);
+        host_->mov_imm(divisor, blk_size);
+        host_->umod(blocked_remainder, channel_remainder, divisor);
     }
 
-    host_->mov_imm(tmp_reg, blk_size);
-    host_->mul(X_TMP_0, X_TMP_0, tmp_reg);
-    if (blk_size > simd_w) host_->add(X_TMP_0, X_TMP_0, X_TMP_2);
+    host_->mov_imm(offset, blk_size);
+    host_->mul(result, result, offset);
+    if (blk_size > simd_w) host_->add(result, result, blocked_remainder);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_oc_nspc(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_oc_nspc(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // c = offset % C
     // output = X_TMP_0
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
     const auto C = rhs_arg_static_params_.dst_d.dims()[1];
 
-    host_->mov_imm(X_TMP_1, C);
-    host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, C);
+    host_->umod(result, offset, divisor);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_oc_cspn(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_oc_cspn(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // c = offset / strides[1]
     // output = X_TMP_0
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
 
-    host_->mov_imm(X_TMP_1, strides[1]);
-    host_->udiv(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, strides[1]);
+    host_->udiv(result, offset, divisor);
 }
 
 template <cpu_isa_t isa>
@@ -976,8 +980,9 @@ void jit_uni_binary_injector_t<isa>::append_mb_sp_offset(
         const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
         const std::map<int, Xbyak_aarch64::XReg> &vmm_idx_to_out_reg,
         const std::map<int, size_t> &vmm_idx_to_out_elem_off_val, int vmm_idx,
-        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &tmp_reg,
+        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &offset,
         std::size_t elem_size_bytes) const {
+    const auto &result = host_->X_TMP_0;
 
     const auto it_out_addr = vmm_idx_to_out_addr.find(vmm_idx);
     const auto it_out_reg = vmm_idx_to_out_reg.find(vmm_idx);
@@ -997,44 +1002,47 @@ void jit_uni_binary_injector_t<isa>::append_mb_sp_offset(
                 it_off_val != vmm_idx_to_out_elem_off_val.end()
                         ? it_off_val->second
                         : 0,
-                tmp_reg);
+                offset);
 
-        const auto X_TMP_0 = host_->X_TMP_0;
         const auto dst_d = rhs_arg_static_params_.dst_d;
         const auto strides = dst_d.blocking_desc().strides;
         const auto layout = injector_utils::get_layout_type(dst_d);
 
-        // c = X_TMP_0
+        // c = result
         switch (layout) {
             case injector_utils::layout_t::ncsp:
-                calculate_mb_sp_ncsp(strides, tmp_reg);
+                calculate_mb_sp_ncsp(strides, offset, result);
                 break;
             case injector_utils::layout_t::c_blocked:
-                calculate_mb_sp_blocked(strides, tmp_reg);
+                calculate_mb_sp_blocked(strides, offset, result);
                 break;
             case injector_utils::layout_t::nspc:
-                calculate_mb_sp_nspc(strides, tmp_reg);
+                calculate_mb_sp_nspc(strides, offset, result);
                 break;
             case injector_utils::layout_t::cspn:
-                calculate_mb_sp_cspn(strides, tmp_reg);
+                calculate_mb_sp_cspn(strides, offset, result);
                 break;
             default: assert(!"Unknown layout");
         }
 
         if (elem_size_bytes == 1) {
-            host_->add(addr_reg, addr_reg, X_TMP_0);
+            host_->add(addr_reg, addr_reg, result);
         } else {
             const int shift_val = std::log2(elem_size_bytes);
-            host_->mov(tmp_reg, X_TMP_0);
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
-            host_->add(addr_reg, addr_reg, tmp_reg);
+            host_->mov(offset, result);
+            host_->lsl(offset, offset, shift_val);
+            host_->add(addr_reg, addr_reg, offset);
         }
     }
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_mb_sp_ncsp(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_mb_sp_ncsp(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &within_batch = host_->X_TMP_1;
+    const auto &batch = host_->X_TMP_2;
+    const auto &divisor = host_->X_TMP_3;
     // offset = (n * stride_n) + (c * stride_c) + (d * stride_d) + (h * stride_h) + (w * stride_w)
     // mb_sp_off = (n * (stride_n/C)) + (d * stride_d) + (h * stride_h) + (w * stride_w)
     // mb_sp_off = offset - (c * stride_c) - (n * (C - 1)DHW)
@@ -1046,79 +1054,73 @@ void jit_uni_binary_injector_t<isa>::calculate_mb_sp_ncsp(
     const auto H = (ndims >= 4) ? dst_d.dims()[ndims - 2] : 1;
     const auto W = (ndims >= 3) ? dst_d.dims()[ndims - 1] : 1;
 
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-    const auto X_TMP_2 = host_->X_TMP_2;
-    const auto X_TMP_3 = host_->X_TMP_3;
-
-    host_->mov_imm(X_TMP_3, strides[0]);
-    host_->udiv_mod(X_TMP_2, X_TMP_1, tmp_reg, X_TMP_3);
-    // X_TMP_2 = n
-    host_->mov_imm(X_TMP_3, strides[1]);
-    host_->udiv(X_TMP_0, X_TMP_1, X_TMP_3);
-    host_->mul(X_TMP_0, X_TMP_0, X_TMP_3);
+    host_->mov_imm(divisor, strides[0]);
+    host_->udiv_mod(batch, within_batch, offset, divisor);
+    // batch = n
+    host_->mov_imm(divisor, strides[1]);
+    host_->udiv(result, within_batch, divisor);
+    host_->mul(result, result, divisor);
     // X_TMP_0 = c * stride_c
-    host_->sub(tmp_reg, tmp_reg, X_TMP_0);
+    host_->sub(offset, offset, result);
     // tmp_reg = offset - c * stride_c
-    host_->mov(X_TMP_0, X_TMP_2);
+    host_->mov(result, batch);
     // X_TMP_0 = n
-    host_->mov_imm(X_TMP_3, (C_padded - 1) * D * H * W);
+    host_->mov_imm(divisor, (C_padded - 1) * D * H * W);
     // n(C - 1)DHW = nCDHW - nDHW
-    host_->mul(X_TMP_0, X_TMP_0, X_TMP_3);
+    host_->mul(result, result, divisor);
     // X_TMP_0 = n(C - 1)DHW
-    host_->sub(X_TMP_0, tmp_reg, X_TMP_0);
+    host_->sub(result, offset, result);
     // X_TMP_0 = offset - (c * stride_c) - (n * (C - 1)DHW)
 }
 
 template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::calculate_mb_sp_blocked(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+        const dim_t *strides, const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // mb_sp_off = offset - (c * stride_c) - (n * (C - 1)DHW) - c % blk_size
     // output = X_TMP_0
     const auto dst_d = rhs_arg_static_params_.dst_d;
     const int simd_w = simd_elems(dst_d.data_type(), isa);
     const int blk_size = dst_d.blocking_desc().inner_blks[0];
 
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-
     if (blk_size > simd_w) {
         // substract c % blk_size
-        host_->mov_imm(X_TMP_1, blk_size);
-        host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
-        host_->sub(tmp_reg, tmp_reg, X_TMP_0);
+        host_->mov_imm(divisor, blk_size);
+        host_->umod(result, offset, divisor);
+        host_->sub(offset, offset, result);
     }
 
-    calculate_mb_sp_ncsp(strides, tmp_reg);
+    calculate_mb_sp_ncsp(strides, offset, result);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_mb_sp_nspc(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_mb_sp_nspc(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // offset = nDHWC + dHWC + hWC + wC + c
     // mb_sp_off = nDHW + dHW + hW + w
     // mb_sp_off = offset / C
     // output = X_TMP_0
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
     const auto C = rhs_arg_static_params_.dst_d.padded_dims()[1];
 
-    host_->mov_imm(X_TMP_1, C);
-    host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, C);
+    host_->umod(result, offset, divisor);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_mb_sp_cspn(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_mb_sp_cspn(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // offset = cDHWN + dHWN + hWN + wN + n
     // mb_sp_off = dHWN + hWN + wN + n
     // mb_sp_off = offset % stride_c
     // output = X_TMP_0
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
 
-    host_->mov_imm(X_TMP_1, strides[1]);
-    host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, strides[1]);
+    host_->umod(result, offset, divisor);
 }
 
 template <cpu_isa_t isa>
@@ -1126,8 +1128,9 @@ void jit_uni_binary_injector_t<isa>::append_mb_w_offset(
         const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
         const std::map<int, Xbyak_aarch64::XReg> &vmm_idx_to_out_reg,
         const std::map<int, size_t> &vmm_idx_to_out_elem_off_val, int vmm_idx,
-        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &tmp_reg,
+        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &offset,
         std::size_t elem_size_bytes) const {
+    const auto &result = host_->X_TMP_0;
 
     const auto it_out_addr = vmm_idx_to_out_addr.find(vmm_idx);
     const auto it_out_reg = vmm_idx_to_out_reg.find(vmm_idx);
@@ -1146,43 +1149,47 @@ void jit_uni_binary_injector_t<isa>::append_mb_w_offset(
                 it_off_val != vmm_idx_to_out_elem_off_val.end()
                         ? it_off_val->second
                         : 0,
-                tmp_reg);
+                offset);
 
-        const auto X_TMP_0 = host_->X_TMP_0;
         const auto dst_d = rhs_arg_static_params_.dst_d;
         const auto strides = dst_d.blocking_desc().strides;
         const auto layout = injector_utils::get_layout_type(dst_d);
 
         switch (layout) {
             case injector_utils::layout_t::ncsp:
-                calculate_mb_w_ncsp(strides, tmp_reg);
+                calculate_mb_w_ncsp(strides, offset, result);
                 break;
             case injector_utils::layout_t::c_blocked:
-                calculate_mb_w_blocked(strides, tmp_reg);
+                calculate_mb_w_blocked(strides, offset, result);
                 break;
             case injector_utils::layout_t::nspc:
-                calculate_mb_w_nspc(strides, tmp_reg);
+                calculate_mb_w_nspc(strides, offset, result);
                 break;
             case injector_utils::layout_t::cspn:
-                calculate_mb_w_cspn(strides, tmp_reg);
+                calculate_mb_w_cspn(strides, offset, result);
                 break;
             default: assert(!"Unknown layout");
         }
 
         if (elem_size_bytes == 1) {
-            host_->add(addr_reg, addr_reg, X_TMP_0);
+            host_->add(addr_reg, addr_reg, result);
         } else {
             const int shift_val = std::log2(elem_size_bytes);
-            host_->mov(tmp_reg, X_TMP_0);
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
-            host_->add(addr_reg, addr_reg, tmp_reg);
+            host_->mov(offset, result);
+            host_->lsl(offset, offset, shift_val);
+            host_->add(addr_reg, addr_reg, offset);
         }
     }
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_mb_w_ncsp(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_mb_w_ncsp(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &component = host_->X_TMP_1;
+    const auto &batch_divisor = host_->X_TMP_2;
+    const auto &divisor = host_->X_TMP_3;
+    const auto &batch = host_->X_TMP_4;
     // offset = (n * stride_n) + (c * stride_c) + (d * stride_d) + (h * stride_h) + (w * stride_w)
     // mb_w_off = (n * (stride_n/(C*D*H))) + (w * stride_w)
     // output = X_TMP_0
@@ -1192,54 +1199,54 @@ void jit_uni_binary_injector_t<isa>::calculate_mb_w_ncsp(
     const auto D = (ndims >= 5) ? dst_d.dims()[ndims - 3] : 1;
     const auto H = (ndims >= 4) ? dst_d.dims()[ndims - 2] : 1;
 
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-    const auto X_TMP_2 = host_->X_TMP_2;
-    const auto X_TMP_3 = host_->X_TMP_3;
-    const auto X_TMP_4 = host_->X_TMP_4;
+    host_->mov_imm(batch_divisor, strides[0]);
+    host_->udiv_mod(batch, divisor, offset, batch_divisor);
+    // batch = n
 
-    host_->mov_imm(X_TMP_2, strides[0]);
-    host_->udiv_mod(X_TMP_4, X_TMP_3, tmp_reg, X_TMP_2);
-    // X_TMP_4 = n
-
-    host_->mov_imm(X_TMP_2, strides[1]);
-    host_->umod(X_TMP_0, X_TMP_3, X_TMP_2);
+    host_->mov_imm(batch_divisor, strides[1]);
+    host_->umod(result, divisor, batch_divisor);
 
     if (ndims >= 5) {
-        host_->mov_imm(X_TMP_3, strides[ndims - 3]);
-        host_->umod(X_TMP_1, X_TMP_0, X_TMP_3);
-        host_->mov(X_TMP_0, X_TMP_1);
+        host_->mov_imm(divisor, strides[ndims - 3]);
+        host_->umod(component, result, divisor);
+        host_->mov(result, component);
     }
     if (ndims >= 4) {
-        host_->mov_imm(X_TMP_3, strides[ndims - 2]);
-        host_->umod(X_TMP_1, X_TMP_0, X_TMP_3);
-        host_->mov(X_TMP_0, X_TMP_1);
+        host_->mov_imm(divisor, strides[ndims - 2]);
+        host_->umod(component, result, divisor);
+        host_->mov(result, component);
     }
     if (ndims >= 3) {
-        host_->mov_imm(X_TMP_3, strides[ndims - 1]);
-        host_->udiv(X_TMP_0, X_TMP_0, X_TMP_3);
-        host_->mul(tmp_reg, X_TMP_0, X_TMP_3);
+        host_->mov_imm(divisor, strides[ndims - 1]);
+        host_->udiv(result, result, divisor);
+        host_->mul(offset, result, divisor);
         // tmp_reg = w * stride_w
     }
     // tmp_reg = w * stride_w
-    host_->mov_imm(X_TMP_3, strides[0] / (C_padded * D * H));
-    host_->mul(X_TMP_0, X_TMP_4, X_TMP_3);
+    host_->mov_imm(divisor, strides[0] / (C_padded * D * H));
+    host_->mul(result, batch, divisor);
     // X_TMP_0 = n * (stride_n/(C*D*H))
-    if (ndims >= 3) host_->add(X_TMP_0, X_TMP_0, tmp_reg);
+    if (ndims >= 3) host_->add(result, result, offset);
     // X_TMP_0 = (n * (stride_n/(C*D*H))) + (w * stride_w)
 }
 
 template <cpu_isa_t isa>
 void jit_uni_binary_injector_t<isa>::calculate_mb_w_blocked(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+        const dim_t *strides, const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
     // mb_w_off = (n * (stride_n/(C*D*H))) + (w * stride_w)
     // output = X_TMP_0
-    calculate_mb_sp_ncsp(strides, tmp_reg);
+    calculate_mb_sp_ncsp(strides, offset, result);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_mb_w_nspc(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_mb_w_nspc(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &component = host_->X_TMP_1;
+    const auto &batch_divisor = host_->X_TMP_2;
+    const auto &divisor = host_->X_TMP_3;
+    const auto &batch = host_->X_TMP_4;
     // offset = nDHWC + dHWC + hWC + wC + c
     // mb_w_off = nW + w
     // output = X_TMP_0
@@ -1249,55 +1256,49 @@ void jit_uni_binary_injector_t<isa>::calculate_mb_w_nspc(
     const auto D = (ndims >= 5) ? dst_d.dims()[ndims - 3] : 1;
     const auto H = (ndims >= 4) ? dst_d.dims()[ndims - 2] : 1;
 
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-    const auto X_TMP_2 = host_->X_TMP_2;
-    const auto X_TMP_3 = host_->X_TMP_3;
-    const auto X_TMP_4 = host_->X_TMP_4;
-
-    host_->mov_imm(X_TMP_2, strides[0]);
-    host_->udiv_mod(X_TMP_4, X_TMP_0, tmp_reg, X_TMP_2);
-    // X_TMP_4 = n
+    host_->mov_imm(batch_divisor, strides[0]);
+    host_->udiv_mod(batch, result, offset, batch_divisor);
+    // batch = n
     if (ndims >= 5) {
-        host_->mov_imm(X_TMP_3, strides[ndims - 3]);
-        host_->umod(X_TMP_1, X_TMP_0, X_TMP_3);
-        host_->mov(X_TMP_0, X_TMP_1);
+        host_->mov_imm(divisor, strides[ndims - 3]);
+        host_->umod(component, result, divisor);
+        host_->mov(result, component);
     }
     if (ndims >= 4) {
-        host_->mov_imm(X_TMP_3, strides[ndims - 2]);
-        host_->umod(X_TMP_1, X_TMP_0, X_TMP_3);
-        host_->mov(X_TMP_0, X_TMP_1);
+        host_->mov_imm(divisor, strides[ndims - 2]);
+        host_->umod(component, result, divisor);
+        host_->mov(result, component);
     }
     if (ndims >= 3) {
-        host_->mov_imm(X_TMP_3, strides[ndims - 1]);
-        host_->udiv(tmp_reg, X_TMP_0, X_TMP_3);
+        host_->mov_imm(divisor, strides[ndims - 1]);
+        host_->udiv(offset, result, divisor);
         // tmp_reg = w
     }
-    host_->mov_imm(X_TMP_3, strides[0] / (D * H * C_padded));
-    host_->mul(X_TMP_0, X_TMP_4, X_TMP_3);
+    host_->mov_imm(divisor, strides[0] / (D * H * C_padded));
+    host_->mul(result, batch, divisor);
     // X_TMP_0 = nW
-    if (ndims >= 3) host_->add(X_TMP_0, X_TMP_0, tmp_reg);
+    if (ndims >= 3) host_->add(result, result, offset);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_mb_w_cspn(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_mb_w_cspn(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // offset = cDHWN + dHWN + hWN + wN + n
     // mb_w_off = wN + n
     // output = X_TMP_0
     const auto ndims = rhs_arg_static_params_.dst_d.ndims();
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
 
-    host_->mov_imm(X_TMP_1, strides[1]);
-    host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, strides[1]);
+    host_->umod(result, offset, divisor);
     if (ndims >= 5) {
-        host_->mov_imm(X_TMP_1, strides[ndims - 3]);
-        host_->umod(tmp_reg, X_TMP_0, X_TMP_1);
+        host_->mov_imm(divisor, strides[ndims - 3]);
+        host_->umod(offset, result, divisor);
     }
     if (ndims >= 4) {
-        host_->mov_imm(X_TMP_1, strides[ndims - 2]);
-        host_->udiv(X_TMP_0, tmp_reg, X_TMP_1);
+        host_->mov_imm(divisor, strides[ndims - 2]);
+        host_->udiv(result, offset, divisor);
     }
 }
 
@@ -1306,8 +1307,9 @@ void jit_uni_binary_injector_t<isa>::append_w_offset(
         const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
         const std::map<int, Xbyak_aarch64::XReg> &vmm_idx_to_out_reg,
         const std::map<int, size_t> &vmm_idx_to_out_elem_off_val, int vmm_idx,
-        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &tmp_reg,
+        const Xbyak_aarch64::XReg &addr_reg, const Xbyak_aarch64::XReg &offset,
         std::size_t elem_size_bytes) const {
+    const auto &result = host_->X_TMP_0;
 
     const auto it_out_addr = vmm_idx_to_out_addr.find(vmm_idx);
     const auto it_out_reg = vmm_idx_to_out_reg.find(vmm_idx);
@@ -1326,98 +1328,97 @@ void jit_uni_binary_injector_t<isa>::append_w_offset(
                 it_off_val != vmm_idx_to_out_elem_off_val.end()
                         ? it_off_val->second
                         : 0,
-                tmp_reg);
+                offset);
 
-        const auto X_TMP_0 = host_->X_TMP_0;
         const auto dst_d = rhs_arg_static_params_.dst_d;
         const auto strides = dst_d.blocking_desc().strides;
         const auto layout = injector_utils::get_layout_type(dst_d);
 
         switch (layout) {
             case injector_utils::layout_t::ncsp:
-                calculate_w_ncsp(strides, tmp_reg);
+                calculate_w_ncsp(strides, offset, result);
                 break;
             case injector_utils::layout_t::c_blocked:
-                calculate_w_blocked(strides, tmp_reg);
+                calculate_w_blocked(strides, offset, result);
                 break;
             case injector_utils::layout_t::nspc:
-                calculate_w_nspc(strides, tmp_reg);
+                calculate_w_nspc(strides, offset, result);
                 break;
             case injector_utils::layout_t::cspn:
-                calculate_w_cspn(strides, tmp_reg);
+                calculate_w_cspn(strides, offset, result);
                 break;
             default: assert(!"Unknown layout");
         }
 
         if (elem_size_bytes == 1) {
-            host_->add(addr_reg, addr_reg, X_TMP_0);
+            host_->add(addr_reg, addr_reg, result);
         } else {
             const int shift_val = std::log2(elem_size_bytes);
-            host_->mov(tmp_reg, X_TMP_0);
-            host_->lsl(tmp_reg, tmp_reg, shift_val);
-            host_->add(addr_reg, addr_reg, tmp_reg);
+            host_->mov(offset, result);
+            host_->lsl(offset, offset, shift_val);
+            host_->add(addr_reg, addr_reg, offset);
         }
     }
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_w_ncsp(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_w_ncsp(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // offset = (n * stride_n) + (c * stride_c) + (d * stride_d) + (h * stride_h) + (w * stride_w)
     // w_off = w * stride_w
     // output = X_TMP_0
     const auto dst_d = rhs_arg_static_params_.dst_d;
     const auto ndims = dst_d.ndims();
 
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-
     assert(ndims >= 3);
 
-    host_->mov_imm(X_TMP_1, strides[ndims - 2]);
-    host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, strides[ndims - 2]);
+    host_->umod(result, offset, divisor);
 
-    host_->mov_imm(X_TMP_1, strides[ndims - 1]);
-    host_->udiv(X_TMP_0, X_TMP_0, X_TMP_1);
-    host_->mul(X_TMP_0, X_TMP_0, X_TMP_1);
+    host_->mov_imm(divisor, strides[ndims - 1]);
+    host_->udiv(result, result, divisor);
+    host_->mul(result, result, divisor);
     // X_TMP_0 = w * stride_w
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_w_blocked(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
-    calculate_w_ncsp(strides, tmp_reg);
+void jit_uni_binary_injector_t<isa>::calculate_w_blocked(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    calculate_w_ncsp(strides, offset, result);
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_w_nspc(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_w_nspc(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
+    const auto &divisor = host_->X_TMP_1;
     // offset = nDHWC + dHWC + hWC + wC + c
     // w_off = w
     // output = X_TMP_0
     const auto dst_d = rhs_arg_static_params_.dst_d;
     const auto ndims = dst_d.ndims();
 
-    const auto X_TMP_0 = host_->X_TMP_0;
-    const auto X_TMP_1 = host_->X_TMP_1;
-
     assert(ndims >= 3);
 
-    host_->mov_imm(X_TMP_1, strides[ndims - 2]);
-    host_->umod(X_TMP_0, tmp_reg, X_TMP_1);
+    host_->mov_imm(divisor, strides[ndims - 2]);
+    host_->umod(result, offset, divisor);
 
-    host_->mov_imm(X_TMP_1, strides[ndims - 1]);
-    host_->udiv(X_TMP_0, X_TMP_0, X_TMP_1);
+    host_->mov_imm(divisor, strides[ndims - 1]);
+    host_->udiv(result, result, divisor);
     // X_TMP_0 = w
 }
 
 template <cpu_isa_t isa>
-void jit_uni_binary_injector_t<isa>::calculate_w_cspn(
-        const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const {
+void jit_uni_binary_injector_t<isa>::calculate_w_cspn(const dim_t *strides,
+        const Xbyak_aarch64::XReg &offset,
+        const Xbyak_aarch64::XReg &result) const {
     // offset = cDHWN + dHWN + hWN + wN + n
     // w_off = w
     // output = X_TMP_0
-    calculate_w_nspc(strides, tmp_reg);
+    calculate_w_nspc(strides, offset, result);
 }
 
 template <cpu_isa_t isa>
@@ -1456,7 +1457,7 @@ void jit_uni_binary_injector_t<isa>::inject_binary(
             host_->uni_scvtf(tmp_vmm.s, tmp_vmm.s);
         }
 
-        execute_binary(alg, dst, host_->P_ALL_ONE, dst, tmp_vmm);
+        execute_binary(alg, dst, host_->P_ALL_ONE, dst, tmp_vmm, tmp_vmm);
     } else {
         const auto lhs = dst;
         const bool with_tail_fusable_to_binary_op = with_tail && scalar_f32;
@@ -1472,7 +1473,8 @@ void jit_uni_binary_injector_t<isa>::inject_binary(
                     Xbyak_aarch64::ZRegS(dst.getIdx()));
         }
 
-        execute_binary(alg, dst, mask, lhs, rhs_addr);
+        const Vmm rhs_scratch(lhs.getIdx() == 0 ? 1 : 0);
+        execute_binary(alg, dst, mask, lhs, rhs_addr, rhs_scratch);
     }
 }
 
@@ -2026,35 +2028,28 @@ template <>
 template <typename T>
 void jit_uni_binary_injector_t<asimd>::execute_binary(alg_kind_t binary_alg,
         const Xbyak_aarch64::VReg &dst, const Xbyak_aarch64::PReg &mask,
-        const Xbyak_aarch64::VReg &lhs, const T &rhs) const {
+        const Xbyak_aarch64::VReg &lhs, const T &rhs,
+        const Xbyak_aarch64::VReg &rhs_scratch) const {
     const int SIMD_SZ = simd_bytes(asimd);
     const bool isAddr = std::is_same<T, rhs_address_t>::value;
     Xbyak_aarch64::VReg v_rhs(0);
 
     if (isAddr) {
         const rhs_address_t &addr = (rhs_address_t &)rhs;
-        for (size_t i = 0; i < 32; i++) {
-            // Look for a temporary vector register whose index isn’t the same as lhs.
-            if (lhs.getIdx() != i) {
-                // Pick the SIMD vector register with index i to be the scratch register.
-                v_rhs = Xbyak_aarch64::VReg(i);
-                // Allocate space on stack
-                host_->sub(host_->sp, host_->sp, SIMD_SZ);
-                // Store the scratch register into the stack so it's safe to clobber it.
-                host_->str(
-                        Xbyak_aarch64::QReg(i), Xbyak_aarch64::ptr(host_->sp));
-                // Compute the effective address we want to load from.
-                Xbyak_aarch64::XReg x_addr = host_->addr_off(addr.base_,
-                        addr.offt_, host_->X_DEFAULT_ADDR, host_->X_TMP_0);
-                // Load into the scratch vector, with or without broadcast.
-                if (addr.isBroadcast_)
-                    host_->ld1r(v_rhs.s, Xbyak_aarch64::ptr(x_addr));
-                else
-                    host_->ld1(v_rhs.s, Xbyak_aarch64::ptr(x_addr));
-                // The temporary register was found, therefore there is no need to keep searching.
-                break;
-            }
-        }
+        v_rhs = rhs_scratch;
+        // Allocate space on stack
+        host_->sub(host_->sp, host_->sp, SIMD_SZ);
+        // Store the scratch register into the stack so it's safe to clobber it.
+        host_->str(Xbyak_aarch64::QReg(v_rhs.getIdx()),
+                Xbyak_aarch64::ptr(host_->sp));
+        // Compute the effective address we want to load from.
+        Xbyak_aarch64::XReg x_addr = host_->addr_off(
+                addr.base_, addr.offt_, host_->X_DEFAULT_ADDR, host_->X_TMP_0);
+        // Load into the scratch vector, with or without broadcast.
+        if (addr.isBroadcast_)
+            host_->ld1r(v_rhs.s, Xbyak_aarch64::ptr(x_addr));
+        else
+            host_->ld1(v_rhs.s, Xbyak_aarch64::ptr(x_addr));
     } else {
         const Xbyak_aarch64::VReg tmp = (Xbyak_aarch64::VReg &)rhs;
         v_rhs = tmp;
@@ -2104,33 +2099,25 @@ template <cpu_isa_t isa>
 template <typename T>
 void jit_uni_binary_injector_t<isa>::execute_binary(alg_kind_t binary_alg,
         const Vmm &dst, const Xbyak_aarch64::PReg &mask, const Vmm &lhs,
-        const T &rhs) const {
+        const T &rhs, const Vmm &rhs_scratch) const {
     const bool isAddr = !std::is_same<T, Xbyak_aarch64::ZReg>::value;
     Vmm z_rhs(0);
 
     if (isAddr) {
         const rhs_address_t &addr = (rhs_address_t &)rhs;
-        for (size_t i = 0; i < 32; i++) {
-            // Look for a temporary vector register whose index isn’t the same as lhs.
-            if (lhs.getIdx() != i) {
-                // Pick the SVE vector register with index i to be the scratch register.
-                z_rhs = Vmm(i);
-                // Allocate 1 VL space on stack
-                host_->addvl(host_->sp, host_->sp, -1);
-                // Store the scratch register into the stack so it's safe to clobber it.
-                host_->str(z_rhs, Xbyak_aarch64::ptr(host_->sp));
-                // Compute the effective address we want to load from.
-                Xbyak_aarch64::XReg x_addr = host_->addr_off(addr.base_,
-                        addr.offt_, host_->X_DEFAULT_ADDR, host_->X_TMP_0);
-                // Load into the scratch vector, with or without broadcast.
-                if (addr.isBroadcast_)
-                    host_->ld1rw(z_rhs.s, mask, Xbyak_aarch64::ptr(x_addr));
-                else
-                    host_->ld1w(z_rhs.s, mask, Xbyak_aarch64::ptr(x_addr));
-                // The temporary register was found, therefore there is no need to keep searching.
-                break;
-            }
-        }
+        z_rhs = rhs_scratch;
+        // Allocate 1 VL space on stack
+        host_->addvl(host_->sp, host_->sp, -1);
+        // Store the scratch register into the stack so it's safe to clobber it.
+        host_->str(z_rhs, Xbyak_aarch64::ptr(host_->sp));
+        // Compute the effective address we want to load from.
+        Xbyak_aarch64::XReg x_addr = host_->addr_off(
+                addr.base_, addr.offt_, host_->X_DEFAULT_ADDR, host_->X_TMP_0);
+        // Load into the scratch vector, with or without broadcast.
+        if (addr.isBroadcast_)
+            host_->ld1rw(z_rhs.s, mask, Xbyak_aarch64::ptr(x_addr));
+        else
+            host_->ld1w(z_rhs.s, mask, Xbyak_aarch64::ptr(x_addr));
     } else {
         const Vmm vmm = (Vmm &)rhs;
         z_rhs = vmm;

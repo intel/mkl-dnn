@@ -437,7 +437,8 @@ private:
     rhs_address_t prepare_rhs_arg_addr(std::size_t vmm_idx,
             std::size_t rhs_arg_idx, const dnnl_post_ops::entry_t &post_op,
             const rhs_arg_dynamic_params_t &rhs_arg_params,
-            const broadcasting_strategy_t rhs_broadcasting_strategy) const;
+            const broadcasting_strategy_t rhs_broadcasting_strategy,
+            const Xbyak_aarch64::XReg &rhs_addr) const;
     /*
      * Loads data and applies particular binary operation.
      */
@@ -451,13 +452,11 @@ private:
     void append_offset_from_operand(
             const std::map<int, rhs_operand_t> &vmm_idx_to_elem_addr_off,
             int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
-            const Xbyak_aarch64::XReg &tmp_reg,
-            std::size_t elem_size_bytes) const;
+            const Xbyak_aarch64::XReg &tmp, std::size_t elem_size_bytes) const;
     void append_offset_under_mem_addr(
             const std::map<int, rhs_address_t> &vmm_idx_to_elem_addr_off,
             int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
-            const Xbyak_aarch64::XReg &tmp_reg,
-            std::size_t elem_size_bytes) const;
+            const Xbyak_aarch64::XReg &tmp, std::size_t elem_size_bytes) const;
     void append_value_offset(
             const std::map<int, size_t> &vmm_idx_to_elem_val_off, int vmm_idx,
             const Xbyak_aarch64::XReg &addr_reg,
@@ -481,14 +480,18 @@ private:
             const Xbyak_aarch64::XReg &tmp_reg,
             std::size_t elem_size_bytes) const;
     void calculate_oc_ncsp(const dim_t *strides,
-            const Xbyak_aarch64::XReg &tmp_reg,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result,
             const bool residue = false) const;
-    void calculate_oc_blocked(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_oc_nspc(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_oc_cspn(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
+    void calculate_oc_blocked(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_oc_nspc(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_oc_cspn(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
 
     void append_mb_sp_offset(
             const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
@@ -497,14 +500,18 @@ private:
             int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
             const Xbyak_aarch64::XReg &tmp_reg,
             std::size_t elem_size_bytes) const;
-    void calculate_mb_sp_ncsp(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_mb_sp_blocked(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_mb_sp_nspc(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_mb_sp_cspn(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
+    void calculate_mb_sp_ncsp(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_mb_sp_blocked(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_mb_sp_nspc(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_mb_sp_cspn(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
 
     void append_mb_w_offset(
             const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
@@ -513,14 +520,18 @@ private:
             int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
             const Xbyak_aarch64::XReg &tmp_reg,
             std::size_t elem_size_bytes) const;
-    void calculate_mb_w_ncsp(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_mb_w_blocked(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_mb_w_nspc(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_mb_w_cspn(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
+    void calculate_mb_w_ncsp(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_mb_w_blocked(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_mb_w_nspc(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_mb_w_cspn(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
 
     void append_w_offset(
             const std::map<int, rhs_address_t> &vmm_idx_to_out_addr,
@@ -529,14 +540,18 @@ private:
             int vmm_idx, const Xbyak_aarch64::XReg &addr_reg,
             const Xbyak_aarch64::XReg &tmp_reg,
             std::size_t elem_size_bytes) const;
-    void calculate_w_ncsp(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_w_blocked(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_w_nspc(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
-    void calculate_w_cspn(
-            const dim_t *strides, const Xbyak_aarch64::XReg &tmp_reg) const;
+    void calculate_w_ncsp(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_w_blocked(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_w_nspc(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
+    void calculate_w_cspn(const dim_t *strides,
+            const Xbyak_aarch64::XReg &offset,
+            const Xbyak_aarch64::XReg &result) const;
 
     void compute_cmp_mask(const Xbyak_aarch64::PReg &cmp_dst,
             const Xbyak_aarch64::PReg &mask, const Xbyak_aarch64::ZReg &cmp_src,
@@ -553,8 +568,8 @@ private:
             const Vmm &lhs, const Vmm &rhs, alg_kind_t cmp_predicate) const;
     template <typename T>
     void execute_binary(alg_kind_t binary_alg, const Vmm &dst,
-            const Xbyak_aarch64::PReg &mask, const Vmm &lhs,
-            const T &rhs) const;
+            const Xbyak_aarch64::PReg &mask, const Vmm &lhs, const T &rhs,
+            const Vmm &rhs_scratch) const;
     /*
      * Used in scalar broadcast strategy, broadcasting single value of given
      * data type over entire vector Vmm register.
