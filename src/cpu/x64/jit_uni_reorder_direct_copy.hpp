@@ -59,7 +59,6 @@ struct jit_uni_reorder_direct_copy_t : public primitive_t {
                 = 0;
         static kernel_base_t *create(const reorder_pd_t *pd, cpu_isa_t isa);
         virtual status_t create_kernel() = 0;
-        virtual int get_max_unroll() const = 0;
         virtual ~kernel_base_t() = default;
 
     protected:
