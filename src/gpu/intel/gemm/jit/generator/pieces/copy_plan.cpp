@@ -1730,8 +1730,13 @@ void CopyPlan::planInt3Upconvert(CopyInstruction &i)
     // Straddling lanes (2, 5) use a shr/shl/or_ sequence; non-merged
     // lanes use a single shr.
     std::vector<int> soloLanes = {2, 3, 4, 5};
-    if (!canMergePairs)
+    if (!canMergePairs) {
         soloLanes = {0, 1, 2, 3, 4, 5, 6, 7};
+        if (type_size == 1 && dstStride == 1) {
+            // Interleave destination GRFs to avoid back-to-back write dependencies.
+            soloLanes = {0, 4, 1, 5, 2, 6, 3, 7};
+        }
+    }
     for (int lane : soloLanes) {
         const auto &L = lanes[lane];
         auto finalDstLane = computeFinalDstLane(lane);
