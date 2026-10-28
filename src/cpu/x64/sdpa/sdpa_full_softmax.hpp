@@ -151,7 +151,7 @@ struct sdpa_full_softmax_conf_t {
     float mm2_beta = 0.0f;
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
-    bool need_kt = false, need_vt = false;
+    bool need_copy_k = false, need_copy_v = false;
     // Independent BRGEMM B pack factors for K and V (1 plain, 2 VNNI2).
     dim_t kt_k_pack = 1;
     dim_t vt_k_pack = 1;
