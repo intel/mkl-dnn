@@ -152,15 +152,13 @@ struct sdpa_full_softmax_conf_t {
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
     bool need_copy_k = false, need_copy_v = false;
-    // Independent BRGEMM B pack factors for K and V (1 plain, 2 VNNI2).
-    dim_t kt_k_pack = 1;
-    dim_t vt_k_pack = 1;
+    bool mm1_needs_vnni_b = false;
+    bool mm2_needs_vnni_b = false;
     // Physical reduction extents required by the K and V copy kernels.
     dim_t kt_k_pad = 1, vt_k_pad = 1;
     // Materialized B operands use independent 64-column panels.
     dim_t kt_ld = 0, vt_ld = 0;
     dim_t v_block = 0, v_tail = 0;
-    bool mm1_transpose_k = false;
     bool pack_k_for_aliasing = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
