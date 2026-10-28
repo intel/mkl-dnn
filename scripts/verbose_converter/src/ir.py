@@ -292,6 +292,9 @@ class BinaryPostOp(AlgPostOp):
     tag: str = "any"
     strides: str = ""
 
+    def is_inplace(self):
+        return self.alg.endswith("_inplace")
+
 
 @dataclass(eq=False)
 class SelectPostOp(PostOp):
