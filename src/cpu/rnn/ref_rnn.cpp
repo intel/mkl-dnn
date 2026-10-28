@@ -2134,18 +2134,18 @@ status_t ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::execute(
     const memory_desc_t *weights_layer_md = pd()->weights_md(0);
     const memory_desc_t *weights_iter_md = pd()->weights_md(1);
 
-    const auto tag = rnn.n_block == 64 ? format_tag::ldgOI64o2i
-                                       : format_tag::ldgOI32o2i;
     memory_desc_t wei_layer_desc;
-    CHECK(memory_desc_init_by_tag(wei_layer_desc, weights_layer_md->ndims,
-            weights_layer_md->dims, data_type::bf16, tag));
-
     memory_desc_t wei_iter_desc;
-    CHECK(memory_desc_init_by_tag(wei_iter_desc, weights_iter_md->ndims,
-            weights_iter_md->dims, data_type::bf16, tag));
 
 #if DNNL_X64
     if (rnn.is_bf32()) {
+        const auto tag = rnn.n_block == 64 ? format_tag::ldgOI64o2i
+                                           : format_tag::ldgOI32o2i;
+        CHECK(memory_desc_init_by_tag(wei_layer_desc, weights_layer_md->ndims,
+                weights_layer_md->dims, data_type::bf16, tag));
+        CHECK(memory_desc_init_by_tag(wei_iter_desc, weights_iter_md->ndims,
+                weights_iter_md->dims, data_type::bf16, tag));
+
         if (rnn.is_augru) {
             const auto bf32_augru_attention
                     = scratchpad.template get<src_layer_t>(
