@@ -50,14 +50,15 @@ struct MaskInfo {
             uint8_t isFixed : 1;  // = true (fixed mask)
             uint8_t _ : 7;
             uint8_t rsize;        // Maximum remainder value.
-            uint16_t value;       // Mask value.
+            uint16_t _2;
+            uint32_t value;       // Mask value (up to 32 lanes).
         } fixed;
-        uint32_t raw;
+        uint64_t raw;
     };
 
-    MaskInfo() : fixed{true,0,0,0xFFFF} {}
+    MaskInfo() : fixed{true,0,0,0,0xFFFFFFFFu} {}
 
-    bool operator!()         const { return fixed.isFixed && fixed.value == 0xFFFF; }
+    bool operator!()         const { return fixed.isFixed && fixed.value == 0xFFFFFFFFu; }
     explicit operator bool() const { return !!*this; }
 
     static MaskInfo None() { return MaskInfo(); }
