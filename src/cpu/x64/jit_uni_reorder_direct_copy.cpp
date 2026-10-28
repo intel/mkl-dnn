@@ -72,8 +72,6 @@ struct direct_copy_kernel_t
     static constexpr int unroll_12_ = 12;
     static constexpr int unroll_4_ = 4;
 
-    int get_max_unroll() const override { return unroll_12_; }
-
     void operator()(
             const void *src, void *dst, dim_t work_amount) const override {
         ker_args_t args;
@@ -379,10 +377,12 @@ status_t jit_uni_reorder_direct_copy_t::execute(const exec_ctx_t &ctx) const {
     const auto nelems = src_d.nelems(true);
     const int simd_w = isa_max_vlen(pd()->isa_) / sizeof(float);
 
-    // If nelem is small, we do sequential copy and don't spawn threads
-    const dim_t thr_granularity
-            = static_cast<dim_t>(kernel_->get_max_unroll()) * simd_w;
-    int nthr = nelems < thr_granularity ? 1 : 0;
+    // Spawning threads costs more than copying a small buffer: up to 32 KiB,
+    // a single thread is faster even with cold caches.
+    constexpr dim_t max_seq_bytes = 32 * 1024;
+    const dim_t nbytes
+            = nelems * static_cast<dim_t>(nstl::max(src_dt_size, dst_dt_size));
+    const int nthr = nbytes <= max_seq_bytes ? 1 : 0;
 
     parallel(nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         dim_t start {0}, end {0};
