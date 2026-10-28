@@ -138,11 +138,12 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
     const auto wei_ic_stride
             = types::data_type_size(jbgp.wei_dt) * weights_d.off_v(ic_dims);
 
-    const auto ker = [= COMPAT_THIS_CAPTURE](int ithr_oc_mb, int nthr_oc_mb,
-                             int ithr_ic, dim_t osb, dim_t osb_s, dim_t ocb,
-                             dim_t ocb_s, int icc, int icc_s, int kd, int kh,
-                             int kw, bool copy_buffer_a, int &prev_ker_idx,
-                             const void *dst_scales_ptr) {
+    const auto ker
+            = [=, &jbgp COMPAT_THIS_CAPTURE](int ithr_oc_mb, int nthr_oc_mb,
+                      int ithr_ic, dim_t osb, dim_t osb_s, dim_t ocb,
+                      dim_t ocb_s, int icc, int icc_s, int kd, int kh, int kw,
+                      bool copy_buffer_a, int &prev_ker_idx,
+                      const void *dst_scales_ptr) {
         const dim_t cur_ocb = ocb + ocb_s;
         const dim_t cur_osb = osb + osb_s;
         const int cur_icc = icc + icc_s;
@@ -360,8 +361,8 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
     const int work_amount = oc_chunks * os_chunks;
 
     const auto init_thr_groups
-            = [=](const int ithr, const int nthr, int &nthr_ic, int &nthr_oc_mb,
-                      int &ithr_ic, int &ithr_oc_mb) {
+            = [=, &jbgp](const int ithr, const int nthr, int &nthr_ic,
+                      int &nthr_oc_mb, int &ithr_ic, int &ithr_oc_mb) {
         nthr_ic = jbgp.nthr_ic_b <= nthr ? jbgp.nthr_ic_b : 1;
         nthr_oc_mb = nthr / nthr_ic;
         ithr_ic = ithr / nthr_oc_mb;
@@ -378,7 +379,7 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
     // overhead on spawning different number of OMP threads from layer to layer.
     const int num_threads
             = work_amount == 1 && jbgp.nthr_ic_b <= 1 ? 1 : jbgp.nthr;
-    parallel(num_threads, [=](const int ithr, const int nthr) {
+    parallel(num_threads, [=, &jbgp](const int ithr, const int nthr) {
         int nthr_ic {1}, nthr_oc_mb {1}, ithr_ic {0}, ithr_oc_mb {0};
         bool ok = init_thr_groups(
                 ithr, nthr, nthr_ic, nthr_oc_mb, ithr_ic, ithr_oc_mb);
@@ -535,7 +536,7 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
         // Explicit return type: `dim_t` and `size_t` have different ranks on
         // macOS, so the two returns would deduce to different types.
         const auto get_dst_reduced_off
-                = [=](int ithr_ic, dim_t osb, dim_t ocb) -> size_t {
+                = [=, &jbgp](int ithr_ic, dim_t osb, dim_t ocb) -> size_t {
             assert(jbgp.nthr_ic_b > 1);
             dim_t os = osb * jbgp.os_block;
             dim_t oc = ocb * jbgp.oc_block;
@@ -549,7 +550,7 @@ status_t brgemm_inner_product_fwd_t<isa>::execute_forward(
         };
 
         parallel(num_threads,
-                [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
+                [=, &jbgp COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
             int nthr_ic {1}, nthr_oc_mb {1}, ithr_ic {0}, ithr_oc_mb {0};
             bool ok = init_thr_groups(
                     ithr, nthr, nthr_ic, nthr_oc_mb, ithr_ic, ithr_oc_mb);
