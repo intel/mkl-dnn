@@ -77,6 +77,8 @@ cmake -S . -B build -G Ninja \
     -DONEDNN_BUILD_TESTS=OFF \
     "${CMAKE_EXTRA_ARGS[@]}"
 cmake --build build --parallel "$(nproc)"
+mkdir -p "$INSTALL_DIR/env"
+cp "$(dirname "$0")/env/vars.sh" "$INSTALL_DIR/env/"
 # Smoke test the CPU engine only, GPU is not expected to be available.
 ctest --test-dir build --output-on-failure -E "gpu|cross-engine"
 cmake --install build
