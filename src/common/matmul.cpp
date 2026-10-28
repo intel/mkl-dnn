@@ -388,7 +388,7 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
             VCHECK_MATMUL_UNIMPL(
                     utils::one_of(wei_sc_qmode, static_sazp, static_sbzp),
                     VERBOSE_UNSUPPORTED_SCALES_CFG);
-            // static_sbzp scales carry the activations' floating-point type.
+            // static_sbzp scales are floating-point values, f16 or bf16.
             VCHECK_MATMUL_UNIMPL(
                     IMPLICATION(wei_sc_qmode == static_sbzp,
                             utils::one_of(sc.get_data_type(DNNL_ARG_WEIGHTS),
@@ -535,8 +535,7 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
             VCHECK_MATMUL_UNIMPL(
                     utils::one_of(wei_zp_qmode, static_sazp, static_sbzp),
                     VERBOSE_UNSUPPORTED_ZP_CFG);
-            // static_sbzp zero-points carry the activations' floating-point
-            // type.
+            // static_sbzp zero-points are floating-point values, f16 or bf16.
             VCHECK_MATMUL_UNIMPL(
                     IMPLICATION(wei_zp_qmode == static_sbzp,
                             utils::one_of(zp.get_data_type(DNNL_ARG_WEIGHTS),
