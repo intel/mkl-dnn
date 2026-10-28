@@ -18,7 +18,7 @@ import functools
 import logging
 import math
 from collections import defaultdict
-from typing import Dict, List, Mapping, Optional, Set, cast
+from typing import Dict, List, Mapping, Optional, cast
 
 from . import ir
 
@@ -1029,6 +1029,41 @@ def get_converter(primitive: str) -> ConverterMeta:
     return converters[primitive]
 
 
+def warning_fn(fn):
+    @functools.lru_cache(maxsize=None)
+    @functools.wraps(fn)
+    def wrapper(logger: Optional[logging.Logger], *args):
+        if logger:
+            fn(logger, *args)
+
+    return wrapper
+
+
+@warning_fn
+def _warn_grouped(logger: logging.Logger):
+    logger.warning(
+        "Verbose does not report per-group sizes; group sizes in"
+        " --grouped are inferred by dividing the total dimension"
+        " by the number of groups and may not match the original."
+    )
+
+
+@warning_fn
+def _warn_sparse(logger: logging.Logger):
+    logger.warning(
+        "Verbose does not report sparsity; the --encoding sparsity values"
+        " are inferred by assuming 1% non-zero."
+    )
+
+
+@warning_fn
+def _warn_missing_converter(logger: logging.Logger, primitive: str):
+    logger.warning(
+        f"Missing converter for primitive '{primitive}';"
+        " the corresponding benchdnn arguments will not be generated."
+    )
+
+
 class InputGenerator:
     """
     Generates an input for benchdnn from internal representation.
@@ -1037,23 +1072,13 @@ class InputGenerator:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.logger = logger
 
-    @staticmethod
-    @functools.lru_cache(maxsize=None)
-    def _warn_grouped(logger: Optional[logging.Logger]):
-        if not logger:
-            return
-        logger.warning(
-            "Verbose does not report per-group sizes; group sizes in"
-            " --grouped are inferred by dividing the total dimension"
-            " by the number of groups and may not match the original."
-        )
-
     def _generate_case(self, entry: ir.Entry):
         Converter = get_converter(entry.prim_kind)
         converter = Converter(entry)
-        grouped = converter.grouped
-        if grouped:
-            self._warn_grouped(self.logger)
+        if converter.grouped:
+            _warn_grouped(self.logger)
+        if converter.encoding:
+            _warn_sparse(self.logger)
         args = [
             "--reset",
             "--allow-enum-tags-only=0",
@@ -1066,21 +1091,18 @@ class InputGenerator:
             converter.tags,
             converter.flags,
             converter.attrs,
-            grouped,
+            converter.grouped,
             converter.shapes,
         ]
         return converter.driver, " ".join(arg for arg in args if arg)
 
     def generate(self, input, split_by_driver=False):
-        missing: Set[str] = set()
         data: Dict[str, List[str]] = defaultdict(list)
         for value in input.values():
             try:
                 driver, args = self._generate_case(value)
-            except KeyError as e:
-                if self.logger is not None and str(e) not in missing:
-                    missing.add(str(e))
-                    self.logger.warning(f"Missing converter: {e!s}")
+            except KeyError:
+                _warn_missing_converter(self.logger, value.prim_kind)
                 continue
             if not split_by_driver:
                 driver, args = "all", f"--{driver} {args}"
