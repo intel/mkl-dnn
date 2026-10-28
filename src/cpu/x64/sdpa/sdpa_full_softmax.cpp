@@ -252,7 +252,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 p_.out_dt, data_type::f32, data_type::f16, data_type::bf16))
         return status::unimplemented;
 
-    const size_t mm_dt_sz = types::data_type_size(p_.mm_dt);
+    const dim_t mm_dt_sz = static_cast<dim_t>(types::data_type_size(p_.mm_dt));
     const dim_t seq_q = p_.seq_q;
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
@@ -272,8 +272,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     const bool need_copy_v = conf.need_copy_v
             = conf.mm2_needs_vnni_b || transpose_v;
-    const dim_t copy_k_block = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
-    const dim_t vt_k_pad = need_copy_v ? copy_k_block : dim_t(1);
+
+    const dim_t mm_wei_k_blk = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
+
+    const dim_t vt_k_pad = need_copy_v ? mm_wei_k_blk : dim_t(1);
     conf.vt_k_pad = vt_k_pad;
 
     const dim_t l2_budget_bytes
@@ -302,10 +304,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // short context runs as one untiled block (kv_block == seq_kv -> no kv tail,
     // mm2 keeps beta = 0).
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
-    const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
-    dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
-                                                / (b_panel_rows * mm_dt_sz))
-                                      : seq_kv;
+    const dim_t hs_max = nstl::max(hs_qk, hs_v);
+    dim_t kv_block = b_panel_budget_bytes / (hs_max * mm_dt_sz);
     const dim_t min_granule = nstl::max<dim_t>(16, vt_k_pad);
     const dim_t granule
             = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
@@ -331,7 +331,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const bool need_copy_k = conf.need_copy_k
             = mm1_transpose_k || conf.mm1_needs_vnni_b || pack_k_for_aliasing;
     conf.pack_k_for_aliasing = pack_k_for_aliasing;
-    const dim_t kt_k_pad = need_copy_k ? copy_k_block : dim_t(1);
+    const dim_t kt_k_pad = need_copy_k ? mm_wei_k_blk : dim_t(1);
     conf.kt_k_pad = kt_k_pad;
 
     if (need_copy_k) kv_block = nstl::min<dim_t>(kv_block, 64);
