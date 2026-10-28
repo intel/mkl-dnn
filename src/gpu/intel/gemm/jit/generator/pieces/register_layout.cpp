@@ -354,7 +354,7 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
                 auto &fymask = colMajor ? rowMask.fixed : colMask.fixed;
                 fymask.isFixed = true;
                 fymask.rsize = *yblock;
-                fymask.value = (uint32_t(1) << logicalSlots) - 1;
+                fymask.value = uint32_t((uint64_t(1) << logicalSlots) - 1);
             }
 
             // X remainders require fragmenting. Channel scattered float doesn't need complete fragmenting.
@@ -637,7 +637,7 @@ RegisterBlock::RegisterBlock(HW hw_, Type T, int r, int c, const MatrixAddressin
                 int logicalSlots = (rblock * cblock * T) / maskGranularity;
                 fmask.isFixed = true;
                 fmask.rsize = rblock * cblock;
-                fmask.value = (uint32_t(1) << logicalSlots) - 1;
+                fmask.value = uint32_t((uint64_t(1) << logicalSlots) - 1);
             }
 
             int nbytes = roundup_pow2(rblock * cblock) * T;

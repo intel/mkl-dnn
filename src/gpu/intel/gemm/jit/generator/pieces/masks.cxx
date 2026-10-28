@@ -122,7 +122,7 @@ void Generator<hw>::loadMask(MaskAssignment assignment, Subregister index, const
 
     if (assignment.mask.fixed.isFixed) {
         // Load fixed mask. Easy.
-        mov(1, flag, uint16_t(assignment.mask.fixed.value));
+        mov(1, flag, assignment.mask.fixed.value);
     } else {
         // Load a variable mask, which requires some minor bit-twiddling.
         auto &vmask = assignment.mask.variable;
