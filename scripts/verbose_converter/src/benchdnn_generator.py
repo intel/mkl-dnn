@@ -144,6 +144,8 @@ class Converter(metaclass=ConverterMeta):
         return ":".join([po.alg, src1_arg, src2_arg])
 
     def _convert_binary_post_op(self, po: ir.BinaryPostOp):
+        if po.is_inplace():
+            return f"{po.alg}:{po.dt}"
         if po.strides != "":
             return f"{po.alg}:{po.dt}:{po.mask}:{po.tag}:{po.strides}"
         if po.tag != "any":
