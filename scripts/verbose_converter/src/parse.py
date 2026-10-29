@@ -406,12 +406,22 @@ class ParserImpl:
             return ir.Dropout()
         if not spec.read_literal(":"):
             return ir.Dropout(tag)
-        seed_dt = spec.read_str()
-        if not spec.read_literal(":"):
-            raise ParseError("Expected offset indicator for dropout")
+        # Sometimes the tag doesn't get printed, and the first entry
+        # is actually the seed data type. In that case, the string we just
+        # read is the seed data type, and the following field is the
+        # offset indicator. So, try to read an offset indicator, and if we
+        # succeed, treat the first field as the seed data type. In that case,
+        # the tag defaults to "abx".
         indicator = spec.read_literal("0") or spec.read_literal("1")
-        if indicator is None:
-            raise ParseError("Expected offset indicator for dropout")
+        if indicator:
+            seed_dt, tag = tag, "abx"
+        else:
+            seed_dt = spec.read_str()
+            if not spec.read_literal(":"):
+                raise ParseError("Expected offset indicator for dropout")
+            indicator = spec.read_literal("0") or spec.read_literal("1")
+            if indicator is None:
+                raise ParseError("Expected offset indicator for dropout")
         use_offset = indicator == "1"
         if not spec.read_literal(":"):
             raise ParseError("Expected host scalar indicator for dropout")
