@@ -21,9 +21,9 @@ name: "Weekly RISC-V"
 on:
   workflow_dispatch:
   schedule:
-    #* minute (0-59) hour (0-23) day (1-31) month (1-12)  day of the week (0 - 6)
-    #* cron jobs run on the default (main) branch.
-    #* set to run at 5am Saturday UCT
+    # minute (0-59) hour (0-23) day (1-31) month (1-12)  day of the week (0 - 6)
+    # cron jobs run on the default (main) branch.
+    # set to run at 5am Saturday UCT
   - cron: "0 5 * * 6"
 
 concurrency:
@@ -104,6 +104,10 @@ jobs:
   test:
     needs: build
     strategy:
+      # QEMU tests are long-running. To reduce the load on GitHub-hosted
+      # runners shared across the organization,
+      # run at most 2 test partitions at a time.
+      max-parallel: 2
       matrix:
         config: [
           { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 1, stride: 10 },
