@@ -26,7 +26,7 @@
 #include "gpu/intel/logging.hpp"
 
 #ifdef DNNL_WITH_SYCL
-#include "gpu/intel/sycl/stream.hpp"
+#include "gpu/intel/sycl/sycl_stream.hpp"
 #endif
 
 namespace dnnl {
