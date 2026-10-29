@@ -107,8 +107,10 @@ rnn_cell_execution_sig((ref_rnn_fwd_t<src_type, weights_type,
             const auto Aic_n
                     = inc_ptr(src_iter_c_, rnn.src_iter_c_dt, m * LDAic + n);
             const auto bias_n = inc_ptr(bias_[0], rnn.bias_dt, n);
+            const auto augru_attention_m
+                    = augru_attention_ ? augru_attention_ + m : nullptr;
             this->rnn_postgemm_->execute(rnn, cell_position, curr_ws_gates_,
-                    C_n, augru_attention_, Dpg_n, Dic_n, Ai_m, Aic_n,
+                    C_n, augru_attention_m, Dpg_n, Dic_n, Ai_m, Aic_n,
                     diff_src_layer_, diff_augru_attention_, diff_src_iter_,
                     diff_src_iter_c_, diff_dst_layer_, diff_dst_iter_,
                     diff_dst_iter_c_, weights_peephole_n, bias_n, ws_grid_,
@@ -142,8 +144,10 @@ rnn_cell_execution_sig((ref_rnn_fwd_t<src_type, weights_type,
                         src_iter_c_, rnn.src_iter_c_dt, m * LDAic + n);
                 const auto bias_n = inc_ptr(bias_[0], rnn.bias_dt, n);
                 auto weights_scales_n = weights_scales + (mask ? n : 0);
+                const auto augru_attention_m
+                        = augru_attention_ ? augru_attention_ + m : nullptr;
                 this->rnn_postgemm_->execute(rnn, cell_position, curr_ws_gates_,
-                        C_gates_n, augru_attention_, Dpg_n, Dic_n, Ai_m, Aic_n,
+                        C_gates_n, augru_attention_m, Dpg_n, Dic_n, Ai_m, Aic_n,
                         diff_src_layer_, diff_augru_attention_, diff_src_iter_,
                         diff_src_iter_c_, diff_dst_layer_, diff_dst_iter_,
                         nullptr, nullptr, bias_n, ws_grid_, C_cell_n, Di_n,
@@ -169,8 +173,10 @@ rnn_cell_execution_sig((ref_rnn_fwd_t<src_type, weights_type,
                         src_iter_c_, rnn.src_iter_c_dt, m * LDAic + n);
                 const auto bias_n = inc_ptr(bias_[0], rnn.bias_dt, n);
                 auto weights_scales_n = weights_scales + (mask ? n : 0);
+                const auto augru_attention_m
+                        = augru_attention_ ? augru_attention_ + m : nullptr;
                 this->rnn_postgemm_->execute_part2(rnn, cell_position,
-                        curr_ws_gates_, C_gates_n, augru_attention_, Dpg_n,
+                        curr_ws_gates_, C_gates_n, augru_attention_m, Dpg_n,
                         Dic_n, Ai_m, Aic_n, diff_src_layer_,
                         diff_augru_attention_, diff_src_iter_, diff_src_iter_c_,
                         diff_dst_layer_, diff_dst_iter_, nullptr, nullptr,

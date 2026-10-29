@@ -23,3 +23,11 @@
 --cfg=f32
 --flags=O
 --batch=shapes_small
+
+# M split into several blocks in brgemm
+--reset
+--alg=LBR_AUGRU,VANILLA_AUGRU
+--prop=FWD_I
+--cfg=f32
+l1t2mb64sic64slc64dhc64dic64
+l1t2mb256sic128slc128dhc128dic128
