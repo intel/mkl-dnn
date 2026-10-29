@@ -17,8 +17,8 @@
 
 name: "CI AArch64"
 
-#* To avoid duplicate jobs running when both push and PR is satisfied, we use this:
-#* https://github.com/orgs/community/discussions/26940#discussioncomment-5686753
+# To avoid duplicate jobs running when both push and PR is satisfied, we use this:
+# https://github.com/orgs/community/discussions/26940#discussioncomment-5686753
 on:
   push:
     branches: [main, "rls-*"]
@@ -36,6 +36,8 @@ on:
       - "src/cpu/aarch64/**"
       - "tests/**"
       - "CMakeLists.txt"
+  # Pull requests are tested only if they change AArch64-specific files.
+  # Changes to common code are covered by post-merge testing.
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -44,19 +46,16 @@ on:
       - ".github/automation/aarch64/**"
       - ".github/workflows/aarch64-acl.yml"
       - ".github/workflows/ci-aarch64.yml"
-      - "cmake/**"
-      - "examples/**"
-      - "include/**"
-      - "src/common/**"
+      - "cmake/ACL.cmake"
+      - "cmake/FindACL.cmake"
       - "src/cpu/*"
       - "src/cpu/aarch64/**"
       - "tests/**"
-      - "CMakeLists.txt"
-  #* allow manual trigger of workflow when needed.
+  # allow manual trigger of workflow when needed.
   workflow_dispatch:
 
-#* Stop stale workflows when pull requests are updated: https://stackoverflow.com/a/70972844
-#* Does not apply to the main branch.
+# Stop stale workflows when pull requests are updated: https://stackoverflow.com/a/70972844
+# Does not apply to the main branch.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
