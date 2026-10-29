@@ -65,6 +65,8 @@
 --reset --dt=s8:s8:f32 --stag=ab --wtag=ab --dtag=ab --attr-scales=dst:common:1 --attr-post-ops=gelu_erf 8x8:8x8
 # fp8 binary post-ops with int8 inputs
 --reset --dt=s8:s8:f32 --attr-post-ops=mul:f8_e4m3:common,mul:f8_e4m3:per_oc 57x256:256x704_n"int8_fp8_binary_po"
+# fp8 binary post-ops with f16 inputs
+--reset --dt=f16 --attr-post-ops=mul:f8_e4m3:per_tensor,add:f8_e4m3:per_oc+mul:f32:per_oc 3x256:256x2 7x33:33x17 64x256:256x1_n"f16_fp8_binary_po"
 --reset --dt=f32:s4:f32 --stag=ab --wtag=ab --dtag=ba --attr-fpmath=strict:true 2x2:2x2_n"woq_with_transposed_dst"
 --reset --dt=s8:u8:f16 --attr-scales=src:common:2:f16+wei:per_oc 3x6x1x2x4:1x6x7x4x1_n"non-f32_src_scale"
 # int4 weights + dynamic quant with N=1: must not swap A/B into an unsupported swapped kernel (must dispatch to jit)

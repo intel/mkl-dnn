@@ -4359,10 +4359,8 @@ void jit_brgemm_kernel_t<Wmm>::generate() {
             dd(0);
     }
 
-    if (brg.is_fp8_via_convert()) {
-        if (f8_e5m2_cvt_) f8_e5m2_cvt_->prepare_table();
-        if (f8_e4m3_cvt_) f8_e4m3_cvt_->prepare_table();
-    }
+    if (f8_e5m2_cvt_) f8_e5m2_cvt_->prepare_table();
+    if (f8_e4m3_cvt_) f8_e4m3_cvt_->prepare_table();
 
     if (brg.with_eltwise || brg.with_sum)
         postops_injector_->prepare_table(/* generate = */ true);
