@@ -80,6 +80,10 @@
 #include "common/experimental.hpp"
 #endif
 
+#ifdef ONEDNN_BUILD_GRAPH
+#include "graph/utils/verbose.hpp"
+#endif
+
 namespace dnnl {
 namespace impl {
 

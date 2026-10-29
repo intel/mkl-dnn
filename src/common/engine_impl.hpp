@@ -23,7 +23,17 @@
 #include "common/utils.hpp"
 
 #ifdef ONEDNN_BUILD_GRAPH
-#include "graph/interface/allocator.hpp"
+#include <memory>
+
+#include "oneapi/dnnl/dnnl_graph_types.h"
+
+namespace dnnl {
+namespace impl {
+namespace graph {
+using allocator_t = dnnl_graph_allocator;
+} // namespace graph
+} // namespace impl
+} // namespace dnnl
 #endif
 
 #define VERROR_ENGINE_IMPL(cond, stat, msg, ...) \
@@ -40,10 +50,10 @@ namespace impl {
 class engine_impl_t {
 public:
     engine_impl_t() = delete;
-    engine_impl_t(engine_kind_t kind, runtime_kind_t runtime_kind, size_t index)
-        : kind_(kind), runtime_kind_(runtime_kind), index_(index) {}
+    engine_impl_t(
+            engine_kind_t kind, runtime_kind_t runtime_kind, size_t index);
 
-    virtual ~engine_impl_t() = default;
+    virtual ~engine_impl_t();
 
     engine_kind_t kind() const { return kind_; }
     runtime_kind_t runtime_kind() const { return runtime_kind_; }
@@ -56,8 +66,8 @@ public:
     }
 
 #ifdef ONEDNN_BUILD_GRAPH
-    void *get_allocator() const { return (void *)(&allocator_); }
-    void set_allocator(graph::allocator_t *alloc) { allocator_ = *alloc; }
+    void *get_allocator() const { return (void *)allocator_.get(); }
+    void set_allocator(graph::allocator_t *alloc);
 #endif
 
     virtual status_t init() { return status::success; }
@@ -89,7 +99,9 @@ private:
     size_t index_;
 
 #ifdef ONEDNN_BUILD_GRAPH
-    graph::allocator_t allocator_;
+    // Held by pointer to keep graph/interface/allocator.hpp, which pulls in
+    // SYCL headers, out of this header.
+    std::unique_ptr<graph::allocator_t> allocator_;
 #endif
 };
 

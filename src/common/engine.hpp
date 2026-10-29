@@ -28,10 +28,6 @@
 #include "primitive_desc.hpp"
 #include "utils.hpp"
 
-#ifdef ONEDNN_BUILD_GRAPH
-#include "graph/interface/allocator.hpp"
-#endif
-
 #define VERROR_ENGINE(cond, stat, msg, ...) \
     do { \
         if (!(cond)) { \

@@ -26,6 +26,7 @@
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
 
+#include "graph/interface/allocator.hpp"
 #include "graph/interface/c_types_map.hpp"
 #include "graph/interface/partition_cache.hpp"
 #include "graph/interface/tensor.hpp"
