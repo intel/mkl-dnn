@@ -263,6 +263,20 @@ bool binary_doable(
     return true;
 }
 
+static bool is_supported_cpu_matmul_bcast(int ndims, int mask) {
+    if (ndims == 4) {
+        // Supported 4D CPU masks:
+        // 0 (scalar), 1 (per_mb), 2 (per_oc), 3 (batch), 8 (per_w),
+        // 9 (per_mb_w), 10 (per_hw), 12 (spatial), 13 (per_mb_spatial), 15 (full)
+        return dnnl::impl::utils::one_of(mask, 0, 1, 2, 3, 8, 9, 10, 12, 13, 15);
+    } else if (ndims == 5) {
+        // Supported 5D CPU masks:
+        // 1 (per_mb), 7 (batch), 16 (per_w), 17 (per_mb_w), 29 (per_mb_spatial), 31 (full)
+        return dnnl::impl::utils::one_of(mask, 0, 1, 2, 7, 16, 17, 29, 31);
+    }
+    return false;
+}
+
 // TODO: ekind can be removed once CPU optimized 5d tensor MatMul with
 // broadcasted post op
 static bool post_binary_fusible_impl(const op_t *base_op,
@@ -280,16 +294,18 @@ static bool post_binary_fusible_impl(const op_t *base_op,
         return true;
 
     int32_t output_ndims = static_cast<int32_t>(fused_shape.size());
-    // 5d tensor MatMul with broadcasted post was not optimized on CPU
-    if (ekind == dnnl_cpu && base_op->get_kind() == op_kind::_matmul
-            && output_ndims == 5)
-        return false;
+
     // any broadcasted for 4d or 5d tensor MatMul
     if (base_op->get_kind() == op_kind::_matmul
             && (output_ndims == 4 || output_ndims == 5)) {
+        int mask = 0;
         for (int32_t i = output_ndims - 1; i >= 0; i--) {
             if (other_shape[i] == 1) continue;
             if (fused_shape[i] != other_shape[i]) { return false; }
+            mask |= (1 << i);
+        }
+        if(ekind == dnnl_cpu){
+            return is_supported_cpu_matmul_bcast(output_ndims, mask);
         }
         return true;
     }

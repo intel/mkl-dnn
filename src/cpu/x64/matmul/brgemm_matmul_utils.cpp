@@ -170,13 +170,13 @@ bool post_ops_ok(brgemm_matmul_conf_t &bgmmc, const primitive_attr_t &attr,
             = IMPLICATION(is_binary_po_per_oc_sp_bcast, ndims < 4)
             && IMPLICATION(is_binary_po_per_oc_d_bcast, ndims == 4)
             && IMPLICATION(
-                    is_binary_po_channel_bcast, utils::one_of(ndims, 3, 4))
+                    is_binary_po_channel_bcast, utils::one_of(ndims, 3, 4, 5))
             && IMPLICATION(
-                    is_binary_po_per_mb_w_bcast, utils::one_of(ndims, 3, 4))
-            && IMPLICATION(is_binary_po_per_w_bcast, utils::one_of(ndims, 3, 4))
+                    is_binary_po_per_mb_w_bcast, utils::one_of(ndims, 3, 4, 5))
+            && IMPLICATION(is_binary_po_per_w_bcast, utils::one_of(ndims, 3, 4, 5))
             && IMPLICATION(
-                    is_binary_po_per_mb_bcast, utils::one_of(ndims, 3, 4))
-            && IMPLICATION(is_binary_po_batch_bcast, utils::one_of(ndims, 3, 4))
+                    is_binary_po_per_mb_bcast, utils::one_of(ndims, 3, 4, 5))
+            && IMPLICATION(is_binary_po_batch_bcast, utils::one_of(ndims, 3, 4, 5))
             && IMPLICATION(is_binary_po_per_hw_bcast, ndims == 4);
 
     const bcast_set_t default_bcast_set = {broadcasting_strategy_t::per_oc,
