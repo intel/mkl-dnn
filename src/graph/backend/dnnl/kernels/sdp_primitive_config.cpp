@@ -53,7 +53,7 @@ status_t sdp_primitive_config_t::initial_check(
                 status::unimplemented, "Not support quantized SDPA");
     }
 
-    // step1(pattern check): Not support sdpa variants with select as mask
+    // step1(pattern check): Not support sdpa variants with select as mask on GPU
     // We already have a pattern matcher to ensure that the sdpa patterns
     // dispatch to here are knows ones, and we have quant check in sdpa base
     // kernel, so here we only check specific variants based on support matrix.
@@ -142,7 +142,7 @@ status_t sdp_primitive_config_t::initial_check(
                 if (post_op && post_op->get_kind() == graph::op_kind::Select) {
                     VCHECK_SDP_PRIMITIVE(is_cpu, status::unimplemented,
                             "Not support select after scale(optional) and "
-                            "mask(optional)");
+                            "mask(optional) on GPU");
 
                     // The score enters the select as one branch (then/else);
                     // the other branch is the fill and must be a scalar.
@@ -178,8 +178,8 @@ status_t sdp_primitive_config_t::initial_check(
         }
     }
 
-    VCHECK_SDP_PRIMITIVE(f32_inter, status::invalid_graph,
-            "only supports f32 intermediates.");
+    VCHECK_SDP_PRIMITIVE(f32_inter || is_cpu, status::invalid_graph,
+            "only supports f32 intermediates on GPU.");
 
     auto find_graph_inport = [&inputs](const std::shared_ptr<value_t> &val) {
         auto tmp_val = val;

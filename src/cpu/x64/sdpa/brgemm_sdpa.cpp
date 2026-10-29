@@ -117,8 +117,10 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
             const memory_desc_wrapper fill_mdw(desc()->fill_md());
             VDISPATCH_SDPA(fill_mdw.ndims() == 1 && fill_mdw.dims()[0] == 1
-                            && fill_mdw.data_type() == f32,
-                    "the select attention mask fill must be a scalar f32");
+                            && utils::one_of(
+                                    fill_mdw.data_type(), f32, bf16, f16),
+                    "the select attention mask fill must be a scalar f32, "
+                    "bf16, or f16");
         } else
             VDISPATCH_SDPA(
                     mask_mdw.data_type() == dt || mask_mdw.data_type() == f32,
@@ -128,8 +130,9 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
     if (with_attn_scale()) {
         const memory_desc_wrapper scale_mdw(desc()->scale_md());
-        VDISPATCH_SDPA(scale_mdw.data_type() == f32,
-                "only an f32 attention scale is currently supported");
+        VDISPATCH_SDPA(scale_mdw.ndims() == 1 && scale_mdw.dims()[0] == 1
+                        && utils::one_of(scale_mdw.data_type(), f32, bf16, f16),
+                "the attention scale must be a scalar f32, bf16, or f16");
     }
 
     VDISPATCH_SDPA(
@@ -199,7 +202,8 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         // Derive the tiling + per-thread scratch layout once (JIT-free), then
         // size the scratchpad from it; the primitive compiles its kernels from
         // the same conf, so no work is repeated and the pd stays kernel-free.
-        CHECK(sdpa_online_softmax::configure(fp_, online_conf_));
+        VDISPATCH_SDPA_SC(sdpa_online_softmax::configure(fp_, online_conf_),
+                "sdpa_online_softmax configuration failed");
         nthr_ = online_conf_.nthr;
         scratchpad.book(memory_tracking::names::key_sdpa_brgemm_buffer,
                 online_conf_.scratch_total(nthr_), 1, 64);
@@ -262,7 +266,9 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     // finalized BRGEMM descriptors once (JIT-free); size the scratchpad from the
     // conf the primitive later compiles its kernels from, so no work is repeated
     // and the pd stays kernel-free.
-    CHECK(sdpa_full_softmax::configure(bp_, full_conf_, full_descs_));
+    VDISPATCH_SDPA_SC(
+            sdpa_full_softmax::configure(bp_, full_conf_, full_descs_),
+            "sdpa_full_softmax configuration failed");
     nthr_ = full_conf_.nthr;
     scratchpad.book(memory_tracking::names::key_sdpa_brgemm_buffer,
             full_conf_.scratch_total(nthr_), 1, 64);
@@ -284,6 +290,36 @@ status_t brgemm_sdpa_fwd_t::init(engine_t *engine) {
     return status::unimplemented;
 }
 
+namespace {
+status_t get_scalar_value(
+        const exec_ctx_t &ctx, const memory_desc_t &md, int arg, float &value) {
+    if (md.data_type == data_type::f32) {
+        value = *CTX_IN_MEM(const float *, arg);
+    } else if (md.data_type == data_type::bf16) {
+        value = *CTX_IN_MEM(const bfloat16_t *, arg);
+    } else if (md.data_type == data_type::f16) {
+        value = *CTX_IN_MEM(const float16_t *, arg);
+    } else {
+        return status::unimplemented;
+    }
+    return status::success;
+}
+
+status_t get_scalar_value(
+        const exec_ctx_t &ctx, const sdpa_pd_t &pd, int arg, float &value) {
+    const auto &storage = CTX_IN_STORAGE(arg);
+    if (storage.is_host_scalar()) {
+        const auto *host_storage
+                = utils::downcast<const host_scalar_memory_storage_t *>(
+                        &storage);
+        return host_storage->get_scalar_value(&value, sizeof(value));
+    } else {
+        const auto &md = *pd.arg_md(arg);
+        return get_scalar_value(ctx, md, arg, value);
+    }
+}
+} // namespace
+
 status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     auto *scratch = ctx.get_scratchpad_grantor().get<char>(
             memory_tracking::names::key_sdpa_brgemm_buffer);
@@ -299,16 +335,7 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     // from host storage; a regular tensor scale from its device buffer.
     float scale_val = 1.0f;
     if (pd()->with_attn_scale()) {
-        if (pd()->with_host_scale()) {
-            const auto &scale_storage = CTX_IN_STORAGE(DNNL_ARG_SCALE);
-            const auto *host_storage
-                    = utils::downcast<const host_scalar_memory_storage_t *>(
-                            &scale_storage);
-            CHECK(host_storage->get_scalar_value(
-                    &scale_val, sizeof(scale_val)));
-        } else {
-            scale_val = *CTX_IN_MEM(const float *, DNNL_ARG_SCALE);
-        }
+        CHECK(get_scalar_value(ctx, *pd(), DNNL_ARG_SCALE, scale_val));
         if (pd()->desc()->invert_scale) scale_val = 1.0f / scale_val;
     }
 
@@ -319,15 +346,7 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     float fill_val = 0.0f;
     if (pd()->with_select_mask()) {
         cond = CTX_IN_MEM(const void *, DNNL_ARG_ATTN_MASK);
-        const auto &fill_storage = CTX_IN_STORAGE(DNNL_ARG_ATTN_MASK_FILL);
-        if (fill_storage.is_host_scalar()) {
-            const auto *host_storage
-                    = utils::downcast<const host_scalar_memory_storage_t *>(
-                            &fill_storage);
-            CHECK(host_storage->get_scalar_value(&fill_val, sizeof(fill_val)));
-        } else {
-            fill_val = *CTX_IN_MEM(const float *, DNNL_ARG_ATTN_MASK_FILL);
-        }
+        CHECK(get_scalar_value(ctx, *pd(), DNNL_ARG_ATTN_MASK_FILL, fill_val));
     }
 
     if (pd()->impl_kind() == sdpa_impl_kind_t::online_softmax) {
