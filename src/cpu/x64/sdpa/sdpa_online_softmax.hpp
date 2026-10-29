@@ -39,13 +39,11 @@ class jit_generator_t;
 // [seq_q x seq_kv] score matrix is never materialized:
 //   for each KV tile: scores = Q * K_tile^T ; rescale the running softmax
 //   state (max/denominator) ; out = old_coef * out + P_tile * V_tile
-// Takes ONLY plain arguments (dims, strides in elements, raw pointers, scalar
-// scale/fill) over the pd's conf + the primitive's kernels.
 //
 // Unlike the full-key-axis path, which computes each query tile's scores for
 // all seq_kv keys before softmax, this never materializes or re-reads a full
 // score row. It instead rescales the running accumulator per KV tile. f32
-// compute only today (no bf16/f16/AMX path, no attention-mask post-op); the
+// compute only now (no bf16/f16/AMX path, no attention-mask post-op); the
 // full-key-axis path supports those data types and the additive attention mask.
 // -----------------------------------------------------------------------------
 struct sdpa_online_softmax_params_t {
@@ -59,14 +57,7 @@ struct sdpa_online_softmax_params_t {
     dim_t head_size_qk = 0;
     dim_t head_size_v = 0;
 
-    // User strides in elements. Q / output / select-condition carry the group
-    // axis; K / V have group extent 1 (broadcast over the group). K is always
-    // read as [.., head_size_qk, seq_kv] (the non-transposed orientation);
-    // callers that may see the other physical layout must transpose it
-    // themselves (the online-softmax strategy does not, unlike the full-softmax one).
     std::vector<dim_t> q_strides, k_strides, v_strides, o_strides, cond_strides;
-    // Logical dims of the select-condition tensor; a dim of 1 is a broadcast
-    // axis whose (meaningless) stride must contribute 0.
     std::vector<dim_t> cond_dims;
 
     bool has_select = false;
@@ -74,9 +65,6 @@ struct sdpa_online_softmax_params_t {
     bool invert_select = false;
 };
 
-// Runtime pointers / scalars, resolved per execute call. No generic post-op
-// chain (unlike sdpa_full_softmax_run_args_t): the scale is applied unconditionally
-// (1.0f is a no-op) and there is no attention-mask support yet.
 struct sdpa_online_softmax_run_args_t {
     const void *q = nullptr;
     const void *k = nullptr;
@@ -87,9 +75,8 @@ struct sdpa_online_softmax_run_args_t {
     float fill = 0.0f;
 };
 
-// Derived compute configuration (KV tiling + per-thread scratch layout). Pure
-// scalar config (mirroring brgemm_matmul_conf_t), computed once by configure()
-// and owned by the primitive_desc so the pd sizes its scratchpad from it.
+// Derived compute configuration (KV tiling + per-thread scratch layout),
+// computed by configure()
 struct sdpa_online_softmax_conf_t {
     sdpa_online_softmax_params_t params;
     // KV tiling width for the streaming softmax (seq_kv in tiles of kv_blk).
@@ -133,7 +120,7 @@ struct sdpa_online_softmax_kernels_t {
     // ragged last query block, and the full kv_blk vs the ragged last KV tile.
     brgemm_kernel_t *mm1_kernel[2][2] = {};
     brgemm_kernel_t *mm2_kernel[2][2] = {};
-    // JIT online-softmax epilogue (AVX2 IR): the softmax kernels apply scale +
+    // JIT online-softmax epilogue (IR): the softmax kernels apply scale +
     // select-mask + streaming-softmax to one KV tile, indexed [q_tail?][kv_tail?]
     // (row count baked from q_blk/q_tail, width from kv_blk/kv_tail); acc_renorm
     // rescales the running output by old_coef and adds the tile's P*V and
@@ -142,25 +129,20 @@ struct sdpa_online_softmax_kernels_t {
     std::unique_ptr<jit_generator_t> acc_renorm_ir_kernel[2];
 };
 
-// Online-softmax (flash) SDPA compute, folded into the CPU primitive:
-// the primitive_desc owns the conf (configure), the primitive owns the kernels
-// (create_kernels) and drives the loop (execute).
+// Online-softmax (flash) SDPA compute: the primitive_desc owns
+// the conf (the function `configure`), the primitive owns the kernels (`create_kernels`)
+// and drives the loop (`execute`).
 namespace sdpa_online_softmax {
 
 // Compute the derived configuration (KV tiling + per-thread scratch layout)
-// from the plain params. JIT-free, so a primitive_desc can size its scratchpad
-// from the returned conf without compiling kernels.
+// from the plain params.
 status_t configure(const sdpa_online_softmax_params_t &params,
         sdpa_online_softmax_conf_t &conf);
 
-// JIT-compile the BRGEMM + IR-softmax kernels from a conf produced by
-// configure(), into `kernels`. The engine is unused today (kept for interface
-// parity with the full-softmax path / future engine-dependent kernel selection).
-status_t create_kernels(cpu_isa_t isa, const sdpa_online_softmax_conf_t &conf,
-        engine_t *engine, sdpa_online_softmax_kernels_t &kernels);
+status_t create_kernels(cpu_isa_t isa_for_ir,
+        const sdpa_online_softmax_conf_t &conf, engine_t *engine,
+        sdpa_online_softmax_kernels_t &kernels);
 
-// Run the online-softmax SDPA. scratch_base points at a buffer of at least
-// conf.scratch_total(nthr) bytes; each thread slices its own block.
 status_t execute(const sdpa_online_softmax_conf_t &conf,
         const sdpa_online_softmax_kernels_t &kernels,
         const sdpa_online_softmax_run_args_t &args, void *scratch_base,

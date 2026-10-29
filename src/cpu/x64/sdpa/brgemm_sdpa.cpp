@@ -28,24 +28,16 @@ namespace impl {
 namespace cpu {
 namespace x64 {
 
-// Fills bp_ directly from this pd's memory descriptors (sdpa_desc_t), the
-// same way GPU's micro_fwd_t::pd_t::init() fills its own params struct from
-// desc() -- not from any graph pattern-matching / subgraph-parsing logic.
 status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     using namespace data_type;
     using namespace status;
 
-    // The pd stays kernel-free: it only derives the compute conf and sizes the
-    // scratchpad (via the JIT-free configure()); the BRGEMM kernels are compiled
-    // later in brgemm_sdpa_fwd_t::init(engine).
     UNUSED(engine);
     VDISPATCH_SDPA(is_fwd(), VERBOSE_BAD_PROPKIND);
 
     VDISPATCH_SDPA(desc()->prop_kind == prop_kind::forward_inference,
             "training-forward (softmax stats output) is not supported");
 
-    // Both strategies JIT a vectorized softmax epilogue and run BRGEMM, which
-    // need at least AVX2.
     VDISPATCH_SDPA(mayiuse(avx2), VERBOSE_UNSUPPORTED_ISA);
 
     const memory_desc_wrapper qry_mdw(desc()->qry_md());
@@ -74,8 +66,8 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 
     const data_type_t dt = qry_mdw.data_type();
     VDISPATCH_SDPA(utils::one_of(dt, f32, bf16, f16), VERBOSE_UNSUPPORTED_DT);
-    VDISPATCH_SDPA(key_mdw.data_type() == dt && val_mdw.data_type() == dt
-                    && dst_mdw.data_type() == dt,
+    VDISPATCH_SDPA(utils::everyone_is(dt, key_mdw.data_type(),
+                           val_mdw.data_type(), dst_mdw.data_type()),
             "query, key, value and dst data types must match");
 
     VDISPATCH_SDPA(kq_acc_dt() == f32 && vs_acc_dt() == f32,
@@ -199,9 +191,6 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
                     cond_mdw.dims(), cond_mdw.dims() + sdpa_pd_t::ndims);
         }
 
-        // Derive the tiling + per-thread scratch layout once (JIT-free), then
-        // size the scratchpad from it; the primitive compiles its kernels from
-        // the same conf, so no work is repeated and the pd stays kernel-free.
         VDISPATCH_SDPA_SC(sdpa_online_softmax::configure(fp_, online_conf_),
                 "sdpa_online_softmax configuration failed");
         nthr_ = online_conf_.nthr;
@@ -262,10 +251,6 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         bp_.mm1_post_ops.push_back(mk);
     }
 
-    // Derive the query/KV blocking, per-thread + global scratch layout, and the
-    // finalized BRGEMM descriptors once (JIT-free); size the scratchpad from the
-    // conf the primitive later compiles its kernels from, so no work is repeated
-    // and the pd stays kernel-free.
     VDISPATCH_SDPA_SC(
             sdpa_full_softmax::configure(bp_, full_conf_, full_descs_),
             "sdpa_full_softmax configuration failed");
@@ -277,14 +262,15 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
 }
 
 status_t brgemm_sdpa_fwd_t::init(engine_t *engine) {
-    const auto isa = mayiuse(avx512_core) ? avx512_core : avx2;
+    const auto isa_for_ir = mayiuse(avx512_core) ? avx512_core : avx2;
 
     if (pd()->impl_kind() == sdpa_impl_kind_t::online_softmax) {
-        return sdpa_online_softmax::create_kernels(
-                isa, pd()->online_softmax_conf(), engine, online_kernels_);
+        return sdpa_online_softmax::create_kernels(isa_for_ir,
+                pd()->online_softmax_conf(), engine, online_kernels_);
     } else {
-        return sdpa_full_softmax::create_kernels(isa, pd()->full_softmax_conf(),
-                pd()->full_softmax_descs(), engine, full_kernels_);
+        return sdpa_full_softmax::create_kernels(isa_for_ir,
+                pd()->full_softmax_conf(), pd()->full_softmax_descs(), engine,
+                full_kernels_);
     }
     assert(!"Unknown SDPA implementation kind");
     return status::unimplemented;

@@ -545,7 +545,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     return status::success;
 }
 
-status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
+status_t create_kernels(cpu_isa_t isa_for_ir,
+        const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_descs_t &descs, engine_t *engine,
         sdpa_full_softmax_kernels_t &kernels) {
     const sdpa_full_softmax_params_t &p_ = conf.params;
@@ -734,7 +735,7 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
 
         const dim_t cond_row = eff[ndims - 2];
         std::shared_ptr<jit_generator_t> k(
-                sdpa_full_softmax_select_ir::create_select_ir_kernel(isa,
+                sdpa_full_softmax_select_ir::create_select_ir_kernel(isa_for_ir,
                         /*wseq_kv=*/seq_kv,
                         /*invert_select=*/p_.invert_select,
                         /*scores_row_stride=*/seq_kv,
