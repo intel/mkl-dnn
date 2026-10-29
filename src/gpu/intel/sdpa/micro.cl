@@ -103,7 +103,19 @@ inline void apply_dropout_s_tile(
             const int offset_c = tile_offset_c + i;
             const ulong cbase = batch_head_base
                     + (ulong)offset_c * (ulong)k_stride + (ulong)tile_offset_r;
-            for (int j = 0; j < tile_len; j += 4) {
+            int j = 0;
+            /* Two independent Philox chains per call, for ILP. */
+            for (; j + 8 <= tile_len; j += 8) {
+                const uint8 v8 = philox_4x32_vec4x2_w_offset(
+                        cbase + (ulong)j, seed, offset);
+                for (int w = 0; w < 8; w++) {
+                    tile_access(scale_tile, i0, j + w, SUBGROUP_SIZE, blk_r,
+                            blk_c, nblk_r)
+                            = dropout_keep(
+                                    v8[w], tile_offset_r + j + w, offset_c);
+                }
+            }
+            for (; j < tile_len; j += 4) {
                 const uint4 v4 = philox_4x32_vec4_w_offset(
                         cbase + (ulong)j, seed, offset);
                 for (int w = 0; w < 4; w++) {
