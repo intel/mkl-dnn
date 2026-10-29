@@ -52,9 +52,11 @@ dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<
             const auto &entry = post_ops.entry_[i];
             if (!entry.is_binary()) continue;
             has_f8_e5m2_binary_postops
-                    = entry.binary.src1_desc.data_type == data_type::f8_e5m2;
+                    = entry.binary.src1_desc.data_type == data_type::f8_e5m2
+                    || has_f8_e5m2_binary_postops;
             has_f8_e4m3_binary_postops
-                    = entry.binary.src1_desc.data_type == data_type::f8_e4m3;
+                    = entry.binary.src1_desc.data_type == data_type::f8_e4m3
+                    || has_f8_e4m3_binary_postops;
         }
     }
 
