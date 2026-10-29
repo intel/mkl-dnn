@@ -17,8 +17,14 @@
 name: "CodeQL"
 
 on:
+  # Only GitHub Actions and Python sources are analyzed.
   push:
     branches: [ "main" ]
+    paths:
+      - ".github/**"
+      - "**.py"
+  schedule:
+    - cron: '17 3 * * 1'
 
 permissions:
   contents: read
