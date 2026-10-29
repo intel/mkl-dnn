@@ -81,7 +81,12 @@ inline void apply_dropout_s_tile(
     })
 
     /* Build float scale tile: inv_q if keep, 0.f if drop -- same type as s_tile */
+#if DROPOUT_VOLATILE_SCALE_WORKAROUND
+    // Xe-HPG only: volatile avoids an IGC miscompile but adds memory traffic.
     volatile s_tile_type scale_tile;
+#else
+    s_tile_type scale_tile;
+#endif
 
     const int blk_r = ugemm_kq_c_type_block0;
     const int blk_c = ugemm_kq_c_type_block1;

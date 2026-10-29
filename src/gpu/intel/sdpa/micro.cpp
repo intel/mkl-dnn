@@ -1212,6 +1212,8 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     kernel_ctx.define_int("WITH_DROPOUT", dropout);
     kernel_ctx.define_int("DROPOUT_HOST_SCALARS", dropout_host_scalars);
     kernel_ctx.define_int("DROPOUT_OUTPUT_MASK", dropout_output_mask);
+    // Xe-HPG needs volatile scale_tile (IGC miscompile); newer archs do not.
+    kernel_ctx.define_int("DROPOUT_VOLATILE_SCALE_WORKAROUND", !arch_gte_hpc);
 
     micro::HWInformation hw_info;
     gemmstone::GEMMProblem problem_kq, problem_vs;
