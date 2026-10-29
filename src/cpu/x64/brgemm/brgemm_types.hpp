@@ -527,6 +527,26 @@ struct brgemm_desc_t {
         return is_fp8_via_convert() && isa_impl == avx10_2;
     }
 
+    // return 'true' when fp8 dst, bias, or binary post-op data are converted
+    // by emulation because the CPU ISA has no native fp8 conversion
+    bool is_fp8_post_ops_emu() const {
+        using namespace data_type;
+        if (is_superset(isa_impl, avx10_2)) return false;
+        if (utils::one_of(f8_e5m2, dt_d, dt_bias)
+                || utils::one_of(f8_e4m3, dt_d, dt_bias))
+            return true;
+        if (!with_binary) return false;
+        const auto &post_ops = attr()->post_ops_;
+        for (int i = 0; i < post_ops.len(); i++) {
+            const auto &entry = post_ops.entry_[i];
+            if (entry.is_binary()
+                    && utils::one_of(
+                            entry.binary.src1_desc.data_type, f8_e5m2, f8_e4m3))
+                return true;
+        }
+        return false;
+    }
+
     bool is_input_convert() const { return is_bf32 || is_fp8_via_convert(); }
 
     bool is_row_major() const {

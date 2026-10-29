@@ -332,7 +332,7 @@ private:
         auto used_vregs = 0;
         if (brg.is_int8 && !brg.has_int8_vnni)
             used_vregs = 2;
-        else if (brg.is_fp8_via_convert())
+        else if (brg.is_fp8_via_convert() || brg.is_fp8_post_ops_emu())
             used_vregs = 5;
         else if (brg.is_f16_b_non_amx_vnni())
             used_vregs = 2;

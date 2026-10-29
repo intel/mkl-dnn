@@ -260,9 +260,13 @@ int calculate_max_bcast_block(brgemm_desc_t *brg, const int adj_ld_block2) {
             = (brg->is_int8 && !brg->has_int8_vnni) ? 2 : 0;
 
     // non-AMX fp8 via conversion requires five registers
-    // to convert fp8 to f16 vnni before dot product
+    // to convert fp8 to f16 vnni before dot product.
+    // fp8 emulation in post-ops uses the same registers.
     // see vmm_fp8_emu_aux* in brgemm kernel
-    const int fp8_emu_regs = brg->is_fp8_via_convert_non_amx() ? 5 : 0;
+    const int fp8_emu_regs
+            = brg->is_fp8_via_convert_non_amx() || brg->is_fp8_post_ops_emu()
+            ? 5
+            : 0;
 
     max_isa_regs -= b_vnni_regs + non_int8_vnni_regs + fp8_emu_regs;
 
