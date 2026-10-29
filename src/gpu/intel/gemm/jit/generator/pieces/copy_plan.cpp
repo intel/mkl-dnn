@@ -2113,18 +2113,19 @@ void CopyPlan::planInt2Downconversion(CopyInstruction &i)
         auto offset = (ddst.offset % 8) * 2;
         int simd_factor = std::max(1, 8 / ddst.stride);
         int new_ins = std::min(simd, simd_factor);
+        auto step = stmp.stride;
+        const auto stride = std::max(ddst.stride / 8, 1);
 
         for (int j = 0; j < new_ins; ++j) {
             ie[2*j + 1]->op = Opcode::shl;
             ie[2*j + 1]->simd = std::max(simd/simd_factor, 1);
             ie[2*j + 1]->dst = sstmp;
-            ie[2*j + 1]->dst.stride *= 2;
+            ie[2*j + 1]->dst.stride = stride;
             ie[2*j + 1]->src0 = stmp;
-            ie[2*j + 1]->src0.offset += j * ie[3]->src0.stride;
+            ie[2*j + 1]->src0.offset += j * step;
             ie[2*j + 1]->src0.stride *= simd_factor;
             ie[2*j + 1]->src1 = Immediate::uw((offset + 2*ddst.stride*j) % 16);
 
-            const auto stride = std::max(ddst.stride / 8, 1);
             ie[2*j + 2]->op = Opcode::bfn;
             ie[2*j + 2]->simd = std::max(simd/simd_factor, 1);
             ie[2*j + 2]->ctrl = 0xCA;
@@ -2141,7 +2142,7 @@ void CopyPlan::planInt2Downconversion(CopyInstruction &i)
                 ie[2*j + 2]->src0.offset += 1;
             }
             ie[2*j + 2]->src1 = sstmp;
-            ie[2*j + 2]->src1.stride *= 2;
+            ie[2*j + 2]->src1.stride = stride;
             ie[2*j + 2]->src2 = Immediate::uw(0x3 << ((offset + 2*ddst.stride*j) % 16));
         }
 
