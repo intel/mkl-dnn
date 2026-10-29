@@ -384,7 +384,11 @@ class ParserImpl:
         if not spec.read_literal(":"):
             raise ParseError("Expected data type for binary post-op")
         dt = spec.read_str()
-        post_op = ir.BinaryPostOp(alg=alg, dt=dt)
+        # A 0D or 1D operand does not print a tag, which benchdnn interprets
+        # as an "any" tag. Meanwhile, actual "any" tags are explicitly printed
+        # in the verbose line.
+        # Use "abx" as the default tag to align benchdnn and verbose behaviors.
+        post_op = ir.BinaryPostOp(alg=alg, dt=dt, tag="abx")
         if spec.read_literal(":"):
             post_op.mask = spec.read_uint()
         if spec.read_literal(":"):
