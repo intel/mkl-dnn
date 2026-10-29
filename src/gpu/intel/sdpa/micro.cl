@@ -65,6 +65,11 @@ inline void apply_dropout_s_tile(
         global uchar *mask_buf
 #endif
 ) {
+    /* One Philox call per aligned group of four indices (strided loop, since
+       IGC if-converts a "key changed" branch and saves nothing). */
+#define dropout_keep(_ph, _orow, _ocol) \
+    (((_orow) < max_r && (_ocol) < max_c) && ((_ph) > threshold) ? inv_q : 0.f)
+
 #define dropout_predicate(offset_r, offset_c) \
     ({ \
         ulong _goff = batch_head_base + (ulong)offset_c * (ulong)k_stride \
@@ -77,10 +82,49 @@ inline void apply_dropout_s_tile(
 
     /* Build float scale tile: inv_q if keep, 0.f if drop -- same type as s_tile */
     volatile s_tile_type scale_tile;
-    tile_predicated_select_t(scale_tile, tile_offset_r, tile_offset_c,
-            dropout_predicate, inv_q, 0.f, SUBGROUP_SIZE,
-            ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
-            ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1);
+
+    const int blk_r = ugemm_kq_c_type_block0;
+    const int blk_c = ugemm_kq_c_type_block1;
+    const int nblk_r = ugemm_kq_c_type_nblock0;
+    const int nblk_c = ugemm_kq_c_type_nblock1;
+    const int tile_len = blk_c * nblk_c;
+
+    /* Grouped path needs use_dropout_offset, k_stride % 4 == 0, a 4-aligned
+       tile start (runtime) and tile_len % 4 == 0 (JIT constant). */
+#define DROPOUT_GROUPED_SHAPE_OK \
+    (((ugemm_kq_c_type_block1 * ugemm_kq_c_type_nblock1) & 3) == 0)
+#define DROPOUT_GROUPED_RT_OK \
+    (use_dropout_offset && (k_stride & 3) == 0 \
+            && (((batch_head_base + (ulong)tile_offset_r) & 3UL) == 0))
+#if DROPOUT_GROUPED_SHAPE_OK
+    if (DROPOUT_GROUPED_RT_OK) {
+        for (int i0 = 0; i0 < blk_r * nblk_r; i0 += SUBGROUP_SIZE) {
+            const int i = i0 + get_sub_group_local_id();
+            const int offset_c = tile_offset_c + i;
+            const ulong cbase = batch_head_base
+                    + (ulong)offset_c * (ulong)k_stride + (ulong)tile_offset_r;
+            for (int j = 0; j < tile_len; j += 4) {
+                const uint4 v4 = philox_4x32_vec4_w_offset(
+                        cbase + (ulong)j, seed, offset);
+                for (int w = 0; w < 4; w++) {
+                    tile_access(scale_tile, i0, j + w, SUBGROUP_SIZE, blk_r,
+                            blk_c, nblk_r)
+                            = dropout_keep(
+                                    v4[w], tile_offset_r + j + w, offset_c);
+                }
+            }
+        }
+    } else
+#endif
+    {
+        tile_predicated_select_t(scale_tile, tile_offset_r, tile_offset_c,
+                dropout_predicate, inv_q, 0.f, SUBGROUP_SIZE,
+                ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1);
+    }
+#undef DROPOUT_GROUPED_SHAPE_OK
+#undef DROPOUT_GROUPED_RT_OK
+#undef dropout_keep
 
     /* Multiply S_tile element-wise by scale tile (both float, no conversion) */
     s_tile_type tmp = *tile;
