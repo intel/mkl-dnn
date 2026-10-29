@@ -1496,6 +1496,11 @@ void CopyPlan::planInt2Upconversion(CopyInstruction &i)
             i0.dst.offset += i0.dst.stride / factor;
             i0.src0.offset += i0.src0.stride / factor;
         }
+        // sort() is broken when dst is a temporary and src is
+        // repeated/broadcast, so this additional split is helpful for
+        // correctly ordering the instructions for later zip optimizations.
+        split(i, false);
+        i.invalidate();
     } else {
         int offset = (i.src0.offset % 4);
         i.src0.stride /= 4;
