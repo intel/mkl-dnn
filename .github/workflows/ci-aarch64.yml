@@ -73,7 +73,9 @@ jobs:
           { name: onednn-perf-new, build: Release, testset: SMOKE }
         ]
     name: build ${{ matrix.config.name }}
-    runs-on: ubuntu-22.04-arm
+    # Use self-hosted runners to reduce the load on GitHub-hosted runners
+    # shared across the organization.
+    runs-on: ah-ubuntu_22_04-c7g_8x-100
     steps:
       - name: Checkout oneDNN
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
