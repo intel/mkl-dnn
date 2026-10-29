@@ -129,6 +129,10 @@ jobs:
   test:
     needs: build
     strategy:
+      # QEMU tests are long-running. To reduce the load on GitHub-hosted
+      # runners shared across the organization,
+      # run vector length configurations one at a time.
+      max-parallel: 1
       matrix:
         config: [
           # Test with different vector lengths and threading modes
