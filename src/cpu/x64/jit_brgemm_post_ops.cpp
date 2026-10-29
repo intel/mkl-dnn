@@ -655,9 +655,10 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::generate() {
     const int nb2_tail = nb % n_block2_;
     int n_block = (nb2 == 0) ? nstl::max(1, nb2_tail) : n_block2_;
 
-    int m_max_regs = (brg_.is_bf16_emu
-                    ? 24
-                    : (brg_.is_fp8_via_convert() ? 23 : max_vregs_ - 4));
+    int m_max_regs = (brg_.is_bf16_emu ? 24
+                    : (brg_.is_fp8_via_convert() || brg_.is_fp8_post_ops_emu())
+                    ? 23
+                    : max_vregs_ - 4);
     m_max_regs /= n_block;
     int m_block
             = static_cast<int>(nstl::min<dim_t>(brg_.bcast_dim, m_max_regs));
