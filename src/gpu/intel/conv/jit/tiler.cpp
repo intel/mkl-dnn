@@ -1019,6 +1019,10 @@ dim_t get_iter_dim_score(
         const pvar_t &dim, const config_t &cfg, dim_t dim_size) {
     auto &prb = cfg.prb();
     if (utils::one_of(dim, pvars::ow, pvars::iw)) {
+        // Prefer mb-iter when weight reuse across mb outweighs narrow ow.
+        if (prb.is_fwd && prb.ksp > 1 && prb.mb >= 2
+                && prb.mb * prb.oc >= 512 * dim_size)
+            return 0;
         if (prb.ksp > 1 || dim_size % 16 != 0) return 16 - 1;
         return dim_size;
     } else if (dim == pvars::mb) {
