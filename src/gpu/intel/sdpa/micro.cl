@@ -98,6 +98,8 @@ inline void apply_dropout_s_tile(
             && (((batch_head_base + (ulong)tile_offset_r) & 3UL) == 0))
 #if DROPOUT_GROUPED_SHAPE_OK
     if (DROPOUT_GROUPED_RT_OK) {
+        /* Key schedule is loop-invariant. */
+        const philox_key_schedule_t ks = philox_4x32_key_schedule(seed);
         for (int i0 = 0; i0 < blk_r * nblk_r; i0 += SUBGROUP_SIZE) {
             const int i = i0 + get_sub_group_local_id();
             const int offset_c = tile_offset_c + i;
@@ -106,8 +108,8 @@ inline void apply_dropout_s_tile(
             int j = 0;
             /* Two independent Philox chains per call, for ILP. */
             for (; j + 8 <= tile_len; j += 8) {
-                const uint8 v8 = philox_4x32_vec4x2_w_offset(
-                        cbase + (ulong)j, seed, offset);
+                const uint8 v8 = philox_4x32_vec4x2_w_keys(
+                        cbase + (ulong)j, offset, ks.key0, ks.key1);
                 for (int w = 0; w < 8; w++) {
                     tile_access(scale_tile, i0, j + w, SUBGROUP_SIZE, blk_r,
                             blk_c, nblk_r)
@@ -116,8 +118,8 @@ inline void apply_dropout_s_tile(
                 }
             }
             for (; j < tile_len; j += 4) {
-                const uint4 v4 = philox_4x32_vec4_w_offset(
-                        cbase + (ulong)j, seed, offset);
+                const uint4 v4 = philox_4x32_vec4_w_keys(
+                        cbase + (ulong)j, offset, ks.key0, ks.key1);
                 for (int w = 0; w < 4; w++) {
                     tile_access(scale_tile, i0, j + w, SUBGROUP_SIZE, blk_r,
                             blk_c, nblk_r)
