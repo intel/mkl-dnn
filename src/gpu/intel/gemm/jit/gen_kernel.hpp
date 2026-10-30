@@ -107,6 +107,8 @@ struct gen_desc_t {
     void set_kernel_override(const std::string &kernel) {
         kernel_override_ = kernel;
     }
+    // Why the override does not run.
+    const std::string &reject_reason() const { return reject_reason_; }
 
 protected:
     compute::gpu_arch_t arch_;
@@ -123,6 +125,7 @@ protected:
     bool efficient_64b_ = false;
 
     std::string kernel_override_;
+    std::string reject_reason_;
 
     /* optional information to fine-tune kernel */
     int m_ = -1, n_ = -1, k_ = -1;

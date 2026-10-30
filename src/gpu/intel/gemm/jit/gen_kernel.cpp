@@ -209,8 +209,7 @@ status_t gen_desc_t::apply_kernel_override(
                             int(utils::div_up(k_, aux_params_.k0))));
         }
     } catch (const std::exception &e) {
-        gpu_warning() << "jit::gemm kernel override rejected: " << e.what()
-                      << "," << ovr_strategy;
+        reject_reason_ = e.what();
         return status::unimplemented;
     }
     return status::success;
@@ -218,13 +217,16 @@ status_t gen_desc_t::apply_kernel_override(
 #endif
 
 status_t gen_desc_t::finalize(const char *tags) {
+    reject_reason_.clear();
+    auto reject = [&](const std::string &why) {
+        reject_reason_ = why;
+        return status::unimplemented;
+    };
     problem_.CO.setAlignment(problem_.Tco.paddedSize());
 
 #ifdef DNNL_DEV_MODE
-    std::string ovr_strategy
-            = gpu_utils::dev_getenv("GEMM_KERNEL", kernel_override_);
-    if (!ovr_strategy.empty()) {
-        CHECK(apply_kernel_override(ovr_strategy, tags));
+    if (!kernel_override_.empty()) {
+        CHECK(apply_kernel_override(kernel_override_, tags));
     } else {
 #endif
         // Update problem alignments to match catalog entry.
@@ -377,31 +379,33 @@ status_t gen_desc_t::finalize(const char *tags) {
     adjustStrategy(hw_, problem_, strategy_, tags);
     try {
         strategy_.preflight(hw_, problem_);
-    } catch (...) { return status::unimplemented; }
+    } catch (const std::exception &e) { return reject(e.what()); } catch (...) {
+        return reject("preflight failed");
+    }
 
     // Override: fixed beta would be reapplied on later k-chunks.
     if (!entry_ && k_ > strategy_.blocking[LoopK] && problem_.beta.fixed()
             && !problem_.beta1())
-        return status::unimplemented;
+        return reject("fixed beta over k-chunks");
 
     // Check for legal 2D quantization group size.
     if (problem_.aOffset2D() || problem_.aScale2D())
         if (problem_.aqGroupK % strategy_.aqGroupKGranularity())
-            return status::unimplemented;
+            return reject("A quantization group");
     if (problem_.bOffset2D() || problem_.bScale2D())
         if (problem_.bqGroupK % strategy_.bqGroupKGranularity())
-            return status::unimplemented;
+            return reject("B quantization group");
     if (problem_.aScale2D()
             && problem_.aqGroupK % minOuterProductCount(problem_, strategy_)
                     != 0) {
         if (!problem_.Ta.isF4() || !problem_.Tb.isF4())
-            return status::unimplemented;
+            return reject("quantization group vs outer product");
     }
     if (problem_.bScale2D()
             && problem_.bqGroupK % minOuterProductCount(problem_, strategy_)
                     != 0) {
         if (!problem_.Ta.isF4() || !problem_.Tb.isF4())
-            return status::unimplemented;
+            return reject("quantization group vs outer product");
     }
 
     // If the M/N group size is equal to M or N, align up to a multiple of unroll size
@@ -679,7 +683,9 @@ status_t gen_nocopy_desc_t::finalize() {
 
     auto block_k = entry_->driverInfo.blocking[LoopK];
     problem_.beta = beta_;
-    if (block_k > 0 && k_ > block_k && eval_params_.beta != 1.0f)
+    // An override applies its own k blocking.
+    if (kernel_override_.empty() && block_k > 0 && k_ > block_k
+            && eval_params_.beta != 1.0f)
         problem_.beta = Scalar();
     evaluate(*entry_, eval_params_, aux_params_);
     return gen_desc_t::finalize(tags_.c_str());
@@ -1115,10 +1121,14 @@ status_t gen_kernel_t::get_kernel(
             default: assert(!"Unsupported architecture"); break;
         }
     } catch (const std::runtime_error &err) {
-        // Print kernel generation errors only in debug mode
-        VDEBUGINFO(1, primitive, gpu, "%s,%s,%s", "jit::gemm", err.what(),
-                dump_kernel(desc()->hw_, desc()->problem_, desc()->strategy_)
-                        .c_str());
+        auto str
+                = dump_kernel(desc()->hw_, desc()->problem_, desc()->strategy_);
+        if (!desc()->has_entry())
+            VINFO(primitive, create, dispatch, gemm, "%s,%s,%s", "jit::gemm",
+                    err.what(), str.c_str());
+        else // Print kernel generation errors only in debug mode
+            VDEBUGINFO(1, primitive, gpu, "%s,%s,%s", "jit::gemm", err.what(),
+                    str.c_str());
     }
 #undef ARCH_DISPATCH
 

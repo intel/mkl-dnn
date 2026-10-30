@@ -39,11 +39,7 @@ std::string kernel_override(const primitive_attr_t *attr) {
             gpu_attr ? gpu_attr->kernel_override() : std::string());
 }
 
-int kernel_rank(const primitive_attr_t *attr) {
-    auto *gpu_attr = utils::downcast<const gpu_primitive_attr_t *>(
-            attr->gpu_attr_.get());
-    if (!gpu_attr) return -1;
-    const auto &s = gpu_attr->kernel_override();
+int kernel_rank(const std::string &s) {
     // <=9 digits always fit int, so std::stoi cannot overflow.
     bool is_rank = !s.empty() && s.size() <= 9
             && s.find_first_not_of("0123456789") == std::string::npos;

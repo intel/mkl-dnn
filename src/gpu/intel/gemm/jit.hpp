@@ -325,19 +325,19 @@ struct gen_t : public primitive_t {
             // Kernel override: bare int = Nth candidate after sort (rank);
             // else strategy string.
             int index = -1;
-            if (is_dev_mode() && attr()->gpu_attr_) {
+            if (is_dev_mode()) {
                 auto *gpu_attr = utils::downcast<gpu_primitive_attr_t *>(
                         attr()->gpu_attr_.get());
                 // GEMM_KERNEL would replace the attribute override.
                 bool has_env
                         = !gpu_utils::dev_getenv("GEMM_KERNEL", std::string())
                                    .empty();
-                VDISPATCH_GEMM(!has_env || gpu_attr->kernel_override().empty(),
+                VDISPATCH_GEMM(!has_env || !gpu_attr
+                                || gpu_attr->kernel_override().empty(),
                         "kernel override conflicts with GEMM_KERNEL");
-                index = kernel_rank(attr());
-                if (index < 0)
-                    kernel_desc_.set_kernel_override(
-                            gpu_attr->kernel_override());
+                auto kernel = kernel_override(attr());
+                index = kernel_rank(kernel);
+                if (index < 0) kernel_desc_.set_kernel_override(kernel);
             }
             auto lda = ld(DNNL_ARG_A);
             auto ldb = ld(DNNL_ARG_B);
@@ -347,26 +347,33 @@ struct gen_t : public primitive_t {
                     d->batch());
             kernel_count_ = (int)entries.size();
 
-            if (index >= 0)
-                VDISPATCH_GEMM(index < (int)entries.size(),
-                        "kernel index out of range");
+            VDISPATCH_GEMM(index < (int)entries.size(),
+                    "kernel override rejected: rank out of range");
 
-            for (size_t entry_idx = 0; entry_idx < entries.size();
-                    entry_idx++) {
+            // Why an override or a pinned rank does not run.
+            std::string reject_reason;
+            size_t begin = index >= 0 ? index : 0;
+            size_t end = index >= 0 ? index + 1 : entries.size();
+            for (size_t entry_idx = begin; entry_idx < end; entry_idx++) {
                 auto *entry = entries[entry_idx];
                 int g = (int)(entry - jit::catalog().entries);
-                if (index >= 0 && (int)entry_idx != index) continue;
-                auto skip = [&](const char *why) {
+                auto skip = [&](const std::string &why) {
                     gpu_debug() << "[" << lpad(g, 4) << "] skip " << entry_idx
                                 << "/" << entries.size() << " " << entry->str()
                                 << "," << why;
+                    if ((!kernel_desc_.has_entry() || index >= 0)
+                            && reject_reason.empty())
+                        reject_reason = why;
                 };
                 kernel_desc_.set_entry(entry);
                 kernel_desc_.set_problem(problem);
                 auto status = kernel_desc_.finalize();
                 // select_kernel can return a strategy that failed in the finalize call
                 bool valid = status == status::success;
-                if (!valid) skip("Strategy finalization failed.");
+                if (!valid)
+                    skip(kernel_desc_.reject_reason().empty()
+                                    ? "Strategy finalization failed."
+                                    : kernel_desc_.reject_reason());
                 // Global k-parallel kernels don't support post-ops or non-f32/s32
                 //   accumulation unless fusion is enabled.
                 if (kernel_desc_.driver_info()->kParallel()
@@ -445,13 +452,17 @@ struct gen_t : public primitive_t {
                                     << "[override] use " << kernel_desc_.str();
                         break;
                     }
+                    skip("Kernel generation failed.");
                 }
                 // Overrides do not depend on the entry.
                 if (!kernel_desc_.has_entry()) break;
             }
 
-            VDISPATCH_GEMM(
-                    kernel_success, "matching kernel not found in catalog");
+            VDISPATCH_GEMM(kernel_success, "%s",
+                    reject_reason.empty()
+                            ? "matching kernel not found in catalog"
+                            : ("kernel override rejected: " + reject_reason)
+                                      .c_str());
 
             init_scratchpad();
 

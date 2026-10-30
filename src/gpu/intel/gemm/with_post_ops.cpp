@@ -45,7 +45,7 @@ status_t with_post_ops_t::pd_t::init(const impl::engine_t *engine) {
     VDISPATCH_GEMM(attr()->has_default_values(attr_skip_mask),
             VERBOSE_UNSUPPORTED_ATTR);
     // A rank indexes this problem's candidates, not the nested gemm's.
-    VDISPATCH_GEMM(kernel_rank(attr()) < 0,
+    VDISPATCH_GEMM(kernel_rank(kernel_override(attr())) < 0,
             "kernel rank override through post-op decomposition");
     VDISPATCH_GEMM(
             !utils::one_of(d->c_type(), u4, s4, u2), VERBOSE_UNSUPPORTED_DT);
