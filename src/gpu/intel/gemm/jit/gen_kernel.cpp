@@ -390,10 +390,10 @@ status_t gen_desc_t::finalize(const char *tags) {
 
     // Check for legal 2D quantization group size.
     if (problem_.aOffset2D() || problem_.aScale2D())
-        if (problem_.aqGroupK % strategy_.aqGroupKGranularity())
+        if (!strategy_.aqGroupKCompatible(problem_.aqGroupK))
             return reject("A quantization group");
     if (problem_.bOffset2D() || problem_.bScale2D())
-        if (problem_.bqGroupK % strategy_.bqGroupKGranularity())
+        if (!strategy_.bqGroupKCompatible(problem_.bqGroupK))
             return reject("B quantization group");
     if (problem_.aScale2D()
             && problem_.aqGroupK % minOuterProductCount(problem_, strategy_)

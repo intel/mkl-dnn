@@ -412,9 +412,9 @@ struct GEMMStrategy : public GEMMStrategyPOD
 
     bool registerOutput() const { return C.base.getModel() == ngen::ModelInvalid; }
 
-    int aqGroupKGranularity() const { return groupKReduce(slmA ? unrollKSLM : ka_load); }
-    int bqGroupKGranularity() const { return groupKReduce(slmB ? unrollKSLM : kb_load); }
-    static int groupKReduce(int x) { while (x > 16 && (x & 1) == 0) x >>= 1; return x; }
+    bool aqGroupKCompatible(int groupK) const { return groupKCompatible(groupK, slmA ? unrollKSLM : ka_load); }
+    bool bqGroupKCompatible(int groupK) const { return groupKCompatible(groupK, slmB ? unrollKSLM : kb_load); }
+    static bool groupKCompatible(int groupK, int kStep) { return gcd(groupK, kStep) >= std::min(kStep, 16); }
 
     void serialize(SerializationStream &s) const
     {
