@@ -94,17 +94,19 @@ inline void apply_dropout_s_tile(
     const int nblk_c = ugemm_kq_c_type_nblock1;
     const int tile_len = blk_c * nblk_c;
 
-    /* Grouped path needs use_dropout_offset, k_stride % 4 == 0, a 4-aligned
+    /* Grouped path needs k_stride % 4 == 0, a 4-aligned
        tile start (runtime) and tile_len % 4 == 0 (JIT constant). */
 #define DROPOUT_GROUPED_SHAPE_OK \
     (((ugemm_kq_c_type_block1 * ugemm_kq_c_type_nblock1) & 3) == 0)
 #define DROPOUT_GROUPED_RT_OK \
-    (use_dropout_offset && (k_stride & 3) == 0 \
+    ((k_stride & 3) == 0 \
             && (((batch_head_base + (ulong)tile_offset_r) & 3UL) == 0))
 #if DROPOUT_GROUPED_SHAPE_OK
     if (DROPOUT_GROUPED_RT_OK) {
         /* Key schedule is loop-invariant. */
-        const philox_key_schedule_t ks = philox_4x32_key_schedule(seed);
+        const philox_key_schedule_t ks = philox_4x32_key_schedule(
+                DROPOUT_USE_OFFSET ? (ulong)seed
+                                   : philox_4x32_legacy_seed(seed));
         for (int i0 = 0; i0 < blk_r * nblk_r; i0 += SUBGROUP_SIZE) {
             const int i = i0 + get_sub_group_local_id();
             const int offset_c = tile_offset_c + i;
@@ -113,8 +115,8 @@ inline void apply_dropout_s_tile(
             int j = 0;
             /* Two independent Philox chains per call, for ILP. */
             for (; j + 8 <= tile_len; j += 8) {
-                const uint8 v8 = philox_4x32_vec4x2_w_keys(
-                        cbase + (ulong)j, offset, ks.key0, ks.key1);
+                const uint8 v8 = philox_4x32_vec4x2_dropout(cbase + (ulong)j,
+                        offset, DROPOUT_USE_OFFSET, ks.key0, ks.key1);
                 for (int w = 0; w < 8; w++) {
                     tile_access(scale_tile, i0, j + w, SUBGROUP_SIZE, blk_r,
                             blk_c, nblk_r)
@@ -123,8 +125,8 @@ inline void apply_dropout_s_tile(
                 }
             }
             for (; j < tile_len; j += 4) {
-                const uint4 v4 = philox_4x32_vec4_w_keys(
-                        cbase + (ulong)j, offset, ks.key0, ks.key1);
+                const uint4 v4 = philox_4x32_vec4_dropout(cbase + (ulong)j,
+                        offset, DROPOUT_USE_OFFSET, ks.key0, ks.key1);
                 for (int w = 0; w < 4; w++) {
                     tile_access(scale_tile, i0, j + w, SUBGROUP_SIZE, blk_r,
                             blk_c, nblk_r)

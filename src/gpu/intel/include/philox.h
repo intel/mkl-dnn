@@ -40,8 +40,6 @@ philox_key_schedule_t philox_4x32_key_schedule(ulong seed) {
     return ks;
 }
 
-uint4 philox_4x32_vec4_w_keys(
-        ulong idx, ulong offset, uint16 key0, uint4 key1) {
 /* No native 64-bit multiply: use 32-bit mul + mul_hi for each product. */
 #define PHILOX_4UINT_ROUND(mul, ctr, key) \
     ({ \
@@ -52,10 +50,7 @@ uint4 philox_4x32_vec4_w_keys(
         (uint4)(hi1 ^ ctr.s1 ^ key.s0, lo1, hi0 ^ ctr.s3 ^ key.s1, lo0); \
     })
 
-    ulong x = (idx & ~3L);
-    uint4 ctr = (uint4)((uint)offset, (uint)(offset >> 32), (uint)x,
-            (uint)(x >> 32));
-
+uint4 philox_4x32_vec4_ctr_w_keys(uint4 ctr, uint16 key0, uint4 key1) {
     const uint2 PHILOX_M4x32 = (uint2)(0xD2511F53u, 0xCD9E8D57u);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s01);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s23);
@@ -70,21 +65,9 @@ uint4 philox_4x32_vec4_w_keys(
     return ctr;
 }
 
-uint4 philox_4x32_vec4_w_offset(ulong idx, ulong seed, ulong offset) {
-    philox_key_schedule_t ks = philox_4x32_key_schedule(seed);
-    return philox_4x32_vec4_w_keys(idx, offset, ks.key0, ks.key1);
-}
-
-/* Two independent vec4 chains (idx&~3, idx+4) per call, for ILP. */
-uint8 philox_4x32_vec4x2_w_keys(
-        ulong idx, ulong offset, uint16 key0, uint4 key1) {
-    ulong x0 = (idx & ~3L);
-    ulong x1 = x0 + 4;
-    uint4 ctrA = (uint4)((uint)offset, (uint)(offset >> 32), (uint)x0,
-            (uint)(x0 >> 32));
-    uint4 ctrB = (uint4)((uint)offset, (uint)(offset >> 32), (uint)x1,
-            (uint)(x1 >> 32));
-
+/* Two independent vec4 chains per call, for ILP. */
+uint8 philox_4x32_vec4x2_ctr_w_keys(
+        uint4 ctrA, uint4 ctrB, uint16 key0, uint4 key1) {
     const uint2 PHILOX_M4x32 = (uint2)(0xD2511F53u, 0xCD9E8D57u);
 
 #define PHILOX_4UINT_ROUND_X2(key) \
@@ -105,6 +88,60 @@ uint8 philox_4x32_vec4x2_w_keys(
     PHILOX_4UINT_ROUND_X2(key1.s23);
 #undef PHILOX_4UINT_ROUND_X2
     return (uint8)(ctrA, ctrB);
+}
+
+uint4 philox_4x32_ctr_w_offset(ulong idx, ulong offset) {
+    ulong x = (idx & ~3L);
+    return (uint4)((uint)offset, (uint)(offset >> 32), (uint)x,
+            (uint)(x >> 32));
+}
+
+uint4 philox_4x32_vec4_w_keys(
+        ulong idx, ulong offset, uint16 key0, uint4 key1) {
+    return philox_4x32_vec4_ctr_w_keys(
+            philox_4x32_ctr_w_offset(idx, offset), key0, key1);
+}
+
+uint4 philox_4x32_vec4_w_offset(ulong idx, ulong seed, ulong offset) {
+    philox_key_schedule_t ks = philox_4x32_key_schedule(seed);
+    return philox_4x32_vec4_w_keys(idx, offset, ks.key0, ks.key1);
+}
+
+uint8 philox_4x32_vec4x2_w_keys(
+        ulong idx, ulong offset, uint16 key0, uint4 key1) {
+    ulong x0 = (idx & ~3L);
+    return philox_4x32_vec4x2_ctr_w_keys(philox_4x32_ctr_w_offset(x0, offset),
+            philox_4x32_ctr_w_offset(x0 + 4, offset), key0, key1);
+}
+
+/* Legacy (no offset) generator, as in philox_4x32(): the counter comes from a
+   32-bit idx alone and every index of a group of four gets word 2. */
+ulong philox_4x32_legacy_seed(long seed) {
+    return ((ulong)(uint)seed << 32) + (uint)seed;
+}
+
+uint4 philox_4x32_ctr_legacy(uint idx) {
+    uint x = idx & ~3u;
+    return (uint4)(x, x + 1, x, x + 3);
+}
+
+/* Group of four for either generator, selected by use_offset (uniform). */
+uint4 philox_4x32_vec4_dropout(
+        ulong idx, ulong offset, int use_offset, uint16 key0, uint4 key1) {
+    uint4 ctr = use_offset ? philox_4x32_ctr_w_offset(idx, offset)
+                           : philox_4x32_ctr_legacy((uint)idx);
+    uint4 r = philox_4x32_vec4_ctr_w_keys(ctr, key0, key1);
+    return use_offset ? r : (uint4)(r.s2);
+}
+
+uint8 philox_4x32_vec4x2_dropout(
+        ulong idx, ulong offset, int use_offset, uint16 key0, uint4 key1) {
+    uint4 cA = use_offset ? philox_4x32_ctr_w_offset(idx, offset)
+                          : philox_4x32_ctr_legacy((uint)idx);
+    uint4 cB = use_offset ? philox_4x32_ctr_w_offset(idx + 4, offset)
+                          : philox_4x32_ctr_legacy((uint)idx + 4);
+    uint8 r = philox_4x32_vec4x2_ctr_w_keys(cA, cB, key0, key1);
+    return use_offset ? r : (uint8)((uint4)(r.s2), (uint4)(r.s6));
 }
 
 uint8 philox_4x32_vec4x2_w_offset(ulong idx, ulong seed, ulong offset) {
