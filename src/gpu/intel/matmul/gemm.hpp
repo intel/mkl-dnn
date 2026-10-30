@@ -304,16 +304,27 @@ struct gemm_t : public primitive_t {
                                                 const dims_t orig_dims,
                                                 dims_t reshape_dims) -> bool {
                     int full_tensor_mask = ((1 << c_md->ndims) - 1);
-                    int per_oc_mask = (1 << 1);
                     if (!reshape_2d || entry.has_default_values()
-                            || utils::one_of(entry.get_mask(), 0, per_oc_mask,
-                                    full_tensor_mask))
+                            || utils::one_of(
+                                    entry.get_mask(), 0, full_tensor_mask))
                         return true;
 
-                    if (utils::one_of(orig_dims[diff_dims], reshape_dims[0], 1))
-                        return true;
-
-                    return false;
+                    // Dims [0, diff_dims] get merged into the new leading dim.
+                    // The mask is only preserved by the reshape if all of the
+                    // non-trivial merged dims are masked or all are unmasked.
+                    // A partial mask (e.g. mask=2 on 6x2x16 -> 12x16) would
+                    // otherwise be misinterpreted as spanning the whole
+                    // squashed dim.
+                    // The new mask bit for the squashed dim is taken from bit
+                    // diff_dims (see squashed_mask), so every non-trivial
+                    // merged dim must agree with that bit.
+                    const bool new_bit = (entry.get_mask() >> diff_dims) & 1;
+                    for (int i = 0; i <= diff_dims; i++) {
+                        if (orig_dims[i] == 1) continue;
+                        const bool bit = (entry.get_mask() >> i) & 1;
+                        if (bit != new_bit) return false;
+                    }
+                    return true;
                 };
 
                 bcast_ok = bcast_ok
