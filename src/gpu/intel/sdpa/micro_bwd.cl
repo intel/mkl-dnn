@@ -47,6 +47,46 @@ typedef ugemm_ktq_c_type ktq_tile_type; // D*Br tile
 
 #if WITH_DROPOUT
 #define dropout_mul(x, y) ((x) * (y))
+#define dropout_keep(_ph, _orow, _ocol) \
+    (((_orow) < max_r && (_ocol) < max_c) && ((_ph) > threshold) ? inv_q : 0.f)
+
+/* Consecutive indices run across lanes here: each lane makes one Philox block
+   per four columns and the group's words are exchanged with shuffles. */
+#define DROPOUT_GROUPED_SHAPE_OK(br, bc, nbr, nbc) \
+    (SUBGROUP_SIZE == 16 && (((br) * (nbr)) % 16) == 0 \
+            && (((bc) * (nbc)) & 3) == 0)
+#define DROPOUT_GROUPED_RT_OK \
+    (use_dropout_offset && (k_stride & 3) == 0 \
+            && (((batch_head_base + (ulong)tile_offset_r) & 3UL) == 0))
+
+#define DROPOUT_FILL_GROUPED(scale, br, bc, nbr, nbc) \
+    do { \
+        const int _l = get_sub_group_local_id(); \
+        const int _w = _l & 3; \
+        for (int j0 = 0; j0 < (bc) * (nbc); j0 += 4) { \
+            for (int i0 = 0; i0 < (br) * (nbr); i0 += SUBGROUP_SIZE) { \
+                const ulong _idx = batch_head_base \
+                        + (ulong)(tile_offset_c + j0 + _w) * (ulong)k_stride \
+                        + (ulong)(tile_offset_r + i0 + (_l & ~3)); \
+                const uint4 _b = philox_4x32_vec4_w_offset(_idx, seed, offset); \
+                for (int jj = 0; jj < 4; jj++) { \
+                    const int _src = (_l & ~3) | jj; \
+                    const uint _w0 = intel_sub_group_shuffle(_b.s0, _src); \
+                    const uint _w1 = intel_sub_group_shuffle(_b.s1, _src); \
+                    const uint _w2 = intel_sub_group_shuffle(_b.s2, _src); \
+                    const uint _w3 = intel_sub_group_shuffle(_b.s3, _src); \
+                    const uint _v = _w == 0 ? _w0 \
+                            : _w == 1       ? _w1 \
+                            : _w == 2       ? _w2 \
+                                            : _w3; \
+                    tile_access(scale, i0, j0 + jj, SUBGROUP_SIZE, br, bc, nbr) \
+                            = dropout_keep(_v, tile_offset_r + i0 + _l, \
+                                    tile_offset_c + j0 + jj); \
+                } \
+            } \
+        } \
+    } while (0)
+
 #define dropout_predicate(offset_r, offset_c) \
     ({ \
         ulong _goff = batch_head_base + (ulong)offset_c * (ulong)k_stride \
@@ -66,10 +106,20 @@ inline void apply_dropout_s_tile(s_tile_type *tile, int tile_offset_r,
         uint threshold, float inv_q) {
 
     volatile s_tile_type scale_tile;
-    tile_predicated_select(scale_tile, tile_offset_r, tile_offset_c,
-            dropout_predicate, inv_q, 0.f, SUBGROUP_SIZE,
-            ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
-            ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1);
+#if DROPOUT_GROUPED_SHAPE_OK(ugemm_kq_c_type_block0, ugemm_kq_c_type_block1, \
+        ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1)
+    if (DROPOUT_GROUPED_RT_OK) {
+        DROPOUT_FILL_GROUPED(scale_tile, ugemm_kq_c_type_block0,
+                ugemm_kq_c_type_block1, ugemm_kq_c_type_nblock0,
+                ugemm_kq_c_type_nblock1);
+    } else
+#endif
+    {
+        tile_predicated_select(scale_tile, tile_offset_r, tile_offset_c,
+                dropout_predicate, inv_q, 0.f, SUBGROUP_SIZE,
+                ugemm_kq_c_type_block0, ugemm_kq_c_type_block1,
+                ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1);
+    }
 
     s_tile_type tmp = *tile;
     tile_binary(tmp, scale_tile, dropout_mul);
@@ -84,10 +134,21 @@ inline void apply_dropout_dP_tile(p_tile_type *tile, int tile_offset_r,
         uint threshold, float inv_q) {
 
     volatile p_tile_type scale_p_tile;
-    tile_predicated_select(scale_p_tile, tile_offset_r, tile_offset_c,
-            dropout_predicate, inv_q, 0.f, SUBGROUP_SIZE,
-            ugemm_vtdA_c_type_block0, ugemm_vtdA_c_type_block1,
-            ugemm_vtdA_c_type_nblock0, ugemm_vtdA_c_type_nblock1);
+#if DROPOUT_GROUPED_SHAPE_OK(ugemm_vtdA_c_type_block0, \
+        ugemm_vtdA_c_type_block1, ugemm_vtdA_c_type_nblock0, \
+        ugemm_vtdA_c_type_nblock1)
+    if (DROPOUT_GROUPED_RT_OK) {
+        DROPOUT_FILL_GROUPED(scale_p_tile, ugemm_vtdA_c_type_block0,
+                ugemm_vtdA_c_type_block1, ugemm_vtdA_c_type_nblock0,
+                ugemm_vtdA_c_type_nblock1);
+    } else
+#endif
+    {
+        tile_predicated_select(scale_p_tile, tile_offset_r, tile_offset_c,
+                dropout_predicate, inv_q, 0.f, SUBGROUP_SIZE,
+                ugemm_vtdA_c_type_block0, ugemm_vtdA_c_type_block1,
+                ugemm_vtdA_c_type_nblock0, ugemm_vtdA_c_type_nblock1);
+    }
 
     p_tile_type tmp = *tile;
     tile_binary(tmp, scale_p_tile, dropout_mul);
@@ -96,6 +157,10 @@ inline void apply_dropout_dP_tile(p_tile_type *tile, int tile_offset_r,
 
 #undef dropout_mul
 #undef dropout_predicate
+#undef dropout_keep
+#undef DROPOUT_GROUPED_SHAPE_OK
+#undef DROPOUT_GROUPED_RT_OK
+#undef DROPOUT_FILL_GROUPED
 #endif
 
 #ifdef QRY_DT_F16
