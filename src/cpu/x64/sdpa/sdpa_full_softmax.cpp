@@ -49,8 +49,7 @@ namespace cpu {
 namespace x64 {
 
 namespace {
-// Round a byte count up to a 64-byte boundary so each thread's scratch block
-// starts cache-line aligned when carved from a cache-line-aligned base.
+
 inline size_t align64(size_t n) {
     return (n + 63) & ~static_cast<size_t>(63);
 }
@@ -82,11 +81,6 @@ float f32_tile_l2_set_load(
     return static_cast<float>(max_occupancy) / ways;
 }
 
-// Down-convert n contiguous f32 elements into dst as data type dt (f16/bf16).
-// Used to materialise P (mm2's A operand) from the f32 softmax output. f32 is
-// handled by the caller (it uses the f32 scores tile directly, no conversion).
-// Delegates to the jit-backed bulk converters (jit_cvt_ps_to_xf16_t) with a
-// scalar fallback, rather than converting element by element.
 inline void convert_from_f32(
         void *dst, data_type_t dt, const float *src, size_t n) {
     switch (dt) {
@@ -100,17 +94,16 @@ inline void convert_from_f32(
     }
 }
 
-// Build (but do not JIT) a BRGEMM descriptor. Fills `brg` and, when the AMX
-// out-params are supplied, the tile palette + tile-store wsp size read from the
-// finalized descriptor. Kept JIT-free so it can be used both to size the
-// scratchpad (configure) and, immediately before brgemm_kernel_create, to
-// (re)build the descriptor the kernel is compiled from (create_kernels).
+// Build a BRGEMM descriptor. Fills `brg` and, when the AMX out-params
+// are supplied, the tile palette + tile-store wsp size read from the
+// finalized descriptor.
 status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         dim_t M, dim_t N, dim_t K, dim_t lda, dim_t ldb, dim_t ldc,
         const std::vector<sdpa_mm1_post_op_t> *post_ops = nullptr,
         bool select_as_postop = false, bool *amx_need_config = nullptr,
         char *amx_palette = nullptr, size_t *amx_wsp = nullptr,
         dim_t full_output_width = 0, bool b_is_vnni = false) {
+
     CHECK(brgemm_desc_init(&brg, isa_undef, brgemm_addr, dt, dt,
             /*transA=*/false, /*transB=*/false, brgemm_row_major,
             /*alpha=*/1.0f, beta, lda, ldb, ldc, M, N, K, /*strides=*/nullptr));
@@ -132,7 +125,6 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
     // Runtime pointers are supplied per execute call.
     const bool has_post_ops = post_ops && !post_ops->empty();
     if (has_post_ops || select_as_postop) {
-        primitive_attr_t attr;
         post_ops_t po;
         if (has_post_ops) {
             for (const auto &pop : *post_ops) {
@@ -141,6 +133,7 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
                             /*scale=*/1.0f, pop.alg, pop.alpha, pop.beta));
                     continue;
                 }
+
                 memory_desc_t rhs_md;
                 if (pop.rhs_is_scalar) {
                     dims_t rhs_dims = {1, 1};
@@ -163,21 +156,28 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
             }
         }
         if (select_as_postop) {
-            memory_desc_t fill_md, cond_md;
+            memory_desc_t fill_md;
             dims_t fl_dims = {1, 1};
             CHECK(memory_desc_init_by_tag(
                     fill_md, 2, fl_dims, data_type::f32, format_tag::ab));
+
+            memory_desc_t cond_md;
             dims_t cd_dims = {M, full_tile_width};
             CHECK(memory_desc_init_by_tag(
                     cond_md, 2, cd_dims, data_type::u8, format_tag::ab));
+
             CHECK(po.append_binary(
                     alg_kind::binary_select, &fill_md, &cond_md));
         }
+
+        primitive_attr_t attr;
         CHECK(attr.set_post_ops(po));
+
         memory_desc_t dst_md;
         dims_t d_dims = {M, full_tile_width};
         CHECK(memory_desc_init_by_tag(
                 dst_md, 2, d_dims, data_type::f32, format_tag::ab));
+
         CHECK(brgemm_desc_set_postops(&brg, &attr, &dst_md, /*LDD=*/ldc));
     }
 
@@ -192,10 +192,10 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
     }
 
     CHECK(brgemm_desc_finalize(&brg));
-    // AMX kernels (bf16/f16 on amx*) need a tile palette configured before
-    // execution and a per-thread tile-store scratch; brgemm_init_tiles fills
-    // the palette and returns non-success for non-AMX ISAs (f32/avx512_core).
+
     if (amx_need_config) {
+        // brgemm_init_tiles fills the palette and returns non-success
+        // for non-AMX ISAs
         char pal[64] = {};
         *amx_need_config = brgemm_init_tiles(brg, pal) == status::success;
         if (amx_palette) std::memcpy(amx_palette, pal, sizeof(pal));
