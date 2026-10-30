@@ -149,6 +149,18 @@ times for primitive execution instead of relying on the wall time
 measurements. Asynchronous profiling is currently supported for OpenCL, SYCL 
 and L0 runtimes on Intel GPUs.
 
+Asynchronous profiling is also supported for CPU runtimes using the
+Asynchronous Threadpool execution model. In this mode, execution times are
+logged for threadpool events in a non-blocking manner, provided that
+user-defined threadpool event interfaces are available in the build. See the
+threadpool interface [examples](https://uxlfoundation.github.io/oneDNN/dev_guide_threadpool.html)
+for details.
+
+@note
+SYCL Graph recording is incompatible with SYCL queue profiling. As a result,
+asynchronous verbose profiling is automatically paused for the duration of any
+SYCL graph recording session and resumed once recording completes.
+
 @note
 For OpenCL and SYCL runtimes, asynchronous verbose profiling requires queue
 profiling to be enabled on the stream's queue. If queue profiling is not
