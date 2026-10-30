@@ -28,6 +28,54 @@ namespace impl {
 namespace xpu {
 namespace sycl {
 
+namespace {
+
+// Queries start and/or end timestamp in nanoseconds for a single event.
+// Either start or end may be nullptr to skip that half of the query.
+status_t query_event_timestamps(const xpu::sycl::event_t &event, size_t index,
+        uint64_t *start, uint64_t *end, bool use_tag_mode) {
+    using namespace ::sycl::info;
+    assert(index < event.size());
+
+#ifdef DNNL_USE_SYCL_EXT_ONEAPI_PROFILING_TAG
+    // When using the SYCL profiling tags, elapsed time is measured
+    // between two bracketing tag events that wrap all kernels:
+    // - a "start" tag submitted just before the first kernel
+    // - an "end" tag submitted just after the last kernel.
+    //
+    // event queue: ... |start_tag| |kernel| |end_tag| ...
+    //
+    // Per the sycl_ext_oneapi_profiling_tag spec, the time for the
+    // kernel event completion is calculated from:
+    // (start_tag.command_end - end_tag.command_start)
+    // i.e. from the moment the start tag finished executing to the
+    // moment the end tag began executing, which tightly bounds the
+    // kernel execution time.
+    if (use_tag_mode) {
+        assert(event.event_tags_.size() == event.events.size());
+        if (start)
+            *start = event.event_tags_[index]
+                             .first.get_profiling_info<
+                                     event_profiling::command_end>();
+        if (end)
+            *end = event.event_tags_[index]
+                           .second.get_profiling_info<
+                                   event_profiling::command_start>();
+        return status::success;
+    }
+#endif
+
+    if (start)
+        *start = event.events[index]
+                         .get_profiling_info<event_profiling::command_start>();
+    if (end)
+        *end = event.events[index]
+                       .get_profiling_info<event_profiling::command_end>();
+    return status::success;
+}
+
+} // namespace
+
 status_t stream_profiler_t::get_info(profiling_data_kind_t data_kind,
         int *num_entries, uint64_t *data) const {
     return get_info_generic(data_kind, num_entries, data);
@@ -38,9 +86,10 @@ status_t stream_profiler_t::query_event_time(
     using namespace ::sycl::info;
     const auto &sycl_event = xpu::sycl::event_t::from(event);
     assert(sycl_event.size() == 1);
-    start = sycl_event[0].get_profiling_info<event_profiling::command_start>();
-    end = sycl_event[0].get_profiling_info<event_profiling::command_end>();
-    return status::success;
+    // Pass use_tag_mode=false: stream_profiler_t never populates
+    // event_tags_, so taking the tag branch would read garbage.
+    return query_event_timestamps(
+            sycl_event, 0, &start, &end, /* use_tag_mode = */ false);
 }
 
 status_t verbose_profiler_t::get_aggregate_exec_time(
@@ -62,6 +111,7 @@ status_t verbose_profiler_t::get_aggregate_exec_time(
         return status::success;
     }
 
+    const bool tag_mode = use_ext_oneapi_tag();
     uint64_t agg_start = std::numeric_limits<uint64_t>::max();
     uint64_t agg_end = 0;
 
@@ -72,53 +122,18 @@ status_t verbose_profiler_t::get_aggregate_exec_time(
         if (!ev) continue;
         const auto &sycl_ev = xpu::sycl::event_t::from(*ev);
         assert(sycl_ev.size() > 0);
-        size_t last_idx = sycl_ev.size() - 1;
+        const size_t last_idx = sycl_ev.size() - 1;
 
-        using namespace ::sycl::info;
-#ifdef DNNL_USE_SYCL_EXT_ONEAPI_PROFILING_TAG
-        // When using the SYCL profiling tags, elapsed time is measured
-        // between two bracketing tag events that wrap all kernels:
-        // - a "start" tag submitted just before the first kernel
-        // - an "end" tag submitted just after the last kernel.
-        //
-        // event queue: ... |start_tag| |kernel| |end_tag| ...
-        //
-        // Per the sycl_ext_oneapi_profiling_tag spec, the time for the
-        // kernel event completion is calculated from:
-        // (start_tag.command_end - end_tag.command_start)
-        // i.e. from the moment the start tag finished executing to the
-        // moment the end tag began executing, which tightly bounds the
-        // kernel execution time.
-        if (use_ext_oneapi_tag()) {
-            assert(sycl_ev.event_tags_.size() == sycl_ev.events.size());
-            uint64_t ev_start = sycl_ev.event_tags_[0]
-                                        .first.get_profiling_info<
-                                                event_profiling::command_end>();
-            uint64_t ev_end = sycl_ev.event_tags_[last_idx]
-                                      .second.get_profiling_info<
-                                              event_profiling::command_start>();
-            agg_start = std::min(agg_start, ev_start);
-            agg_end = std::max(agg_end, ev_end);
-        } else
-#endif
-        {
-            uint64_t ev_start
-                    = sycl_ev.events[0]
-                              .get_profiling_info<
-                                      event_profiling::command_start>();
-            uint64_t ev_end = sycl_ev.events[last_idx]
-                                      .get_profiling_info<
-                                              event_profiling::command_end>();
-            agg_start = std::min(agg_start, ev_start);
-            agg_end = std::max(agg_end, ev_end);
-        }
+        uint64_t ev_start = 0, ev_end = 0;
+        CHECK(query_event_timestamps(sycl_ev, 0, &ev_start, nullptr, tag_mode));
+        CHECK(query_event_timestamps(
+                sycl_ev, last_idx, nullptr, &ev_end, tag_mode));
+
+        agg_start = std::min(agg_start, ev_start);
+        agg_end = std::max(agg_end, ev_end);
     }
 
     if (agg_end < agg_start) { return status::runtime_error; }
-
-    // TODO: Consolidate timing calculation calls between different
-    // profilers to avoid code duplication and ensure consistent time
-    // conversion logic
     duration_ms = static_cast<double>(agg_end - agg_start) * 1e-6;
     return status::success;
 }
