@@ -368,12 +368,18 @@ ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::pd_t::init_brgemm(
             VERBOSE_PROPKIND_DT_MISMATCH);
 
     // Support for GRU / AUGRU cell in BRGEMM-based implementation is
-    // limited by forward_inference pass for now, all_f32 is disabled
-    // due to performance degradation.
+    // limited by forward_inference pass for now. all_f32 is enabled only
+    // for small shapes on avx2, where it avoids the per-call overhead of
+    // the nested matmul in the reference implementation. For larger shapes
+    // it is slower, as the cell is parallelized over M blocks only.
     // TODO: Improve GRU / AUGRU coverage in BRGEMM-based implementation
+    const dim_t max_c = nstl::max(rnn_.slc, nstl::max(rnn_.sic, rnn_.dhc));
+    const bool is_small_f32_avx2 = !mayiuse(avx512_core)
+            && ((rnn_.mb <= 4 && max_c <= 128) || max_c <= 64);
     VDISPATCH_RNN(IMPLICATION(rnn_.is_orig_gru,
                           this->desc()->prop_kind == forward_inference
-                                  && !rnn_.is_cell_dt_f32()),
+                                  && IMPLICATION(rnn_.is_cell_dt_f32(),
+                                          is_small_f32_avx2)),
             VERBOSE_UNSUPPORTED_FEATURE,
             "gru/augru cell in brgemm-based forward inference");
 
