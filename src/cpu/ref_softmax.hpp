@@ -194,17 +194,31 @@ struct ref_softmax_bwd_t : public primitive_t {
 
         status_t init(const engine_t *engine) {
             using namespace data_type;
-            bool ok = !is_fwd()
-                    && utils::one_of(dst_md()->data_type, f32, bf16, f16)
-                    && utils::one_of(diff_dst_md()->data_type, f32, bf16, f16)
-                    && utils::one_of(diff_src_md()->data_type, f32, bf16, f16)
-                    && platform::has_data_type_support(dst_md()->data_type)
-                    && platform::has_data_type_support(diff_dst_md()->data_type)
-                    && platform::has_data_type_support(diff_src_md()->data_type)
-                    && dst_md()->data_type == diff_dst_md()->data_type
-                    && attr()->has_default_values()
-                    && set_default_formats() == status::success;
-            if (!ok) return status::unimplemented;
+            VDISPATCH_SOFTMAX(!is_fwd(), VERBOSE_BAD_PROPKIND);
+            VDISPATCH_SOFTMAX(
+                    utils::one_of(dst_md()->data_type, f32, bf16, f16),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SOFTMAX(
+                    utils::one_of(diff_dst_md()->data_type, f32, bf16, f16),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SOFTMAX(
+                    utils::one_of(diff_src_md()->data_type, f32, bf16, f16),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SOFTMAX(
+                    platform::has_data_type_support(dst_md()->data_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SOFTMAX(
+                    platform::has_data_type_support(diff_dst_md()->data_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SOFTMAX(
+                    platform::has_data_type_support(diff_src_md()->data_type),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SOFTMAX(dst_md()->data_type == diff_dst_md()->data_type,
+                    VERBOSE_INCONSISTENT_DT, "dst", "diff_dst");
+            VDISPATCH_SOFTMAX(
+                    attr()->has_default_values(), VERBOSE_UNSUPPORTED_ATTR);
+            VDISPATCH_SOFTMAX(set_default_formats() == status::success,
+                    VERBOSE_UNSUPPORTED_TAG);
 
             return status::success;
         }
