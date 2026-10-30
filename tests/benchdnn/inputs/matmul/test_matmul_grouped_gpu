@@ -1,4 +1,4 @@
 --reset
---batch=harness_matmul_grouped
+--batch=harness_grouped_matmul_generated_ci
 --batch=harness_matmul_grouped_moe
 --batch=harness_matmul_grouped_decompression_u3
