@@ -322,6 +322,26 @@ status_t post_ops_t::append_prelu(int mask) {
     return success;
 }
 
+namespace {
+// `memory_desc_init_by_blocking_desc` keeps only the stride order and
+// recomputes dense strides. When the binary tensor spans the whole plain dst
+// (e.g. an in-place post-op), it must keep the dst strides verbatim, otherwise
+// a padded dst leading dimension is lost.
+status_t init_by_dst_blocking(memory_desc_t &md, const memory_desc_t *dst_md) {
+    const memory_desc_wrapper dst_mdw(dst_md);
+    const auto &dblk = dst_mdw.blocking_desc();
+    CHECK(memory_desc_init_by_blocking_desc(md, dblk));
+
+    bool same_dims = md.ndims == dst_md->ndims && dblk.inner_nblks == 0;
+    for (int d = 0; same_dims && d < md.ndims; ++d)
+        same_dims = md.dims[d] == dst_md->dims[d];
+    if (same_dims)
+        utils::array_copy(
+                md.format_desc.blocking.strides, dblk.strides, md.ndims);
+    return status::success;
+}
+} // namespace
+
 status_t post_ops_t::set_default_formats(const memory_desc_t *dst_md) {
     for (int idx = 0; idx < len(); ++idx) {
         if (!contain(primitive_kind::binary, idx)) continue;
@@ -342,8 +362,7 @@ status_t post_ops_t::set_default_formats(const memory_desc_t *dst_md) {
             if (src1_mdw.count_non_unit_dims(1))
                 CHECK(memory_desc_init_by_strides(src1_md, nullptr));
             else
-                CHECK(memory_desc_init_by_blocking_desc(
-                        src1_md, dst_mdw.blocking_desc()));
+                CHECK(init_by_dst_blocking(src1_md, dst_md));
         }
 
         auto &src2_md = entry_[idx].binary.src2_desc;
@@ -355,8 +374,7 @@ status_t post_ops_t::set_default_formats(const memory_desc_t *dst_md) {
             if (src1_mdw.count_non_unit_dims(1))
                 CHECK(memory_desc_init_by_strides(src2_md, nullptr));
             else
-                CHECK(memory_desc_init_by_blocking_desc(
-                        src2_md, dst_mdw.blocking_desc()));
+                CHECK(init_by_dst_blocking(src2_md, dst_md));
         }
     }
 
