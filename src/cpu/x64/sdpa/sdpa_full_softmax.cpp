@@ -417,16 +417,16 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     // Fold select into mm1 only when it is not inverted and its query/key axes
     // are dense [m x seq_kv]. The injector indexes the condition through the
-    // destination offsets, so the row/column strides must be [seq_kv, 1]. A
-    // broadcast query or key axis has effective stride 0 and uses the pre-pass.
-    const dim_t cond_row_stride = p_.has_select
-            ? (p_.cond_dims[row_dim] == 1 ? 0 : p_.cond_strides[row_dim])
-            : 0;
-    const dim_t cond_col_stride = p_.has_select
-            ? (p_.cond_dims[ndims - 1] == 1 ? 0 : p_.cond_strides[ndims - 1])
-            : 0;
+    // destination offsets, so the row/column strides must be [seq_kv, 1].
+    // A broadcast query or key axis has effective stride 0 and uses the pre-pass.
+    const bool broadcast_mask = p_.has_select
+            && ((seq_q > 1 && p_.cond_dims[sdpa_pd_t::mask_q_index] == 1)
+                    || (seq_kv > 1
+                            && p_.cond_dims[sdpa_pd_t::mask_k_index] == 1));
     const bool try_select_postop = p_.has_select && !p_.invert_select
-            && cond_row_stride == seq_kv && cond_col_stride == 1;
+            && !broadcast_mask
+            && (p_.cond_strides[sdpa_pd_t::mask_q_index] == seq_kv
+                    && p_.cond_strides[sdpa_pd_t::mask_k_index] == 1);
 
     conf.mm1_select_postop = try_select_postop;
 
@@ -729,11 +729,9 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
     // tiles. The condition is dense along seq_kv (cond_col == 1) because the
     // pd requires the key axis to be full and plain.
     if (p_.has_select && !mm1_select_postop_) {
-        std::vector<dim_t> eff = p_.cond_strides;
-        for (int d = 0; d < ndims; ++d)
-            if (p_.cond_dims[d] == 1) eff[d] = 0;
-
-        const dim_t cond_row = eff[ndims - 2];
+        const dim_t cond_row = p_.cond_dims[sdpa_pd_t::mask_q_index] == 1
+                ? 0
+                : p_.cond_strides[sdpa_pd_t::mask_q_index];
         std::shared_ptr<jit_generator_t> k(
                 sdpa_full_softmax_select_ir::create_select_ir_kernel(isa_for_ir,
                         /*wseq_kv=*/seq_kv,
@@ -798,17 +796,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const dim_t o_row = p_.o_strides[row_dim];
     const dim_t o_col = p_.o_strides[ndims - 1];
     // Broadcast-aware select-condition strides: an axis with extent 1 is a
-    // broadcast axis whose stride is meaningless (set to the collapsed extent), so it must contribute 0. distill_bert's condition is
-    // [1,1,1,seq_kv] -- broadcast over head and seq_q -- so without this the
-    // per-head base offset and the per-row (cond_row) advance both overrun the
-    // seq_kv-element buffer.
+    // broadcast axis whose stride is meaningless (set to the collapsed extent),
+    // so it must contribute 0. Without this the per-head base offset and the
+    // per-row (cond_row) advance both overrun the seq_kv-element buffer.
     std::vector<dim_t> eff_cond_strides;
     if (has_select) {
         eff_cond_strides = p_.cond_strides;
         for (int d = 0; d < ndims; ++d)
             if (p_.cond_dims[d] == 1) eff_cond_strides[d] = 0;
     }
-    const dim_t cond_row = has_select ? eff_cond_strides[row_dim] : 0;
+    const dim_t cond_row
+            = has_select ? eff_cond_strides[sdpa_pd_t::mask_q_index] : 0;
 
     const dim_t n_qblk = utils::div_up(seq_q, q_block);
     const size_t block_size = scratch_per_thread_;
