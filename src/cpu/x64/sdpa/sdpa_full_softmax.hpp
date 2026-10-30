@@ -164,7 +164,6 @@ struct sdpa_full_softmax_conf_t {
     // A non-inverted select mask with a dense condition is folded into mm1 as
     // a binary_select post-op; the descriptors are built accordingly.
     bool mm1_select_postop = false;
-    dim_t num_head_kv = 0;
     size_t amx_wsp_bytes = 0;
     size_t scratch_per_thread = 0;
     size_t k_copy_bytes = 0, v_copy_bytes = 0;
