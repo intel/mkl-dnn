@@ -84,6 +84,9 @@ protected:
     void cleanup();
 
 private:
+    // allows execution time-tracking for different component kinds
+    void log_profile(const prim_profile_data_t &prof_data, double duration_ms);
+
     void wait_for_pending_primitives() override;
 
     status_t get_aggregate_exec_time(size_t index, double &duration_ms) const;

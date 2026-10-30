@@ -49,32 +49,30 @@ void verbose_profiler_t::add_to_pending_primitive_list(
     last_entry.component_kind_ = component;
 }
 
+void verbose_profiler_t::log_profile(
+        const prim_profile_data_t &prof_data, double duration_ms) {
+    switch (static_cast<component_t::flag_kind>(prof_data.component_kind_)) {
+        case component_t::graph:
+            VPROF(prof_data.start_ms_, graph, exec, VERBOSE_profile,
+                    prof_data.pd_info_.c_str(), duration_ms);
+            break;
+        case component_t::ukernel:
+            VPROF(prof_data.start_ms_, ukernel, exec, VERBOSE_profile,
+                    prof_data.pd_info_.c_str(), duration_ms);
+            break;
+        case component_t::primitive:
+        default:
+            VPROF(prof_data.start_ms_, primitive, exec, VERBOSE_profile,
+                    prof_data.pd_info_.c_str(), duration_ms);
+            break;
+    }
+}
+
 void verbose_profiler_t::check_for_completed_primitives() {
     // the polling check is paused at the first pending primitive
     // and resumed again at the next check. This ensures the
     // primitives are logged in the same order they were enqueued
     size_t first_pending = profiling_data_.size();
-
-    auto log_profile
-            = [](const prim_profile_data_t &prof_data, double duration_ms) {
-        // allows execution time-tracking for different component kinds
-        switch (static_cast<component_t::flag_kind>(
-                prof_data.component_kind_)) {
-            case component_t::graph:
-                VPROF(prof_data.start_ms_, graph, exec, VERBOSE_profile,
-                        prof_data.pd_info_.c_str(), duration_ms);
-                break;
-            case component_t::ukernel:
-                VPROF(prof_data.start_ms_, ukernel, exec, VERBOSE_profile,
-                        prof_data.pd_info_.c_str(), duration_ms);
-                break;
-            case component_t::primitive:
-            default:
-                VPROF(prof_data.start_ms_, primitive, exec, VERBOSE_profile,
-                        prof_data.pd_info_.c_str(), duration_ms);
-                break;
-        }
-    };
 
     for (size_t index = 0; index < profiling_data_.size(); ++index) {
         const auto &prof_data = profiling_data_[index];

@@ -221,6 +221,9 @@ protected:
     void cleanup();
 
 private:
+    // allows execution time-tracking for different component kinds
+    void log_profile(const prim_profile_data_t &prof_data, double duration_ms);
+
     // This is invoked during profiler destruction to account for any
     // pending primitives that have not yet been logged.
     void wait_for_pending_primitives() override;
