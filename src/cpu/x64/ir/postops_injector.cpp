@@ -51,8 +51,9 @@ injector_t<Vmm> *cast2tgt(void *injector) {
 
 postops_injector_t::postops_injector_t(jit_generator_t &gen, cpu_isa_t isa,
         const post_ops_t &post_ops, const memory_desc_t &dst_md,
-        const Xbyak::Reg64 &param_reg, int rhs_arg_offset, dim_t dst_orig_off,
-        int tail_elems, int eltwise_opmask, int binary_tail_opmask)
+        const bcast_set_t &bcast_set, const Xbyak::Reg64 &param_reg,
+        int rhs_arg_offset, dim_t dst_orig_off, int tail_elems,
+        int eltwise_opmask, int binary_tail_opmask)
     : is_zmm_(is_superset(isa, avx512_core))
     , tail_elems_(tail_elems)
     , binary_tail_opmask_(binary_tail_opmask) {
@@ -85,9 +86,7 @@ postops_injector_t::postops_injector_t(jit_generator_t &gen, cpu_isa_t isa,
             preserve_vmm, rhs_arg_offset, dst_orig_off, dst_d, tail_elems,
             Xbyak::Opmask(binary_tail_opmask), use_exact_tail_scalar_bcast};
 
-    const binary_injector::static_params_t bsp {param_reg,
-            binary_injector::get_all_strategies_supported_by_injector(),
-            rhs_sp};
+    const binary_injector::static_params_t bsp {param_reg, bcast_set, rhs_sp};
 
     // Everything but the mask keeps the eltwise injector's own defaults. The
     // mask has to be named because its default, `k1`, is a register the IR

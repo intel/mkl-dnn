@@ -57,6 +57,7 @@
 #include <memory>
 #include <vector>
 
+#include "common/broadcast_strategy.hpp"
 #include "common/c_types_map.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/jit_generator.hpp"
@@ -74,6 +75,8 @@ struct postops_injector_t {
     // post_ops           - attribute post-ops chain to apply
     // dst_md             - destination memory descriptor (used by binary
     //                      post-ops)
+    // bcast_set          - broadcasting strategies the binary injector may
+    //                      pick for a right-hand-side argument
     // param_reg          - gpr holding the kernel-parameter-struct pointer
     //                      (used by binary post-ops to reach their
     //                      right-hand-side arguments)
@@ -90,9 +93,9 @@ struct postops_injector_t {
     //                      the binary injector
     DNNL_API postops_injector_t(jit_generator_t &gen, cpu_isa_t isa,
             const post_ops_t &post_ops, const memory_desc_t &dst_md,
-            const Xbyak::Reg64 &param_reg, int rhs_arg_offset,
-            dim_t dst_orig_off, int tail_elems, int eltwise_opmask,
-            int binary_tail_opmask);
+            const bcast_set_t &bcast_set, const Xbyak::Reg64 &param_reg,
+            int rhs_arg_offset, dim_t dst_orig_off, int tail_elems,
+            int eltwise_opmask, int binary_tail_opmask);
 
     postops_injector_t(const postops_injector_t &) = delete;
     postops_injector_t &operator=(const postops_injector_t &) = delete;

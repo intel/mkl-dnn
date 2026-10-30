@@ -81,9 +81,9 @@ void generate_kernel(
         JIT_ASSERT(tail_elems >= 0
                 && "inject_postops: invalid or inconsistent element counts");
         injector.reset(new postops_injector_t(gen, isa, *postops.post_ops,
-                *postops.dst_md, abi_param1, postops.rhs_arg_offset,
-                postops.dst_orig_off, tail_elems, eltwise_opmask,
-                binary_tail_opmask));
+                *postops.dst_md, postops.bcast_set, abi_param1,
+                postops.rhs_arg_offset, postops.dst_orig_off, tail_elems,
+                eltwise_opmask, binary_tail_opmask));
     }
 
     gen.preamble();

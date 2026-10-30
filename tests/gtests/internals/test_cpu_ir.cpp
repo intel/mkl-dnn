@@ -317,7 +317,8 @@ protected:
         std::unique_ptr<postops_injector_t> injector;
         if (postops_cfg_.post_ops) {
             injector.reset(new postops_injector_t(*this, max_cpu_isa(),
-                    *postops_cfg_.post_ops, *postops_cfg_.dst_md, abi_param1,
+                    *postops_cfg_.post_ops, *postops_cfg_.dst_md,
+                    default_strategies(), abi_param1,
                     static_cast<int>(postops_cfg_.rhs_arg_offset),
                     postops_cfg_.dst_orig_offset, postops_cfg_.tail_elems,
                     eltwise_opmask, binary_tail_opmask));

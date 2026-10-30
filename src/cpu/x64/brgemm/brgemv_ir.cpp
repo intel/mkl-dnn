@@ -743,6 +743,14 @@ struct jit_brgemv_ir_kernel_t : public brgemm_kernel_t {
         if (brg_.with_eltwise || brg_.with_binary || brg_.with_sum) {
             postops.post_ops = &brg_.attr()->post_ops_;
             postops.dst_md = brg_.dst_md();
+            // The transA accumulators run along M, the channel dimension of 3D
+            // dst {B, M, 1}, so per_oc_spatial and per_mb_spatial don't apply.
+            if (brg_.transA && !brg_.treat_y_as_row
+                    && brg_.dst_md()->ndims == 3)
+                postops.bcast_set = {broadcasting_strategy_t::scalar,
+                        broadcasting_strategy_t::per_oc,
+                        broadcasting_strategy_t::per_mb,
+                        broadcasting_strategy_t::no_broadcast};
             postops.rhs_arg_offset = GET_OFF(post_ops_binary_rhs_arg_vec);
             postops.dst_orig_off = GET_OFF(data_C_ptr_);
         }
