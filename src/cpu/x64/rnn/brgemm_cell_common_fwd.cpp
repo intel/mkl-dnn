@@ -704,7 +704,10 @@ template <typename src_t, typename weights_t, typename scratch_t,
         typename gemm_acc_t>
 void brgemm_gru_t<src_t, weights_t, scratch_t, gemm_acc_t>::execute() const {
     assert(is_fused_layer_iter_brgemm_);
-    parallel(max_nthr_, [this](const int ithr, const int nthr) {
+    // Work is split over M blocks only; skip the parallel region when there
+    // is a single block.
+    const int nthr = work_amount_ == 1 ? 1 : max_nthr_;
+    parallel(nthr, [this](const int ithr, const int nthr) {
         this->kernel(ithr, nthr);
     });
 }
