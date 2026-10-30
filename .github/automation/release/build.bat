@@ -70,6 +70,9 @@ if errorlevel 1 exit /b 1
 if not exist "%INSTALL_DIR%\env" mkdir "%INSTALL_DIR%\env"
 copy /y "%~dp0env\vars.bat" "%INSTALL_DIR%\env\vars.bat" >nul
 if errorlevel 1 exit /b 1
+rem Workaround for SIGILL with EMR-based Windows runners
+rem https://github.com/actions/runner-images/issues/14483
+set ONEDNN_MAX_CPU_ISA=AVX10_1_512
 rem Smoke test the CPU engine only, GPU is not expected to be available.
 ctest --test-dir build --output-on-failure -E "gpu|cross-engine"
 if errorlevel 1 exit /b 1
