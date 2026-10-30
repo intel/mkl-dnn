@@ -206,8 +206,8 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     bp_.group_head = desc()->num_q_heads() / desc()->num_kv_heads();
     bp_.seq_q = desc()->queries();
     bp_.seq_kv = desc()->keys();
-    bp_.head_size_qk = desc()->head_size();
-    bp_.head_size_v = desc()->values();
+    bp_.hs_qk = desc()->head_size();
+    bp_.hs_v = desc()->values();
     bp_.mm_dt = dt;
     bp_.out_dt = dt;
     bp_.q_strides.assign(

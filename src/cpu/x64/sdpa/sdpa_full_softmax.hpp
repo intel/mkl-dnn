@@ -76,8 +76,8 @@ struct sdpa_full_softmax_params_t {
     dim_t group_head = 1;
     dim_t seq_q = 0;
     dim_t seq_kv = 0;
-    dim_t head_size_qk = 0;
-    dim_t head_size_v = 0;
+    dim_t hs_qk = 0;
+    dim_t hs_v = 0;
 
     // Compute data type for Q/K/V and the mm1/mm2 BRGEMM inputs (f32/f16/bf16).
     // The scores and pv tiles are always accumulated in f32 (BRGEMM C is f32);
@@ -157,7 +157,7 @@ struct sdpa_full_softmax_conf_t {
     // Physical reduction extents required by the K and V copy kernels.
     dim_t kt_k_pad = 1, vt_k_pad = 1;
     // Materialized B operands use independent 64-column panels.
-    dim_t kt_ld = 0, vt_ld = 0;
+    dim_t ldk = 0, ldv = 0;
     dim_t v_block = 0, v_tail = 0;
     bool pack_k_for_aliasing = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
@@ -167,15 +167,15 @@ struct sdpa_full_softmax_conf_t {
     dim_t num_head_kv = 0;
     size_t amx_wsp_bytes = 0;
     size_t scratch_per_thread = 0;
-    size_t kt_global_bytes = 0, vt_global_bytes = 0;
+    size_t k_copy_bytes = 0, v_copy_bytes = 0;
     int nthr = 0;
 
     // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
     sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2][2];
 
     size_t scratch_total(int n) const {
-        return scratch_per_thread * static_cast<size_t>(n) + kt_global_bytes
-                + vt_global_bytes;
+        return scratch_per_thread * static_cast<size_t>(n) + k_copy_bytes
+                + v_copy_bytes;
     }
 };
 
