@@ -17,7 +17,9 @@
 #ifndef CPU_X64_IR_CODEGEN_HPP
 #define CPU_X64_IR_CODEGEN_HPP
 
+#include "common/broadcast_strategy.hpp"
 #include "common/c_types_map.hpp"
+#include "cpu/x64/injectors/jit_uni_binary_injector.hpp"
 #include "cpu/x64/ir/ir.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
@@ -33,6 +35,9 @@ namespace ir {
 //   post_ops       - attribute post-ops chain to apply, or null when the IR has
 //                    no `inject_postops` operation
 //   dst_md         - destination memory descriptor (used by binary post-ops)
+//   bcast_set      - broadcasting strategies the binary injector may pick for
+//                    a right-hand-side argument. Defaults to every strategy
+//                    the injector supports
 //   rhs_arg_offset - byte offset in the kernel argument struct of the binary
 //                    right-hand-side argument pointer array
 //   dst_orig_off   - byte offset in the kernel argument struct of the
@@ -40,6 +45,8 @@ namespace ir {
 struct postops_config_t {
     const post_ops_t *post_ops = nullptr;
     const memory_desc_t *dst_md = nullptr;
+    bcast_set_t bcast_set
+            = binary_injector::get_all_strategies_supported_by_injector();
     int rhs_arg_offset = 0;
     dim_t dst_orig_off = 0;
 };
