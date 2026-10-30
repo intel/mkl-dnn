@@ -37,7 +37,7 @@ int append_post_ops_to_arg_list(const impl::exec_args_t &args,
 // The kernel override: GEMM_KERNEL, else the attribute's.
 std::string kernel_override(const primitive_attr_t *attr);
 // Candidate rank if the kernel override is a bare integer, else -1.
-int kernel_rank(const primitive_attr_t *attr);
+int kernel_rank(const std::string &kernel);
 
 } // namespace gemm
 } // namespace intel
