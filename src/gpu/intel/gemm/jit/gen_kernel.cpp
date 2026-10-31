@@ -18,6 +18,9 @@
 
 #include "gpu/intel/gemm/jit/gen_kernel.hpp"
 
+#include <algorithm>
+#include <cstring>
+
 #include "common/c_types_map.hpp"
 #include "common/impl_registration.hpp"
 #include "common/type_helpers.hpp"
@@ -633,8 +636,29 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     tags_ = match_params[0].tags;
     Ts_ = problem.Ts;
     beta_ = problem.beta;
-    return select(catalog(), static_cast<int>(match_params.size()),
+    auto entries = select(catalog(), static_cast<int>(match_params.size()),
             match_params.data(), eval_params_, aux_params_, &observer);
+
+    // On Xe3 the default choice for these shapes is slower than the XeHPC
+    // kernel below. 1024 < m < 2048 is left out, the default is faster there.
+    if (hw_ == ngen::HW::Xe3 && !disable_systolic_ && batch <= 1
+            && problem.Ta_ext == Type::f16 && problem.Tb_ext == Type::f16
+            && problem.Tc_ext == Type::f16
+            && problem.A.layout == MatrixLayout::T
+            && problem.B.layout == MatrixLayout::N
+            && problem.C.layout == MatrixLayout::N && n > 256 && n <= 320
+            && k == 4096 && (m == 1024 || (m >= 2048 && m <= 4096))) {
+        const char *preferred
+                = "at16+m64@64 am32+m16@64 aB wg 8x4 af vav hi "
+                  "pt sr br sb64 bk0 sm sn grf256 sys";
+        auto it = std::find_if(
+                entries.begin(), entries.end(), [&](const kcatalog::Entry *e) {
+            return e->selector.hw == kcatalog::HWTagXeHPC
+                    && std::strcmp(e->strategy, preferred) == 0;
+        });
+        if (it != entries.end()) std::rotate(entries.begin(), it, it + 1);
+    }
+    return entries;
 }
 
 status_t gen_nocopy_desc_t::finalize() {

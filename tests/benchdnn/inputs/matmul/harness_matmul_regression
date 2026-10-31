@@ -73,3 +73,5 @@
 --reset --dt=s8:u4:f16 --stag=ab --wtag=ba --dtag=ab --attr-scales=wei:per_ocic:f16:64x1 --attr-zero-points=wei:per_ocic:u8:64x1 16x64:64x1
 # int4 weights decompression with 1 row and n > 65536: blocked launches must address grouped scales/zero points with the full problem size
 --reset --dt=f16:u4:f16 --stag=ab --wtag=ba --dtag=ab --attr-fpmath=f16:true --attr-scales=wei:per_ocic:f16:128x1 --attr-zero-points=,wei:common:8:u8,wei:per_oc:u8,wei:per_ocic:u8:128x1 1x256:256x65537
+# f16 gemm with ~300 rows, Xe3 kernel selection
+--reset --dt=f16:f16:f16 --stag=ab --wtag=ba --dtag=ab 300x4096:4096x2048 320x4096:4096x1024
