@@ -732,10 +732,44 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
     return status::success;
 }
 
+namespace {
+dim_t tensor_base_offset(
+        const std::vector<dim_t> &strides, dim_t batch_idx, dim_t head_idx) {
+    return batch_idx * strides[0] + head_idx * strides[1];
+}
+
+const char *get_k_arg_ptr(const sdpa_full_softmax_conf_t &conf,
+        const sdpa_full_softmax_run_args_t &args, dim_t batch_idx,
+        dim_t head_idx, dim_t mm_dt_sz) {
+    return static_cast<const char *>(args.k)
+            + tensor_base_offset(conf.params.k_strides, batch_idx, head_idx)
+            * mm_dt_sz;
+}
+
+char *get_k_copy_ptr(const sdpa_full_softmax_conf_t &conf,
+        const sdpa_full_softmax_run_args_t &args, dim_t batch_idx,
+        dim_t num_head_kv, dim_t kv_head_idx, dim_t kt_head_elems,
+        dim_t mm_dt_sz) {
+    return static_cast<char *>(args.scratch)
+            + conf.nthr * conf.scratch_per_thread
+            + (batch_idx * num_head_kv + kv_head_idx) * kt_head_elems
+            * mm_dt_sz;
+}
+
+const char *get_k_tile_ptr(const sdpa_full_softmax_conf_t &conf,
+        const sdpa_full_softmax_run_args_t &args, dim_t batch_idx,
+        dim_t num_head_kv, dim_t kv_head_idx, dim_t kt_head_elems,
+        dim_t mm_dt_sz) {
+    return conf.need_copy_k
+            ? get_k_copy_ptr(conf, args, batch_idx, num_head_kv, kv_head_idx,
+                      kt_head_elems, mm_dt_sz)
+            : get_k_arg_ptr(conf, args, batch_idx, kv_head_idx, mm_dt_sz);
+}
+} // namespace
+
 status_t execute(const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_kernels_t &kernels,
-        const sdpa_full_softmax_run_args_t &args, void *scratch_base,
-        int nthr) {
+        const sdpa_full_softmax_run_args_t &args, int nthr) {
     const sdpa_full_softmax_params_t &p_ = conf.params;
     // Bind conf scalars + compiled kernels to the member names the body uses.
     const dim_t q_block = conf.q_block;
@@ -761,18 +795,9 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const float fill = args.fill;
 
     auto *q_base = static_cast<const char *>(args.q);
-    auto *k_orig_buffer_ptr = static_cast<const char *>(args.k);
     auto *v_orig_buffer_ptr = static_cast<const char *>(args.v);
     auto *o_base = static_cast<char *>(args.out);
     auto *cond_base = static_cast<const char *>(args.cond);
-
-    // Q, output, and select-condition tensors use query-head/group coordinates;
-    // K and V use batch/KV-head coordinates shared by each GQA group.
-    const auto tensor_base_offset
-            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
-                      dim_t head_idx) -> dim_t {
-        return batch_idx * strides[0] + head_idx * strides[1];
-    };
 
     const dim_t o_row_stride = p_.o_strides[row_dim];
     const dim_t o_col_stride = p_.o_strides[ndims - 1];
@@ -824,22 +849,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             = hs_qk_padded * sdpa_brgemm_copy::b_packer_t::packed_ld(seq_kv);
     const dim_t v_copy_tile_stride
             = seq_kv_padded * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v);
-    char *k_copy_buffer_ptr = conf.need_copy_k
-            ? static_cast<char *>(scratch_base) + nthr * block_size
-            : nullptr;
     char *v_copy_buffer_ptr = conf.need_copy_v
-            ? static_cast<char *>(scratch_base) + nthr * block_size
+            ? static_cast<char *>(args.scratch) + nthr * block_size
                     + conf.k_copy_bytes
             : nullptr;
     if (conf.need_copy_k) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
-            const char *k_src = k_orig_buffer_ptr
-                    + tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
-                            * mm_dt_sz;
-            char *k_dst = k_copy_buffer_ptr
-                    + (batch_idx * num_head_kv + kv_head_idx) * kt_head_elems
-                            * mm_dt_sz;
+            const char *k_src = get_k_arg_ptr(
+                    conf, args, batch_idx, kv_head_idx, mm_dt_sz);
+            char *k_dst = get_k_copy_ptr(conf, args, batch_idx, num_head_kv,
+                    kv_head_idx, kt_head_elems, mm_dt_sz);
             kernels.k_packer->execute(k_src, k_dst);
         });
     }
@@ -874,13 +894,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                           + q0 * q_row)
                         * mm_dt_sz;
 
-        const char *k_tile_buffer_ptr = conf.need_copy_k ? k_copy_buffer_ptr
-                        + (batch_idx * num_head_kv + kv_head_idx)
-                                * kt_head_elems * mm_dt_sz
-                                                         : k_orig_buffer_ptr
-                        + tensor_base_offset(
-                                  p_.k_strides, batch_idx, kv_head_idx)
-                                * mm_dt_sz;
+        const char *k_tile_buffer_ptr = get_k_tile_ptr(conf, args, batch_idx,
+                num_head_kv, kv_head_idx, kt_head_elems, mm_dt_sz);
 
         const char *v_tile_buffer_ptr = conf.need_copy_v ? v_copy_buffer_ptr
                         + (batch_idx * num_head_kv + kv_head_idx)
@@ -902,7 +917,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                                   * sizeof(uint8_t))
                 : nullptr;
 
-        char *my_scratch = static_cast<char *>(scratch_base) + tid * block_size;
+        char *my_scratch = static_cast<char *>(args.scratch) + tid * block_size;
         float *scores = reinterpret_cast<float *>(my_scratch);
         float *pv = reinterpret_cast<float *>(my_scratch + scores_bytes);
         // P (mm2's A operand) is the softmax output in the compute type. For

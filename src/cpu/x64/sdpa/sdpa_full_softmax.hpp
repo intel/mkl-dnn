@@ -118,6 +118,7 @@ struct sdpa_full_softmax_run_args_t {
     const void *v = nullptr;
     const void *cond = nullptr; // uint8 select condition, or null
     void *out = nullptr;
+    void *scratch = nullptr;
     float fill = 0.0f;
     // Base pointers for the mm1 binary post-op right-hand sides, one per binary
     // entry in sdpa_full_softmax_params_t::mm1_post_ops (in the same order; eltwise
@@ -246,12 +247,9 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
         const sdpa_full_softmax_descs_t &descs, engine_t *engine,
         sdpa_full_softmax_kernels_t &kernels);
 
-// Run the full-softmax SDPA. scratch_base points at a buffer of at least
-// conf.scratch_total(nthr) bytes; each thread slices its own per-thread block
-// and the shared transposed-K buffer (if any) follows them.
 status_t execute(const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_kernels_t &kernels,
-        const sdpa_full_softmax_run_args_t &args, void *scratch_base, int nthr);
+        const sdpa_full_softmax_run_args_t &args, int nthr);
 
 } // namespace sdpa_full_softmax
 

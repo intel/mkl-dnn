@@ -354,6 +354,7 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     args.v = v;
     args.cond = cond;
     args.out = out;
+    args.scratch = scratch;
     args.fill = fill_val;
     // rhs base pointers for the mm1 binary post-ops, in the same order they
     // were appended to bp_.mm1_post_ops: scale (scalar) then attention mask.
@@ -361,8 +362,8 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     if (pd()->with_buffer_mask())
         args.mm1_post_op_rhs.push_back(
                 CTX_IN_MEM(const void *, DNNL_ARG_ATTN_MASK));
-    return sdpa_full_softmax::execute(pd()->full_softmax_conf(), full_kernels_,
-            args, scratch, pd()->nthr());
+    return sdpa_full_softmax::execute(
+            pd()->full_softmax_conf(), full_kernels_, args, pd()->nthr());
 }
 
 } // namespace x64
