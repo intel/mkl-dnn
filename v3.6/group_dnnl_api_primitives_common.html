@@ -1,0 +1,1675 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Common &#8212; oneDNN v3.6.2 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/doxyrest-pygments.css?v=ff3f4257" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=d49039f0"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script src="_static/target-highlight.js?v=df7d332b"></script>
+    <script>window.MathJax = {"tex": {"macros": {"src": "\\operatorname{src}", "srclayer": "\\operatorname{src\\_layer}", "srclayerattention": "\\operatorname{src\\_layer\\_attention}", "srciter": "\\operatorname{src\\_iter}", "srciterc": "\\operatorname{src\\_iter\\_c}", "weights": "\\operatorname{weights}", "weightslayer": "\\operatorname{weights\\_layer}", "weightsiter": "\\operatorname{weights\\_iter}", "weightspeephole": "\\operatorname{weights\\_peephole}", "weightsprojection": "\\operatorname{weights\\_projection}", "bias": "\\operatorname{bias}", "dst": "\\operatorname{dst}", "dstlayer": "\\operatorname{dst\\_layer}", "dstiter": "\\operatorname{dst\\_iter}", "dstiterc": "\\operatorname{dst\\_iter\\_c}", "diffsrc": "\\operatorname{diff\\_src}", "diffsrclayer": "\\operatorname{diff\\_src\\_layer}", "diffsrclayerattention": "\\operatorname{diff\\_src\\_layer\\_attention}", "diffsrciter": "\\operatorname{diff\\_src\\_iter}", "diffsrciterc": "\\operatorname{diff\\_src\\_iter\\_c}", "diffweights": "\\operatorname{diff\\_weights}", "diffweightslayer": "\\operatorname{diff\\_weights\\_layer}", "diffweightsiter": "\\operatorname{diff\\_weights\\_iter}", "diffweightspeephole": "\\operatorname{diff\\_weights\\_peephole}", "diffweightsprojection": "\\operatorname{diff\\_weights\\_projection}", "diffbias": "\\operatorname{diff\\_bias}", "diffdst": "\\operatorname{diff\\_dst}", "diffdstlayer": "\\operatorname{diff\\_dst\\_layer}", "diffdstiter": "\\operatorname{diff\\_dst\\_iter}", "diffdstiterc": "\\operatorname{diff\\_dst\\_iter\\_c}", "diffgamma": "\\operatorname{diff\\_\\gamma}", "diffbeta": "\\operatorname{diff\\_\\beta}", "workspace": "\\operatorname{workspace}", "srcshape": "\\operatorname{src\\_\\shape}", "dstshape": "\\operatorname{dst\\_\\shape}"}}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'group_dnnl_api_primitives_common';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="enum dnnl_alg_kind_t" href="enum_dnnl_alg_kind_t.html" />
+    <link rel="prev" title="Primitives" href="group_dnnl_api_primitives.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">oneDNN v3.6.2 documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="build_and_link.html">Building and Linking</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build.html">Build from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build_options.html">Build Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_link.html">Linking to the Library</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_getting_started_cpp.html">Getting started</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_memory_format_propagation_cpp.html">Memory Format Propagation</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_inference_and_training_aspects.html">Inference and Training Aspects</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference.html">Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference_int8.html">Int8 Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_training_bf16.html">Bfloat16 Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_attributes.html">Primitive Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_fpmath_mode.html">Primitive Attributes: floating-point math mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_accumulation_mode.html">Primitive Attributes: accumulation mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_rounding_mode.html">Primitive Attributes: rounding mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_deterministic.html">Primitive Attributes: deterministic</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_quantization.html">Primitive Attributes: Quantization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_post_ops.html">Primitive Attributes: Post-ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_scratchpad.html">Primitive Attributes: Scratchpad</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_data_types.html">Data Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cross_engine_reorder_cpp.html">Reorder between CPU and GPU engines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_c_and_cpp_apis.html">API</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="interop_with_dpcpp_and_opencl.html">Interoperability with DPC++ and OpenCL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_opencl_interoperability.html">OpenCL Interoperability</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_dpcpp_interoperability.html">DPC++ Interoperability</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="supported_primitives.html">Supported Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_convolution.html">Convolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inner_product.html">Inner Product</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_matmul.html">Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_rnn.html">RNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_batch_normalization.html">Batch Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_binary.html">Binary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_concat.html">Concat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_eltwise.html">Eltwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_group_normalization.html">Group Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_layer_normalization.html">Layer Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_lrn.html">Local Response Normalization (LRN)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_pooling.html">Pooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_prelu.html">PReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_resampling.html">Resampling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_shuffle.html">Shuffle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_softmax.html">Softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sum.html">Sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reorder.html">Reorder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reduction.html">Reduction</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="graph_extension.html">Graph Extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_low_precision.html">Low Precision</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_supported_operations.html">Supported Operations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_abs.html">Abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_absbackward.html">AbsBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_add.html">Add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpool.html">AvgPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpoolbackward.html">AvgPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormforwardtraining.html">BatchNormForwardTraining</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnorminference.html">BatchNormInference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormtrainingbackward.html">BatchNormTrainingBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasadd.html">BiasAdd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasaddbackward.html">BiasAddBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clamp.html">Clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clampbackward.html">ClampBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_concat.html">Concat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolution.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwarddata.html">ConvolutionBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwardweights.html">ConvolutionBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtranspose.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwarddata.html">ConvTransposeBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwardweights.html">ConvTransposeBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dequantize.html">Dequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_divide.html">Divide</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicdequantize.html">DynamicDequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicquantize.html">DynamicQuantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elu.html">Elu</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elubackward.html">EluBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_end.html">End</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_exp.html">Exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_groupnorm.html">GroupNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelu.html">GELU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelubackward.html">GELUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoid.html">HardSigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoidbackward.html">HardSigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswish.html">HardSwish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswishbackward.html">HardSwishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolate.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolatebackward.html">InterpolateBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernorm.html">LayerNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernormbackward.html">LayerNormBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_leakyrelu.html">LeakyReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_log.html">Log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmax.html">LogSoftmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmaxbackward.html">LogSoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_matmul.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maximum.html">Maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpool.html">MaxPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpoolbackward.html">MaxPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_minimum.html">Minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mish.html">Mish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mishbackward.html">MishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_multiply.html">Multiply</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_pow.html">Pow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelu.html">PReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelubackward.html">PReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_quantize.html">Quantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reciprocal.html">Reciprocal</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel1.html">ReduceL1</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel2.html">ReduceL2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemax.html">ReduceMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemean.html">ReduceMean</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemin.html">ReduceMin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reduceprod.html">ReduceProd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducesum.html">ReduceSum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relu.html">ReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relubackward.html">ReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reorder.html">Reorder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_round.html">Round</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_select.html">Select</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoid.html">Sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoidbackward.html">SigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmax.html">SoftMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmaxbackward.html">SoftMaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplus.html">SoftPlus</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplusbackward.html">SoftPlusBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrt.html">Sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrtbackward.html">SqrtBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_square.html">Square</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_squareddifference.html">SquaredDifference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_staticreshape.html">StaticReshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_statictranspose.html">StaticTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_subtract.html">Subtract</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanh.html">Tanh</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanhbackward.html">TanhBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_typecast.html">TypeCast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_wildcard.html">Wildcard</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_fusion_patterns.html">Supported Fusion Patterns</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_dump.html">Graph Dump</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_constant_tensor_cache.html">Constant Tensor Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_compiler.html">Graph Compiler</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_examples.html">Examples</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="performance_profiling_and_inspection.html">Performance Profiling and Inspection</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose.html">Verbose Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_performance_settings.html">Configuring oneDNN for Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_benchdnn.html">Benchmarking Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_profilers.html">Profiling oneDNN Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inspecting_jit.html">Inspecting JIT Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_performance_profiling_cpp.html">Performance Profiling Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html">CPU Dispatcher Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_isa_hints.html">CPU ISA Hints</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose_table.html">Verbose Message Catalogue</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="advanced_topics.html">Advanced Topics</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_transition_to_dnnl.html">Transitioning from Intel MKL-DNN to oneDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_understanding_memory_formats.html">Understanding Memory Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_int8_computations.html">Nuances of int8 Computations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_primitive_cache.html">Primitive Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_persistent_cache.html">Persistent Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_threadpool.html">Using oneDNN with Threadpool-Based Threading</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_experimental.html">Experimental features</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="ukernels.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_brgemm.html">Batch-Reduce General Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_transform.html">Data transformation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cpu_brgemm_example_cpp.html">BRGeMM ukernel example</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="group_dnnl_api.html">oneDNN API</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 current active has-children"><a class="reference internal" href="group_dnnl_api_primitives.html">Primitives</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l3 current active has-children"><a class="current reference internal" href="#">Common</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_alg_kind_t.html">enum dnnl_alg_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags_t.html">enum dnnl_normalization_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_primitive_kind_t.html">enum dnnl_primitive_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind_t.html">enum dnnl_prop_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query_t.html">enum dnnl_query_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags.html">enum dnnl::normalization_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query.html">enum dnnl::query</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_exec_arg_t.html">struct dnnl_exec_arg_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive.html">struct dnnl_primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc.html">struct dnnl_primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive-2.html">struct dnnl::primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc-2.html">struct dnnl::primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc_base.html">struct dnnl::primitive_desc_base</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_attributes.html">Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_algorithm.html">enum dnnl::algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rounding_mode_t.html">enum dnnl_rounding_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode_t.html">enum dnnl_scratchpad_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind.html">enum dnnl::prop_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rounding_mode.html">enum dnnl::rounding_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode.html">enum dnnl::scratchpad_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops.html">struct dnnl_post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr.html">struct dnnl_primitive_attr</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops-2.html">struct dnnl::post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr-2.html">struct dnnl::primitive_attr</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reorder.html">Reorder</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reorder.html">struct dnnl::reorder</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_concat.html">Concat</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_concat.html">struct dnnl::concat</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sum.html">Sum</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_sum.html">struct dnnl::sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_binary.html">Binary</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_binary.html">struct dnnl::binary</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_convolution.html">Convolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_data.html">struct dnnl::convolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_weights.html">struct dnnl::convolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_forward.html">struct dnnl::convolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_deconvolution.html">Deconvolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_data.html">struct dnnl::deconvolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_weights.html">struct dnnl::deconvolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_forward.html">struct dnnl::deconvolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_shuffle.html">Shuffle</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_backward.html">struct dnnl::shuffle_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_forward.html">struct dnnl::shuffle_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_eltwise.html">Eltwise</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_backward.html">struct dnnl::eltwise_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_forward.html">struct dnnl::eltwise_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_softmax.html">Softmax</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_backward.html">struct dnnl::softmax_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_forward.html">struct dnnl::softmax_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_pooling.html">Pooling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_backward.html">struct dnnl::pooling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_forward.html">struct dnnl::pooling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_prelu.html">PReLU</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_backward.html">struct dnnl::prelu_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_forward.html">struct dnnl::prelu_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_lrn.html">LRN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_backward.html">struct dnnl::lrn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_forward.html">struct dnnl::lrn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_batch_normalization.html">Batch Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_backward.html">struct dnnl::batch_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_forward.html">struct dnnl::batch_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_group_normalization.html">Group Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_backward.html">struct dnnl::group_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_forward.html">struct dnnl::group_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_layer_normalization.html">Layer Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_backward.html">struct dnnl::layer_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_forward.html">struct dnnl::layer_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_inner_product.html">Inner Product</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_data.html">struct dnnl::inner_product_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_weights.html">struct dnnl::inner_product_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_forward.html">struct dnnl::inner_product_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_rnn.html">RNN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction_t.html">enum dnnl_rnn_direction_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags_t.html">enum dnnl_rnn_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction.html">enum dnnl::rnn_direction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags.html">enum dnnl::rnn_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_backward.html">struct dnnl::augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_forward.html">struct dnnl::augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_backward.html">struct dnnl::gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_forward.html">struct dnnl::gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_backward.html">struct dnnl::lbr_augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_forward.html">struct dnnl::lbr_augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_backward.html">struct dnnl::lbr_gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_forward.html">struct dnnl::lbr_gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_backward.html">struct dnnl::lstm_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_forward.html">struct dnnl::lstm_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_rnn_primitive_desc_base.html">struct dnnl::rnn_primitive_desc_base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_backward.html">struct dnnl::vanilla_rnn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_forward.html">struct dnnl::vanilla_rnn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_matmul.html">Matrix Multiplication</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_matmul.html">struct dnnl::matmul</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_resampling.html">Resampling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_backward.html">struct dnnl::resampling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_forward.html">struct dnnl::resampling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reduction.html">Reduction</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reduction.html">struct dnnl::reduction</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitive_cache.html">Primitive Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_profiling.html">Profiling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_profiling_data_kind.html">enum dnnl::profiling_data_kind</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_blas.html">BLAS functions</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_common.html">Common API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_engine_kind_t.html">enum dnnl_engine_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine.html">struct dnnl_engine</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine-2.html">struct dnnl::engine</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_stream.html">Stream</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_stream_flags_t.html">enum dnnl_stream_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream.html">struct dnnl_stream</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream-2.html">struct dnnl::stream</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_fpmath_mode.html">Floating-point Math Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode_t.html">enum dnnl_fpmath_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode.html">enum dnnl::fpmath_mode</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_service.html">Service</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa.html">enum dnnl::cpu_isa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html">enum dnnl::cpu_isa_hints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html">enum dnnl_cpu_isa_hints_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_t.html">enum dnnl_cpu_isa_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status.html">enum dnnl::status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_version_t.html">struct dnnl_version_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_utils.html">Utilities</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status_t.html">enum dnnl_status_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_error.html">struct dnnl::error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle.html">template struct dnnl::handle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle_traits.html">template struct dnnl::handle_traits</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_accumulation_mode.html">Accumulation Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode.html">enum dnnl::accumulation_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode_t.html">enum dnnl_accumulation_mode_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_data_types.html">Data types</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_data_type_t.html">enum dnnl_data_type_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_memory.html">Memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_kind_t.html">enum dnnl_format_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_tag_t.html">enum dnnl_format_tag_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_profiling_data_kind_t.html">enum dnnl_profiling_data_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sparse_encoding_t.html">enum dnnl_sparse_encoding_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory.html">struct dnnl_memory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory_desc.html">struct dnnl_memory_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory-2.html">struct dnnl::memory</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_graph_api.html">Graph API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_allocator.html">Allocator</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_allocator.html">class dnnl::graph::allocator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_logical_tensor.html">Logical Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_layout_type_t.html">enum dnnl_graph_layout_type_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_tensor_property_t.html">enum dnnl_graph_tensor_property_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_logical_tensor_t.html">struct dnnl_graph_logical_tensor_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_logical_tensor.html">class dnnl::graph::logical_tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_tensor.html">Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_tensor.html">class dnnl::graph::tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_op.html">Op</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_attr_t.html">enum dnnl_graph_op_attr_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_kind_t.html">enum dnnl_graph_op_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_op.html">class dnnl::graph::op</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_partition.html">Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_partition_policy_t.html">enum dnnl_graph_partition_policy_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_partition.html">class dnnl::graph::partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition.html">Compiled Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_inplace_pair_t.html">struct dnnl_graph_inplace_pair_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_compiled_partition.html">class dnnl::graph::compiled_partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_graph.html">Graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_graph.html">class dnnl::graph::graph</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition_cache.html">Compiled Partition Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_constant_tensor_cache.html">Constant Tensor Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_ocl_interop.html">OpenCL interoperability API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_sycl_interop.html">SYCL interoperability API</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_graph.html">namespace dnnl::graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ocl_interop.html">OpenCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_ocl_interop.html">namespace dnnl::ocl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ocl_interop_memory_kind_t.html">enum dnnl_ocl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sycl_interop.html">SYCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_sycl_interop.html">namespace dnnl::sycl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sycl_interop_memory_kind_t.html">enum dnnl_sycl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_threadpool_interop.html">Threadpool interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_threadpool_interop.html">namespace dnnl::threadpool_interop</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_ukernel.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ukernel_brgemm.html">BRGeMM ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_brgemm.html">struct dnnl::ukernel::brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_brgemm.html">struct dnnl_brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_transform.html">struct dnnl_transform</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_transform.html">struct dnnl::ukernel::transform</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_ukernel.html">namespace dnnl::ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ukernel_pack_type.html">enum dnnl::ukernel::pack_type</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_attr_params-2.html">struct dnnl::ukernel::attr_params</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_pack_type_t.html">enum dnnl_pack_type_t</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="struct_dnnl_ukernel_attr_params.html">struct dnnl_ukernel_attr_params</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_dnnl.html">namespace dnnl</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_oneapi.html">namespace oneapi</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/oneapi-src/oneDNN" target="_blank"
+   class="btn btn-sm btn-source-repository-button"
+   title="Source repository"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Common</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#detailed-documentation">Detailed Documentation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#typedefs">Typedefs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#global-functions">Global Functions</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#macros">Macros</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="common">
+<span id="doxid-group-dnnl-api-primitives-common"></span><span id="index-0"></span><h1>Common<a class="headerlink" href="#common" title="Link to this heading">#</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>Common operations to create, destroy and inspect primitives. <a class="reference internal" href="#details-group-dnnl-api-primitives-common"><span class="std std-ref">More…</span></a></p>
+<pre class="highlight doxyrest-overview-code-block literal-block"><span></span><span class="c1">// typedefs</span>
+
+<span class="k">typedef</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc.html#doxid-structdnnl-primitive-desc"><span class="std std-ref">dnnl_primitive_desc</span></a><span></span><span class="o">*</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span><span class="p">;</span>
+<span class="k">typedef</span> <span class="k">const</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc.html#doxid-structdnnl-primitive-desc"><span class="std std-ref">dnnl_primitive_desc</span></a><span></span><span class="o">*</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span><span class="p">;</span>
+<span class="k">typedef</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive.html#doxid-structdnnl-primitive"><span class="std std-ref">dnnl_primitive</span></a><span></span><span class="o">*</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span><span class="p">;</span>
+<span class="k">typedef</span> <span class="k">const</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive.html#doxid-structdnnl-primitive"><span class="std std-ref">dnnl_primitive</span></a><span></span><span class="o">*</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span><span class="p">;</span>
+
+<span class="c1">// enums</span>
+
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_alg_kind_t.html#doxid-group-dnnl-api-primitives-common-1ga96946c805f6c4922c38c37049ab95d23"><span class="std std-ref">dnnl_alg_kind_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_normalization_flags_t.html#doxid-group-dnnl-api-primitives-common-1ga301f673522a400c7c1e75f518431c9a3"><span class="std std-ref">dnnl_normalization_flags_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_primitive_kind_t.html#doxid-group-dnnl-api-primitives-common-1ga9878f4795e53ad8443e5c0a29e53286a"><span class="std std-ref">dnnl_primitive_kind_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_prop_kind_t.html#doxid-group-dnnl-api-primitives-common-1gae3c1f22ae55645782923fbfd8b07d0c4"><span class="std std-ref">dnnl_prop_kind_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_normalization_flags.html#doxid-group-dnnl-api-primitives-common-1gad8ef0fcbb7b10cae3d67dd46892002be"><span class="std std-ref">dnnl::normalization_flags</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_query.html#doxid-group-dnnl-api-primitives-common-1ga94efdd650364f4d9776cfb9b711cbdc1"><span class="std std-ref">dnnl::query</span></a><span></span><span class="p">;</span>
+
+<span class="c1">// structs</span>
+
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_exec_arg_t.html#doxid-structdnnl-exec-arg-t"><span class="std std-ref">dnnl_exec_arg_t</span></a><span></span><span class="p">;</span>
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive.html#doxid-structdnnl-primitive"><span class="std std-ref">dnnl_primitive</span></a><span></span><span class="p">;</span>
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc.html#doxid-structdnnl-primitive-desc"><span class="std std-ref">dnnl_primitive_desc</span></a><span></span><span class="p">;</span>
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive-2.html#doxid-structdnnl-1-1primitive"><span class="std std-ref">dnnl::primitive</span></a><span></span><span class="p">;</span>
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc-2.html#doxid-structdnnl-1-1primitive-desc"><span class="std std-ref">dnnl::primitive_desc</span></a><span></span><span class="p">;</span>
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc_base.html#doxid-structdnnl-1-1primitive-desc-base"><span class="std std-ref">dnnl::primitive_desc_base</span></a><span></span><span class="p">;</span>
+
+<span class="c1">// global functions</span>
+
+<a class="reference internal" href="enum_dnnl_primitive_kind_t.html#doxid-group-dnnl-api-primitives-common-1ga9878f4795e53ad8443e5c0a29e53286a"><span class="std std-ref">dnnl_primitive_kind_t</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaaa215c424a2a5c5f734600216dfb8873"><span class="std std-ref">dnnl::convert_to_c</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_primitive_kind.html#doxid-structdnnl-1-1primitive-1ad1ec93215a0cf3aa0a32bae0c2cd9169"><span class="std std-ref">primitive::kind</span></a><span></span> <span class="n">akind</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_normalization_flags_t.html#doxid-group-dnnl-api-primitives-common-1ga301f673522a400c7c1e75f518431c9a3"><span class="std std-ref">dnnl_normalization_flags_t</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gae3d2ea872c5ab424c74d7549d2222926"><span class="std std-ref">dnnl::convert_to_c</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_normalization_flags.html#doxid-group-dnnl-api-primitives-common-1gad8ef0fcbb7b10cae3d67dd46892002be"><span class="std std-ref">normalization_flags</span></a><span></span> <span class="n">flags</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga01d8a1881875cdb94e230db4e53ccb97"><span class="std std-ref">dnnl::convert_to_c</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_query.html#doxid-group-dnnl-api-primitives-common-1ga94efdd650364f4d9776cfb9b711cbdc1"><span class="std std-ref">query</span></a><span></span> <span class="n">aquery</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga8fc906c6f9b705d747e034097b74965c"><span class="std std-ref">dnnl_primitive_desc_next_impl</span></a><span></span><span class="p">(</span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gae40abecf7360106805eabc049cc86e4b"><span class="std std-ref">dnnl_primitive_desc_clone</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span><span class="o">*</span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">existing_primitive_desc</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga47e492dff0bba4376b8e9f30522c6207"><span class="std std-ref">dnnl_primitive_desc_get_attr</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="group_dnnl_api_attributes.html#doxid-group-dnnl-api-attributes-1ga871d7ee732a90fec43f1c878581bb59a"><span class="std std-ref">const_dnnl_primitive_attr_t</span></a><span></span><span class="o">*</span> <span class="n">attr</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga643938c7c73d200ac1fd3866204e7285"><span class="std std-ref">dnnl_primitive_desc_destroy</span></a><span></span><span class="p">(</span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga041881114858228279174aff5c1f5e75"><span class="std std-ref">dnnl_primitive_desc_query</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">what</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">index</span><span class="p">,</span>
+    <span class="kt">void</span><span class="o">*</span> <span class="n">result</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="group_dnnl_api_memory.html#doxid-group-dnnl-api-memory-1ga402f0cb4399cd56445803cfa433aac6d"><span class="std std-ref">const_dnnl_memory_desc_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga22d7722f49cf30215fa4354429106873"><span class="std std-ref">dnnl_primitive_desc_query_md</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">what</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">index</span>
+    <span class="p">);</span>
+
+<span class="kt">int</span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga314bfec9b68ad50e76ac4c87816cc3aa"><span class="std std-ref">dnnl_primitive_desc_query_s32</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">what</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">index</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gad07540a0074d9cd3a6970b49897e57d3"><span class="std std-ref">dnnl_primitive_create</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span><span class="o">*</span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaeee0deb9aa704e3b7c58291c2a3d022b"><span class="std std-ref">dnnl_primitive_create_from_cache_blob</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span><span class="o">*</span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <span class="kt">size_t</span> <span class="n">size</span><span class="p">,</span>
+    <span class="k">const</span> <span class="kt">uint8_t</span><span class="o">*</span> <span class="n">cache_blob</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga57f8ec3a6e5b33a1068cf2236028935c"><span class="std std-ref">dnnl_primitive_execute</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="group_dnnl_api_stream.html#doxid-group-dnnl-api-stream-1ga735eb19cfd205c108c468b5657de4eca"><span class="std std-ref">dnnl_stream_t</span></a><span></span> <span class="n">stream</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">nargs</span><span class="p">,</span>
+    <span class="k">const</span> <a class="reference internal" href="struct_dnnl_exec_arg_t.html#doxid-structdnnl-exec-arg-t"><span class="std std-ref">dnnl_exec_arg_t</span></a><span></span><span class="o">*</span> <span class="n">args</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga8324e883e41c0b1b9b95bdb7718d35f9"><span class="std std-ref">dnnl_primitive_get_primitive_desc</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span><span class="o">*</span> <span class="n">primitive_desc</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gafceed39f28cd3bec5f530317a2a88719"><span class="std std-ref">dnnl_primitive_get_cache_blob</span></a><span></span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">,</span>
+    <span class="kt">size_t</span><span class="o">*</span> <span class="n">size</span><span class="p">,</span>
+    <span class="kt">uint8_t</span><span class="o">*</span> <span class="n">cache_blob</span>
+    <span class="p">);</span>
+
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaba605c4591c2054a6ee80ec1b581659f"><span class="std std-ref">dnnl_primitive_destroy</span></a><span></span><span class="p">(</span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">);</span>
+
+<span class="c1">// macros</span>
+
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga75f71c3764ec4754333bd400a290c217"><span class="std std-ref">DNNL_ARG_ATTR_DROPOUT_MASK</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga97211384b4573d1f4160f88b1fc764fb"><span class="std std-ref">DNNL_ARG_ATTR_DROPOUT_PROBABILITY</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga00f50d06255b72868fdba100fbb53b1a"><span class="std std-ref">DNNL_ARG_ATTR_DROPOUT_SEED</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga30839136bbf81b03a173e0842ae015e1"><span class="std std-ref">DNNL_ARG_ATTR_MULTIPLE_POST_OP</span></a><span></span><span class="p">(</span><span class="n">idx</span><span class="p">)</span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gadec6bcdebcd35d41c394622af3e0cb75"><span class="std std-ref">DNNL_ARG_ATTR_MULTIPLE_POST_OP_BASE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga0afb48b0c2b8f3ee30609aaa47aa29db"><span class="std std-ref">DNNL_ARG_ATTR_OUTPUT_SCALES</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga47534804c9b2f9ede6b875f6cb08cc35"><span class="std std-ref">DNNL_ARG_ATTR_POST_OP_DW</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga242f970c3e8a56983d92204e71c91fc3"><span class="std std-ref">DNNL_ARG_ATTR_ROUNDING_SEED</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga7f52f0ef5ceb99e163f3ba7f83c18aed"><span class="std std-ref">DNNL_ARG_ATTR_SCALES</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf8d879adfe2baa2f9f2a5143a0f274b6"><span class="std std-ref">DNNL_ARG_ATTR_ZERO_POINTS</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga635c81b2547d4291a82d53a70b6aa8d6"><span class="std std-ref">DNNL_ARG_AUGRU_ATTENTION</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gad0cbc09942aba93fbe3c0c2e09166f0d"><span class="std std-ref">DNNL_ARG_BIAS</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga04f2d46dcd9b18f2f2d240d3efbe2e74"><span class="std std-ref">DNNL_ARG_DIFF_AUGRU_ATTENTION</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga1cd79979dda6df65ec45eef32a839901"><span class="std std-ref">DNNL_ARG_DIFF_BIAS</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gac9302f4cbd2668bf9a98ba99d752b971"><span class="std std-ref">DNNL_ARG_DIFF_DST</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5cf662f6dc742a3500ec4f54290b86da"><span class="std std-ref">DNNL_ARG_DIFF_DST_0</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga87fad7b00d52b6bff673fca344d0f96d"><span class="std std-ref">DNNL_ARG_DIFF_DST_1</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf6ae542064ad032e7c335f3701398034"><span class="std std-ref">DNNL_ARG_DIFF_DST_2</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gad9c83f558d1b229b4185ccbf939590a3"><span class="std std-ref">DNNL_ARG_DIFF_DST_ITER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5524b26b690b9b4b81f0c7f3f9ac3b62"><span class="std std-ref">DNNL_ARG_DIFF_DST_ITER_C</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gafc6053e276352b05b3b526141586e0ac"><span class="std std-ref">DNNL_ARG_DIFF_DST_LAYER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaeb524b0816a1748026a60195523d3393"><span class="std std-ref">DNNL_ARG_DIFF_SCALE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaba70712528e1e3922b1b9e3072915df6"><span class="std std-ref">DNNL_ARG_DIFF_SHIFT</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga18ee0e360399cfe9d3b58a13dfcb9333"><span class="std std-ref">DNNL_ARG_DIFF_SRC</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5d7ebcd603a037e0cd53a22377d1addf"><span class="std std-ref">DNNL_ARG_DIFF_SRC_0</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga79861408c787de29acec450006dace7f"><span class="std std-ref">DNNL_ARG_DIFF_SRC_1</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gae5520b100e7e94e218ccda5697d720bf"><span class="std std-ref">DNNL_ARG_DIFF_SRC_2</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gad0ef2743a16142c7818726b4c970ac07"><span class="std std-ref">DNNL_ARG_DIFF_SRC_3</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga4f7ed97882e020a1cbaa891bbe0da45b"><span class="std std-ref">DNNL_ARG_DIFF_SRC_ITER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga1d8616925684111f3a1b6d8116ab0077"><span class="std std-ref">DNNL_ARG_DIFF_SRC_ITER_C</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga24709fa44c67cf453facbc1c52b0d598"><span class="std std-ref">DNNL_ARG_DIFF_SRC_LAYER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3324092ef421f77aebee83b0117cac60"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaece55926acecbbf375cd4fb06c5786ab"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_0</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga789a5f68ece3af7f3c86217a4a5dab7e"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_1</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga4b4fca234fa86cd9270fb3ef7cf9446d"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_2</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga98277fe5c9232f3089b8a9b5841e821c"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_3</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga4a8e5f32de3856588b2976a766d0af0f"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_ITER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gac0bd0c223011ee2fbbc3c430c047c756"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_LAYER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga24d0c96468ef0e28a96f8a6f1b2869b3"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_PEEPHOLE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3e29edb164be584b8f2df0b4ed6256fb"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_PROJECTION</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3ca217e4a06d42a0ede3c018383c388f"><span class="std std-ref">DNNL_ARG_DST</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga7ba773575a68b592f3ef0fa885d87c20"><span class="std std-ref">DNNL_ARG_DST_0</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gae4215f24ddcf9e4b20b246e10a992687"><span class="std std-ref">DNNL_ARG_DST_1</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gabec2200437d5553747fe56a15548a9b1"><span class="std std-ref">DNNL_ARG_DST_2</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga13b91cbd3f531d9c90227895a275d5a6"><span class="std std-ref">DNNL_ARG_DST_ITER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga8b77d8716fc0ab9923d6cb409dbdf900"><span class="std std-ref">DNNL_ARG_DST_ITER_C</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gacfc123a6a4ff3b4af4cd27ed66fb8528"><span class="std std-ref">DNNL_ARG_DST_LAYER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga953b34f004a8222b04e21851487c611a"><span class="std std-ref">DNNL_ARG_FROM</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga9bcff7f442a5d6a0ac1183533e721066"><span class="std std-ref">DNNL_ARG_MEAN</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaa4183403de9fac3efd3f32c7a975580b"><span class="std std-ref">DNNL_ARG_MULTIPLE_DST</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga1f0da423df3fb6853ddcbe6ffe964267"><span class="std std-ref">DNNL_ARG_MULTIPLE_SRC</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3c5cac668bc82c90c8da051c7d430370"><span class="std std-ref">DNNL_ARG_SCALE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga81836a4db2cb1c4a14d959e304d3f63d"><span class="std std-ref">DNNL_ARG_SCRATCHPAD</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gac250777ced72098caf39deae1d9039c8"><span class="std std-ref">DNNL_ARG_SHIFT</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gac37ad67b48edeb9e742af0e50b70fe09"><span class="std std-ref">DNNL_ARG_SRC</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga53dc83e64489cd69bd82c1c2025eb5bd"><span class="std std-ref">DNNL_ARG_SRC_0</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gadc5a5761633c05f4378780d23b7c9692"><span class="std std-ref">DNNL_ARG_SRC_1</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga2ad44d7072cc1c13f0d2eeb3f5f59a24"><span class="std std-ref">DNNL_ARG_SRC_2</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3cf129098380c0ee634875c4d65b2c43"><span class="std std-ref">DNNL_ARG_SRC_3</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf35f4f604284f1b00bb35bffd0f7a143"><span class="std std-ref">DNNL_ARG_SRC_ITER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga8ef6969516e717208a33766542410410"><span class="std std-ref">DNNL_ARG_SRC_ITER_C</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab91ce4d04cf4e98e3a407daa0676764f"><span class="std std-ref">DNNL_ARG_SRC_LAYER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf700c3396987b450413c8df5d78bafd9"><span class="std std-ref">DNNL_ARG_TO</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf22edfd16f175f5b4860a486780a81b9"><span class="std std-ref">DNNL_ARG_UNDEF</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaa0e60e8d129936ba29555e17efb82581"><span class="std std-ref">DNNL_ARG_VARIANCE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf279f28c59a807e71a70c719db56c5b3"><span class="std std-ref">DNNL_ARG_WEIGHTS</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga12d6c5c4ea17c90ade1e324d47756c3f"><span class="std std-ref">DNNL_ARG_WEIGHTS_0</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga6daaa6a32731e2a670821f95f8e353fd"><span class="std std-ref">DNNL_ARG_WEIGHTS_1</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab5744466811fbf73e69f47100a5276e6"><span class="std std-ref">DNNL_ARG_WEIGHTS_2</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab6c802a32495f116c5918a987dc6a6ed"><span class="std std-ref">DNNL_ARG_WEIGHTS_3</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5a9c39486c01ad263e29677a32735af8"><span class="std std-ref">DNNL_ARG_WEIGHTS_ITER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga1ac9e1f1327be3902b488b64bae1b4c5"><span class="std std-ref">DNNL_ARG_WEIGHTS_LAYER</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab1638cabf7e6c1c3e0d6a1f470707e08"><span class="std std-ref">DNNL_ARG_WEIGHTS_PEEPHOLE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga28e553bafbca27e9c87020adc8863340"><span class="std std-ref">DNNL_ARG_WEIGHTS_PROJECTION</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga550c80e1b9ba4f541202a7ac98be117f"><span class="std std-ref">DNNL_ARG_WORKSPACE</span></a></pre>
+</section>
+<section id="detailed-documentation">
+<span id="details-group-dnnl-api-primitives-common"></span><h2>Detailed Documentation<a class="headerlink" href="#detailed-documentation" title="Link to this heading">#</a></h2>
+<p>Common operations to create, destroy and inspect primitives.</p>
+<section id="typedefs">
+<h3>Typedefs<a class="headerlink" href="#typedefs" title="Link to this heading">#</a></h3>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span id="index-1"></span><span></span><span class="k">typedef</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc.html#doxid-structdnnl-primitive-desc"><span class="std std-ref">dnnl_primitive_desc</span></a><span></span><span class="o">*</span> <span class="n">dnnl_primitive_desc_t</span></pre>
+<p>A primitive descriptor handle.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span id="index-2"></span><span></span><span class="k">typedef</span> <span class="k">const</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive_desc.html#doxid-structdnnl-primitive-desc"><span class="std std-ref">dnnl_primitive_desc</span></a><span></span><span class="o">*</span> <span class="n">const_dnnl_primitive_desc_t</span></pre>
+<p>A constant primitive descriptor handle.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span id="index-3"></span><span></span><span class="k">typedef</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive.html#doxid-structdnnl-primitive"><span class="std std-ref">dnnl_primitive</span></a><span></span><span class="o">*</span> <span class="n">dnnl_primitive_t</span></pre>
+<p>A primitive handle.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span id="index-4"></span><span></span><span class="k">typedef</span> <span class="k">const</span> <span class="k">struct</span> <a class="reference internal" href="struct_dnnl_primitive.html#doxid-structdnnl-primitive"><span class="std std-ref">dnnl_primitive</span></a><span></span><span class="o">*</span> <span class="n">const_dnnl_primitive_t</span></pre>
+<p>A constant primitive handle.</p>
+</section>
+<section id="global-functions">
+<h3>Global Functions<a class="headerlink" href="#global-functions" title="Link to this heading">#</a></h3>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaaa215c424a2a5c5f734600216dfb8873"><span id="index-5"></span><a class="reference internal" href="enum_dnnl_primitive_kind_t.html#doxid-group-dnnl-api-primitives-common-1ga9878f4795e53ad8443e5c0a29e53286a"><span class="std std-ref">dnnl_primitive_kind_t</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">convert_to_c</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_primitive_kind.html#doxid-structdnnl-1-1primitive-1ad1ec93215a0cf3aa0a32bae0c2cd9169"><span class="std std-ref">primitive::kind</span></a><span></span> <span class="n">akind</span><span class="p">)</span></pre>
+<p>Converts primitive kind enum value from C++ API to C API type.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>akind</p></td>
+<td><p>C++ API primitive kind enum value.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p>Corresponding C API primitive kind enum value.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gae3d2ea872c5ab424c74d7549d2222926"><span id="index-6"></span><a class="reference internal" href="enum_dnnl_normalization_flags_t.html#doxid-group-dnnl-api-primitives-common-1ga301f673522a400c7c1e75f518431c9a3"><span class="std std-ref">dnnl_normalization_flags_t</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">convert_to_c</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_normalization_flags.html#doxid-group-dnnl-api-primitives-common-1gad8ef0fcbb7b10cae3d67dd46892002be"><span class="std std-ref">normalization_flags</span></a><span></span> <span class="n">flags</span><span class="p">)</span></pre>
+<p>Converts normalization flags enum value from C++ API to C API type.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>flags</p></td>
+<td><p>C++ API normalization flags enum value.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p>Corresponding C API normalization flags enum value.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga01d8a1881875cdb94e230db4e53ccb97"><span id="index-7"></span><a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">convert_to_c</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_query.html#doxid-group-dnnl-api-primitives-common-1ga94efdd650364f4d9776cfb9b711cbdc1"><span class="std std-ref">query</span></a><span></span> <span class="n">aquery</span><span class="p">)</span></pre>
+<p>Converts query enum value from C++ API to C API type.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>aquery</p></td>
+<td><p>C++ API query enum value.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p>Corresponding C API query enum value.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga8fc906c6f9b705d747e034097b74965c"><span id="index-8"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_next_impl</span><span class="p">(</span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">)</span></pre>
+<p>Changes the primitive descriptor to point to the next available implementation.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>A primitive descriptor to change.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa2c6653ea2885f9dbafdc0bf2ee8693f8"><span class="std std-ref">dnnl_last_impl_reached</span></a> if no more implementations available, in which case the primitive descriptor itself is kept unchanged.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gae40abecf7360106805eabc049cc86e4b"><span id="index-9"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_clone</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span><span class="o">*</span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">existing_primitive_desc</span>
+    <span class="p">)</span></pre>
+<p>Clones a primitive descriptor.</p>
+<p>The resulting primitive descriptor must be destroyed separately.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>Output primitive descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p>existing_primitive_desc</p></td>
+<td><p>Primitive descriptor to clone.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga47e492dff0bba4376b8e9f30522c6207"><span id="index-10"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_get_attr</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="group_dnnl_api_attributes.html#doxid-group-dnnl-api-attributes-1ga871d7ee732a90fec43f1c878581bb59a"><span class="std std-ref">const_dnnl_primitive_attr_t</span></a><span></span><span class="o">*</span> <span class="n">attr</span>
+    <span class="p">)</span></pre>
+<p>Returns a constant reference to the attributes of a primitive descriptor.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>It is an error to destroy the resulting <code class="docutils literal notranslate"><span class="pre">attr</span></code>.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>The lifetime of an <code class="docutils literal notranslate"><span class="pre">attr</span></code> is the same as that of a <code class="docutils literal notranslate"><span class="pre">primitive_desc</span></code>, so it is an error to use the <code class="docutils literal notranslate"><span class="pre">attr</span></code> once the <code class="docutils literal notranslate"><span class="pre">primitive_desc</span></code> has been destroyed.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p>attr</p></td>
+<td><p>Output primitive attributes.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga643938c7c73d200ac1fd3866204e7285"><span id="index-11"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_destroy</span><span class="p">(</span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaabde3e27edf071b62b39f47bace7efd6"><span class="std std-ref">dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">)</span></pre>
+<p>Destroys a primitive descriptor.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor to destroy.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga041881114858228279174aff5c1f5e75"><span id="index-12"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_query</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">what</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">index</span><span class="p">,</span>
+    <span class="kt">void</span><span class="o">*</span> <span class="n">result</span>
+    <span class="p">)</span></pre>
+<p>Queries a primitive descriptor for various pieces of information.</p>
+<p>The most common use case is to query a primitive descriptor, created with source, weights, and destination memory descriptors with format tags set to <a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091dafee39ac6fff0325cae43cd66495c18ac"><span class="std std-ref">dnnl_format_tag_any</span></a>, for the corresponding memory descriptors (in this case the <code class="docutils literal notranslate"><span class="pre">what</span></code> is set to <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059a14a86faee7b85eeb60d0d7886756ffa5"><span class="std std-ref">dnnl_query_src_md</span></a>, <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059a12ea0b4858b84889acab34e498323355"><span class="std std-ref">dnnl_query_weights_md</span></a>, and <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059add5c338ad7ae0c296509e54d22130598"><span class="std std-ref">dnnl_query_dst_md</span></a> respectively) so that it is possible to create memory objects and reorder primitives if necessary.</p>
+<p>Another typical use case is to query a primitive descriptor for workspace memory descriptor (with <code class="docutils literal notranslate"><span class="pre">what</span></code> set to <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059a1c465006660aabe46e644e6df7d36e8a"><span class="std std-ref">dnnl_query_workspace_md</span></a>). If this query returns <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaff3988320148106126bce50dd76d6a97"><span class="std std-ref">dnnl_not_required</span></a> status, then workspace memory is not required.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>When querying for a memory descriptor for a scratchpad, a workspace, or an optional parameter, the query will return a pointer to a zero memory descriptor if the parameter is not needed.</p>
+</div>
+<p>A few other use cases:</p>
+<ul class="simple">
+<li><p>query a primitive descriptor for the implementation information string (<a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059a5a44980a7317e63cc7b6877d15a549aa"><span class="std std-ref">dnnl_query_impl_info_str</span></a>)</p></li>
+<li><p>query a primitive descriptor for the number of inputs and outputs (<a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059a1fe7a52f5934c92b0bd0330463549c0e"><span class="std std-ref">dnnl_query_num_of_inputs_s32</span></a> and <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059a06833f7d865faf3eaaad3b71976ba16a"><span class="std std-ref">dnnl_query_num_of_outputs_s32</span></a> respectively)</p></li>
+</ul>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p>what</p></td>
+<td><p>Parameter to query.</p></td>
+</tr>
+<tr class="row-odd"><td><p>index</p></td>
+<td><p>Index of the parameter to query for.</p></td>
+</tr>
+<tr class="row-even"><td><p>result</p></td>
+<td><p>Output result. The type depends on the query. For example, it must be a <code class="docutils literal notranslate"><span class="pre">dnnl_memory_desc_t*</span></code> if querying for a memory descriptor.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a> for more options</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga22d7722f49cf30215fa4354429106873"><span id="index-13"></span><a class="reference internal" href="group_dnnl_api_memory.html#doxid-group-dnnl-api-memory-1ga402f0cb4399cd56445803cfa433aac6d"><span class="std std-ref">const_dnnl_memory_desc_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_query_md</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">what</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">index</span>
+    <span class="p">)</span></pre>
+<p>Queries primitive descriptor for a memory descriptor.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function is a convenience version of <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga041881114858228279174aff5c1f5e75"><span class="std std-ref">dnnl_primitive_desc_query()</span></a>.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p>what</p></td>
+<td><p>Kind of memory descriptor parameter to query for.</p></td>
+</tr>
+<tr class="row-odd"><td><p>index</p></td>
+<td><p>Index of the parameter to query.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p>A pointer to the requested memory descriptor.</p>
+<p>A pointer to a zero memory descriptor if the parameter is not needed.</p>
+<p>NULL in case of any error.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga314bfec9b68ad50e76ac4c87816cc3aa"><span id="index-14"></span><span></span><span class="kt">int</span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_desc_query_s32</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1ga9e5235563cf7cfc10fa89f415de98059"><span class="std std-ref">dnnl_query_t</span></a><span></span> <span class="n">what</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">index</span>
+    <span class="p">)</span></pre>
+<p>Queries primitive descriptor for a signed 32bit int.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function is a convenience version of <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga041881114858228279174aff5c1f5e75"><span class="std std-ref">dnnl_primitive_desc_query()</span></a>.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p>what</p></td>
+<td><p>Kind of the value to query for.</p></td>
+</tr>
+<tr class="row-odd"><td><p>index</p></td>
+<td><p>Index of the parameter to query.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p>The requested value.</p>
+<p>0 in case of any error (in particular if the queried entity is not of type int32_t). Note that 0 may also be the actual returned value.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gad07540a0074d9cd3a6970b49897e57d3"><span id="index-15"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_create</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span><span class="o">*</span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span>
+    <span class="p">)</span></pre>
+<p>Creates a primitive.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive</p></td>
+<td><p>Output primitive.</p></td>
+</tr>
+<tr class="row-even"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor used to create the primitive.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaeee0deb9aa704e3b7c58291c2a3d022b"><span id="index-16"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_create_from_cache_blob</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span><span class="o">*</span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span> <span class="n">primitive_desc</span><span class="p">,</span>
+    <span class="kt">size_t</span> <span class="n">size</span><span class="p">,</span>
+    <span class="k">const</span> <span class="kt">uint8_t</span><span class="o">*</span> <span class="n">cache_blob</span>
+    <span class="p">)</span></pre>
+<p>Creates a primitive from a cache blob.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive</p></td>
+<td><p>Output primitive.</p></td>
+</tr>
+<tr class="row-even"><td><p>primitive_desc</p></td>
+<td><p>Primitive descriptor used to create the primitive.</p></td>
+</tr>
+<tr class="row-odd"><td><p>size</p></td>
+<td><p>Size of the cache blob in bytes.</p></td>
+</tr>
+<tr class="row-even"><td><p>cache_blob</p></td>
+<td><p>Cache blob of size <code class="docutils literal notranslate"><span class="pre">size</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga57f8ec3a6e5b33a1068cf2236028935c"><span id="index-17"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_execute</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="group_dnnl_api_stream.html#doxid-group-dnnl-api-stream-1ga735eb19cfd205c108c468b5657de4eca"><span class="std std-ref">dnnl_stream_t</span></a><span></span> <span class="n">stream</span><span class="p">,</span>
+    <span class="kt">int</span> <span class="n">nargs</span><span class="p">,</span>
+    <span class="k">const</span> <a class="reference internal" href="struct_dnnl_exec_arg_t.html#doxid-structdnnl-exec-arg-t"><span class="std std-ref">dnnl_exec_arg_t</span></a><span></span><span class="o">*</span> <span class="n">args</span>
+    <span class="p">)</span></pre>
+<p>Executes a primitive.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If any argument in <code class="docutils literal notranslate"><span class="pre">args</span></code> is padded (padded_dims &gt; dims), the primitive execution will assume properly zero-padded input arguments, and produce zero-padded output arguments.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive</p></td>
+<td><p>Primitive to execute.</p></td>
+</tr>
+<tr class="row-even"><td><p>stream</p></td>
+<td><p>Stream to use.</p></td>
+</tr>
+<tr class="row-odd"><td><p>nargs</p></td>
+<td><p>Number of arguments.</p></td>
+</tr>
+<tr class="row-even"><td><p>args</p></td>
+<td><p>Array of arguments. Each argument is an &lt;index, <a class="reference internal" href="group_dnnl_api_memory.html#doxid-group-dnnl-api-memory-1ga2b79954bd7bb293e766a89189e8440fd"><span class="std std-ref">dnnl_memory_t</span></a>&gt; pair. The index is one of the <code class="docutils literal notranslate"><span class="pre">DNNL_ARG_*</span></code> values such as <code class="docutils literal notranslate"><span class="pre">DNNL_ARG_SRC</span></code>. Unless runtime shapes are used (see <a class="reference internal" href="group_dnnl_api_memory.html#doxid-group-dnnl-api-memory-1gaa596c5a6102df77a550bad98f0d5cc12"><span class="std std-ref">DNNL_RUNTIME_DIM_VAL</span></a>), the memory object must have the same memory descriptor as that returned by <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga22d7722f49cf30215fa4354429106873"><span class="std std-ref">dnnl_primitive_desc_query_md</span></a> (<a class="reference internal" href="enum_dnnl_query_t.html#doxid-group-dnnl-api-primitives-common-1gga9e5235563cf7cfc10fa89f415de98059ac7ecf09260d89d54ddd7f35c51a244da"><span class="std std-ref">dnnl_query_exec_arg_md</span></a>, index).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga8324e883e41c0b1b9b95bdb7718d35f9"><span id="index-18"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_get_primitive_desc</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">,</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab604e76e39a791e855bc6bb4ee13c63f"><span class="std std-ref">const_dnnl_primitive_desc_t</span></a><span></span><span class="o">*</span> <span class="n">primitive_desc</span>
+    <span class="p">)</span></pre>
+<p>Retrieves a constant reference to the primitive descriptor of a given primitive.</p>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>It is an error to destroy the returned object. It is owned by the primitive. The <code class="docutils literal notranslate"><span class="pre">const</span></code> qualifier of the returned object prevents such attempts.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive</p></td>
+<td><p>Primitive to query for the primitive descriptor.</p></td>
+</tr>
+<tr class="row-even"><td><p>primitive_desc</p></td>
+<td><p>Output primitive descriptor.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gafceed39f28cd3bec5f530317a2a88719"><span id="index-19"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_get_cache_blob</span><span class="p">(</span>
+    <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3a24919ac3820e4a196bd4e50a0972c5"><span class="std std-ref">const_dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">,</span>
+    <span class="kt">size_t</span><span class="o">*</span> <span class="n">size</span><span class="p">,</span>
+    <span class="kt">uint8_t</span><span class="o">*</span> <span class="n">cache_blob</span>
+    <span class="p">)</span></pre>
+<p>Retrieves a cache blob associated with the given primitive.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The cache blob can be empty. It’s the user’s responsibility to check whether it’s empty prior to passing it to <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaeee0deb9aa704e3b7c58291c2a3d022b"><span class="std std-ref">dnnl_primitive_create_from_cache_blob()</span></a>.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive</p></td>
+<td><p>Primitive to query for the cache blob.</p></td>
+</tr>
+<tr class="row-even"><td><p>size</p></td>
+<td><p>Size of the cache blob in bytes.</p></td>
+</tr>
+<tr class="row-odd"><td><p>cache_blob</p></td>
+<td><p>Cache blob of size <code class="docutils literal notranslate"><span class="pre">size</span></code>. If the <code class="docutils literal notranslate"><span class="pre">cache_blob</span></code> is nullptr then the size of the cache blob is returned in <code class="docutils literal notranslate"><span class="pre">size</span></code>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaba605c4591c2054a6ee80ec1b581659f"><span id="index-20"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_primitive_destroy</span><span class="p">(</span><a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga226afc85f63f0d1029d4ea90a60cae47"><span class="std std-ref">dnnl_primitive_t</span></a><span></span> <span class="n">primitive</span><span class="p">)</span></pre>
+<p>Destroys a primitive.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>primitive</p></td>
+<td><p>The primitive to destroy.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+</section>
+<section id="macros">
+<h3>Macros<a class="headerlink" href="#macros" title="Link to this heading">#</a></h3>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga75f71c3764ec4754333bd400a290c217"><span id="index-21"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_DROPOUT_MASK</span></pre>
+<p>Dropout mask output buffer.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga97211384b4573d1f4160f88b1fc764fb"><span id="index-22"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_DROPOUT_PROBABILITY</span></pre>
+<p>Dropout probability value passed via a buffer.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga00f50d06255b72868fdba100fbb53b1a"><span id="index-23"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_DROPOUT_SEED</span></pre>
+<p>Dropout RNG seed value passed via a buffer.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga30839136bbf81b03a173e0842ae015e1"><span id="index-24"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx)</span></pre>
+<p>Arguments for a binary post operation.</p>
+<p>Up to 32 arguments are supported. See <a class="reference internal" href="dev_guide_attributes_post_ops.html#doxid-dev-guide-attributes-post-ops-1dev-guide-attributes-post-ops-binary-fusion"><span class="std std-ref">dev_guide_attributes_post_ops_binary_fusion</span></a></p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gadec6bcdebcd35d41c394622af3e0cb75"><span id="index-25"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_MULTIPLE_POST_OP_BASE</span></pre>
+<p>Starting point for a binary post operation.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga0afb48b0c2b8f3ee30609aaa47aa29db"><span id="index-26"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_OUTPUT_SCALES</span></pre>
+<p>Output scaling factors provided at execution time.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga47534804c9b2f9ede6b875f6cb08cc35"><span id="index-27"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_POST_OP_DW</span></pre>
+<p>Arguments for fused depthwise convolution.</p>
+<p>See <a class="reference internal" href="dev_guide_attributes_post_ops.html#doxid-dev-guide-attributes-post-ops-1dev-guide-attributes-post-ops-depthwise-fusion"><span class="std std-ref">dev_guide_attributes_post_ops_depthwise_fusion</span></a></p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga242f970c3e8a56983d92204e71c91fc3"><span id="index-28"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_ROUNDING_SEED</span></pre>
+<p>Rounding mode seed for stochastic rounding Single seed needed independently of how many arguments need stochastic rounding.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga7f52f0ef5ceb99e163f3ba7f83c18aed"><span id="index-29"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_SCALES</span></pre>
+<p>Scaling factors provided at execution time.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaf8d879adfe2baa2f9f2a5143a0f274b6"><span id="index-30"></span><span></span><span class="cp">#define DNNL_ARG_ATTR_ZERO_POINTS</span></pre>
+<p>Zero points provided at execution time.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga635c81b2547d4291a82d53a70b6aa8d6"><span id="index-31"></span><span></span><span class="cp">#define DNNL_ARG_AUGRU_ATTENTION</span></pre>
+<p>A special mnemonic for RNN input recurrent cell attention vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga3cf129098380c0ee634875c4d65b2c43"><span class="std std-ref">DNNL_ARG_SRC_3</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gad0cbc09942aba93fbe3c0c2e09166f0d"><span id="index-32"></span><span></span><span class="cp">#define DNNL_ARG_BIAS</span></pre>
+<p>Bias tensor argument.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga04f2d46dcd9b18f2f2d240d3efbe2e74"><span id="index-33"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_AUGRU_ATTENTION</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN input recurrent cell attention vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gad0ef2743a16142c7818726b4c970ac07"><span class="std std-ref">DNNL_ARG_DIFF_SRC_3</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga1cd79979dda6df65ec45eef32a839901"><span id="index-34"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_BIAS</span></pre>
+<p>Gradient (diff) of the bias tensor argument.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gac9302f4cbd2668bf9a98ba99d752b971"><span id="index-35"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST</span></pre>
+<p>A special mnemonic for primitives that have a single diff destination argument.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5cf662f6dc742a3500ec4f54290b86da"><span class="std std-ref">DNNL_ARG_DIFF_DST_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga5cf662f6dc742a3500ec4f54290b86da"><span id="index-36"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST_0</span></pre>
+<p>Gradient (diff) of the destination argument #0.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga87fad7b00d52b6bff673fca344d0f96d"><span id="index-37"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST_1</span></pre>
+<p>Gradient (diff) of the destination argument #1.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaf6ae542064ad032e7c335f3701398034"><span id="index-38"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST_2</span></pre>
+<p>Gradient (diff) of the destination argument #2.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gad9c83f558d1b229b4185ccbf939590a3"><span id="index-39"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST_ITER</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN input recurrent hidden state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga87fad7b00d52b6bff673fca344d0f96d"><span class="std std-ref">DNNL_ARG_DIFF_DST_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga5524b26b690b9b4b81f0c7f3f9ac3b62"><span id="index-40"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST_ITER_C</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN input recurrent cell state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaf6ae542064ad032e7c335f3701398034"><span class="std std-ref">DNNL_ARG_DIFF_DST_2</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gafc6053e276352b05b3b526141586e0ac"><span id="index-41"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_DST_LAYER</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN output vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5cf662f6dc742a3500ec4f54290b86da"><span class="std std-ref">DNNL_ARG_DIFF_DST_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaeb524b0816a1748026a60195523d3393"><span id="index-42"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SCALE</span></pre>
+<p>A special mnemonic for scale argument of normalization primitives.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaba70712528e1e3922b1b9e3072915df6"><span id="index-43"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SHIFT</span></pre>
+<p>A special mnemonic for shift argument of normalization primitives.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga18ee0e360399cfe9d3b58a13dfcb9333"><span id="index-44"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC</span></pre>
+<p>A special mnemonic for primitives that have a single diff source argument.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5d7ebcd603a037e0cd53a22377d1addf"><span class="std std-ref">DNNL_ARG_DIFF_SRC_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga5d7ebcd603a037e0cd53a22377d1addf"><span id="index-45"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_0</span></pre>
+<p>Gradient (diff) of the source argument #0.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga79861408c787de29acec450006dace7f"><span id="index-46"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_1</span></pre>
+<p>Gradient (diff) of the source argument #1.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gae5520b100e7e94e218ccda5697d720bf"><span id="index-47"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_2</span></pre>
+<p>Gradient (diff) of the source argument #2.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gad0ef2743a16142c7818726b4c970ac07"><span id="index-48"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_3</span></pre>
+<p>Gradient (diff) of the source argument #3.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga4f7ed97882e020a1cbaa891bbe0da45b"><span id="index-49"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_ITER</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN input recurrent hidden state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga79861408c787de29acec450006dace7f"><span class="std std-ref">DNNL_ARG_DIFF_SRC_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga1d8616925684111f3a1b6d8116ab0077"><span id="index-50"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_ITER_C</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN input recurrent cell state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga79861408c787de29acec450006dace7f"><span class="std std-ref">DNNL_ARG_DIFF_SRC_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga24709fa44c67cf453facbc1c52b0d598"><span id="index-51"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_SRC_LAYER</span></pre>
+<p>A special mnemonic for gradient (diff) of RNN input vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga5d7ebcd603a037e0cd53a22377d1addf"><span class="std std-ref">DNNL_ARG_DIFF_SRC_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga3324092ef421f77aebee83b0117cac60"><span id="index-52"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS</span></pre>
+<p>A special mnemonic for primitives that have a single diff weights argument.</p>
+<p>Alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaece55926acecbbf375cd4fb06c5786ab"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaece55926acecbbf375cd4fb06c5786ab"><span id="index-53"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_0</span></pre>
+<p>Gradient (diff) of the weights argument #0.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga789a5f68ece3af7f3c86217a4a5dab7e"><span id="index-54"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_1</span></pre>
+<p>Gradient (diff) of the weights argument #1.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga4b4fca234fa86cd9270fb3ef7cf9446d"><span id="index-55"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_2</span></pre>
+<p>Gradient (diff) of the weights argument #2.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga98277fe5c9232f3089b8a9b5841e821c"><span id="index-56"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_3</span></pre>
+<p>Gradient (diff) of the weights argument #3.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga4a8e5f32de3856588b2976a766d0af0f"><span id="index-57"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_ITER</span></pre>
+<p>A special mnemonic for diff of RNN weights applied to the recurrent input.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga789a5f68ece3af7f3c86217a4a5dab7e"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gac0bd0c223011ee2fbbc3c430c047c756"><span id="index-58"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_LAYER</span></pre>
+<p>A special mnemonic for diff of RNN weights applied to the layer input.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gaece55926acecbbf375cd4fb06c5786ab"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga24d0c96468ef0e28a96f8a6f1b2869b3"><span id="index-59"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_PEEPHOLE</span></pre>
+<p>A special mnemonic for diff of RNN weights applied to the peephole weights.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga4b4fca234fa86cd9270fb3ef7cf9446d"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_2</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga3e29edb164be584b8f2df0b4ed6256fb"><span id="index-60"></span><span></span><span class="cp">#define DNNL_ARG_DIFF_WEIGHTS_PROJECTION</span></pre>
+<p>A special mnemonic for diff of RNN weights applied to the projection weights.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga98277fe5c9232f3089b8a9b5841e821c"><span class="std std-ref">DNNL_ARG_DIFF_WEIGHTS_3</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga3ca217e4a06d42a0ede3c018383c388f"><span id="index-61"></span><span></span><span class="cp">#define DNNL_ARG_DST</span></pre>
+<p>A special mnemonic for destination argument for primitives that have a single destination.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga7ba773575a68b592f3ef0fa885d87c20"><span class="std std-ref">DNNL_ARG_DST_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga7ba773575a68b592f3ef0fa885d87c20"><span id="index-62"></span><span></span><span class="cp">#define DNNL_ARG_DST_0</span></pre>
+<p>Destination argument #0.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gae4215f24ddcf9e4b20b246e10a992687"><span id="index-63"></span><span></span><span class="cp">#define DNNL_ARG_DST_1</span></pre>
+<p>Destination argument #1.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gabec2200437d5553747fe56a15548a9b1"><span id="index-64"></span><span></span><span class="cp">#define DNNL_ARG_DST_2</span></pre>
+<p>Destination argument #2.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga13b91cbd3f531d9c90227895a275d5a6"><span id="index-65"></span><span></span><span class="cp">#define DNNL_ARG_DST_ITER</span></pre>
+<p>A special mnemonic for RNN input recurrent hidden state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gae4215f24ddcf9e4b20b246e10a992687"><span class="std std-ref">DNNL_ARG_DST_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga8b77d8716fc0ab9923d6cb409dbdf900"><span id="index-66"></span><span></span><span class="cp">#define DNNL_ARG_DST_ITER_C</span></pre>
+<p>A special mnemonic for LSTM output recurrent cell state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gabec2200437d5553747fe56a15548a9b1"><span class="std std-ref">DNNL_ARG_DST_2</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gacfc123a6a4ff3b4af4cd27ed66fb8528"><span id="index-67"></span><span></span><span class="cp">#define DNNL_ARG_DST_LAYER</span></pre>
+<p>A special mnemonic for RNN output vector. An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga7ba773575a68b592f3ef0fa885d87c20"><span class="std std-ref">DNNL_ARG_DST_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga953b34f004a8222b04e21851487c611a"><span id="index-68"></span><span></span><span class="cp">#define DNNL_ARG_FROM</span></pre>
+<p>A special mnemonic for reorder source argument.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga53dc83e64489cd69bd82c1c2025eb5bd"><span class="std std-ref">DNNL_ARG_SRC_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga9bcff7f442a5d6a0ac1183533e721066"><span id="index-69"></span><span></span><span class="cp">#define DNNL_ARG_MEAN</span></pre>
+<p>Mean values tensor argument.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaa4183403de9fac3efd3f32c7a975580b"><span id="index-70"></span><span></span><span class="cp">#define DNNL_ARG_MULTIPLE_DST</span></pre>
+<p>Starting index for destination arguments for primitives that produce a variable number of destination arguments.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga1f0da423df3fb6853ddcbe6ffe964267"><span id="index-71"></span><span></span><span class="cp">#define DNNL_ARG_MULTIPLE_SRC</span></pre>
+<p>Starting index for source arguments for primitives that take a variable number of source arguments.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga3c5cac668bc82c90c8da051c7d430370"><span id="index-72"></span><span></span><span class="cp">#define DNNL_ARG_SCALE</span></pre>
+<p>A special mnemonic for scale argument of normalization primitives.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga81836a4db2cb1c4a14d959e304d3f63d"><span id="index-73"></span><span></span><span class="cp">#define DNNL_ARG_SCRATCHPAD</span></pre>
+<p>Scratchpad (temporary storage) tensor argument.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gac250777ced72098caf39deae1d9039c8"><span id="index-74"></span><span></span><span class="cp">#define DNNL_ARG_SHIFT</span></pre>
+<p>A special mnemonic for shift argument of normalization primitives.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gac37ad67b48edeb9e742af0e50b70fe09"><span id="index-75"></span><span></span><span class="cp">#define DNNL_ARG_SRC</span></pre>
+<p>A special mnemonic for source argument for primitives that have a single source.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga53dc83e64489cd69bd82c1c2025eb5bd"><span class="std std-ref">DNNL_ARG_SRC_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga53dc83e64489cd69bd82c1c2025eb5bd"><span id="index-76"></span><span></span><span class="cp">#define DNNL_ARG_SRC_0</span></pre>
+<p>Source argument #0.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gadc5a5761633c05f4378780d23b7c9692"><span id="index-77"></span><span></span><span class="cp">#define DNNL_ARG_SRC_1</span></pre>
+<p>Source argument #1.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga2ad44d7072cc1c13f0d2eeb3f5f59a24"><span id="index-78"></span><span></span><span class="cp">#define DNNL_ARG_SRC_2</span></pre>
+<p>Source argument #2.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga3cf129098380c0ee634875c4d65b2c43"><span id="index-79"></span><span></span><span class="cp">#define DNNL_ARG_SRC_3</span></pre>
+<p>Source argument #3.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaf35f4f604284f1b00bb35bffd0f7a143"><span id="index-80"></span><span></span><span class="cp">#define DNNL_ARG_SRC_ITER</span></pre>
+<p>A special mnemonic for RNN input recurrent hidden state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gadc5a5761633c05f4378780d23b7c9692"><span class="std std-ref">DNNL_ARG_SRC_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga8ef6969516e717208a33766542410410"><span id="index-81"></span><span></span><span class="cp">#define DNNL_ARG_SRC_ITER_C</span></pre>
+<p>A special mnemonic for RNN input recurrent cell state vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga2ad44d7072cc1c13f0d2eeb3f5f59a24"><span class="std std-ref">DNNL_ARG_SRC_2</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gab91ce4d04cf4e98e3a407daa0676764f"><span id="index-82"></span><span></span><span class="cp">#define DNNL_ARG_SRC_LAYER</span></pre>
+<p>A special mnemonic for RNN input vector.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga53dc83e64489cd69bd82c1c2025eb5bd"><span class="std std-ref">DNNL_ARG_SRC_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaf700c3396987b450413c8df5d78bafd9"><span id="index-83"></span><span></span><span class="cp">#define DNNL_ARG_TO</span></pre>
+<p>A special mnemonic for reorder destination argument.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga7ba773575a68b592f3ef0fa885d87c20"><span class="std std-ref">DNNL_ARG_DST_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaf22edfd16f175f5b4860a486780a81b9"><span id="index-84"></span><span></span><span class="cp">#define DNNL_ARG_UNDEF</span></pre>
+<p>Undefined argument.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaa0e60e8d129936ba29555e17efb82581"><span id="index-85"></span><span></span><span class="cp">#define DNNL_ARG_VARIANCE</span></pre>
+<p>Variance values tensor argument.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gaf279f28c59a807e71a70c719db56c5b3"><span id="index-86"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS</span></pre>
+<p>A special mnemonic for primitives that have a single weights argument.</p>
+<p>Alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga12d6c5c4ea17c90ade1e324d47756c3f"><span class="std std-ref">DNNL_ARG_WEIGHTS_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga12d6c5c4ea17c90ade1e324d47756c3f"><span id="index-87"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_0</span></pre>
+<p>Weights argument #0.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga6daaa6a32731e2a670821f95f8e353fd"><span id="index-88"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_1</span></pre>
+<p>Weights argument #1.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gab5744466811fbf73e69f47100a5276e6"><span id="index-89"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_2</span></pre>
+<p>Weights argument #2.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gab6c802a32495f116c5918a987dc6a6ed"><span id="index-90"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_3</span></pre>
+<p>Weights argument #3.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga5a9c39486c01ad263e29677a32735af8"><span id="index-91"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_ITER</span></pre>
+<p>A special mnemonic for RNN weights applied to the recurrent input.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga6daaa6a32731e2a670821f95f8e353fd"><span class="std std-ref">DNNL_ARG_WEIGHTS_1</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga1ac9e1f1327be3902b488b64bae1b4c5"><span id="index-92"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_LAYER</span></pre>
+<p>A special mnemonic for RNN weights applied to the layer input.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1ga12d6c5c4ea17c90ade1e324d47756c3f"><span class="std std-ref">DNNL_ARG_WEIGHTS_0</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1gab1638cabf7e6c1c3e0d6a1f470707e08"><span id="index-93"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_PEEPHOLE</span></pre>
+<p>A special mnemonic for RNN weights applied to the peephole weights.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab5744466811fbf73e69f47100a5276e6"><span class="std std-ref">DNNL_ARG_WEIGHTS_2</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga28e553bafbca27e9c87020adc8863340"><span id="index-94"></span><span></span><span class="cp">#define DNNL_ARG_WEIGHTS_PROJECTION</span></pre>
+<p>A special mnemonic for RNN weights applied to the projection weights.</p>
+<p>An alias for <a class="reference internal" href="#doxid-group-dnnl-api-primitives-common-1gab6c802a32495f116c5918a987dc6a6ed"><span class="std std-ref">DNNL_ARG_WEIGHTS_3</span></a>.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-primitives-common-1ga550c80e1b9ba4f541202a7ac98be117f"><span id="index-95"></span><span></span><span class="cp">#define DNNL_ARG_WORKSPACE</span></pre>
+<p>Workspace tensor argument.</p>
+<p>Workspace is used to pass information from forward propagation to backward propagation computations.</p>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="group_dnnl_api_primitives.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Primitives</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="enum_dnnl_alg_kind_t.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">enum dnnl_alg_kind_t</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#detailed-documentation">Detailed Documentation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#typedefs">Typedefs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#global-functions">Global Functions</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#macros">Macros</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2016-2024 Intel Corporation.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

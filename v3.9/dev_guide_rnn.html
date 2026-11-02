@@ -1,0 +1,1465 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>RNN &#8212; oneDNN v3.9.2 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/doxyrest-pygments.css?v=ff3f4257" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=c4100cd3"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/doxyrest_code_copy_button.js?v=4be5b8d3"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script src="_static/target-highlight.js?v=df7d332b"></script>
+    <script>window.MathJax = {"tex": {"macros": {"src": "\\operatorname{src}", "srclayer": "\\operatorname{src\\_layer}", "srclayerattention": "\\operatorname{src\\_layer\\_attention}", "srciter": "\\operatorname{src\\_iter}", "srciterc": "\\operatorname{src\\_iter\\_c}", "weights": "\\operatorname{weights}", "weightslayer": "\\operatorname{weights\\_layer}", "weightsiter": "\\operatorname{weights\\_iter}", "weightspeephole": "\\operatorname{weights\\_peephole}", "weightsprojection": "\\operatorname{weights\\_projection}", "bias": "\\operatorname{bias}", "dst": "\\operatorname{dst}", "dstlayer": "\\operatorname{dst\\_layer}", "dstiter": "\\operatorname{dst\\_iter}", "dstiterc": "\\operatorname{dst\\_iter\\_c}", "diffsrc": "\\operatorname{diff\\_src}", "diffsrclayer": "\\operatorname{diff\\_src\\_layer}", "diffsrclayerattention": "\\operatorname{diff\\_src\\_layer\\_attention}", "diffsrciter": "\\operatorname{diff\\_src\\_iter}", "diffsrciterc": "\\operatorname{diff\\_src\\_iter\\_c}", "diffweights": "\\operatorname{diff\\_weights}", "diffweightslayer": "\\operatorname{diff\\_weights\\_layer}", "diffweightsiter": "\\operatorname{diff\\_weights\\_iter}", "diffweightspeephole": "\\operatorname{diff\\_weights\\_peephole}", "diffweightsprojection": "\\operatorname{diff\\_weights\\_projection}", "diffbias": "\\operatorname{diff\\_bias}", "diffdst": "\\operatorname{diff\\_dst}", "diffdstlayer": "\\operatorname{diff\\_dst\\_layer}", "diffdstiter": "\\operatorname{diff\\_dst\\_iter}", "diffdstiterc": "\\operatorname{diff\\_dst\\_iter\\_c}", "diffgamma": "\\operatorname{diff\\_\\gamma}", "diffbeta": "\\operatorname{diff\\_\\beta}", "workspace": "\\operatorname{workspace}", "srcshape": "\\operatorname{src\\_\\shape}", "dstshape": "\\operatorname{dst\\_\\shape}"}}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'dev_guide_rnn';</script>
+    <link rel="icon" href="_static/favicons.png"/>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Batch Normalization" href="dev_guide_batch_normalization.html" />
+    <link rel="prev" title="Matrix Multiplication" href="dev_guide_matmul.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="v3.9" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="_static/oneAPI-rgb-rev-100.png" class="logo__image only-light" alt=""/>
+    <img src="_static/oneAPI-rgb-rev-100.png" class="logo__image only-dark pst-js-only" alt=""/>
+  
+  
+    <p class="title logo__title">oneDNN v3.9 Documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">About</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="index.html">Introduction</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Get Started</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_system_requirements.html">System Requirements</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_build.html">Build from Source</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_build_options.html">Use Build Options</a></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_link.html">Link to the Library</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Learn oneDNN</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_basic_concepts.html">Key Concepts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="page_getting_started_cpp.html">Functional API Basic Workflow</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Developer Guide</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="programming_model.html">oneDNN Concepts</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="page_memory_format_propagation_cpp.html">Memory Format Propagation</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_inference_and_training_aspects.html">Inference and Training Aspects</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference.html">Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference_int8.html">Int8 Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_training_bf16.html">Bfloat16 Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_attributes.html">Primitive Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_fpmath_mode.html">Primitive Attributes: floating-point math mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_accumulation_mode.html">Primitive Attributes: accumulation mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_rounding_mode.html">Primitive Attributes: rounding mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_deterministic.html">Primitive Attributes: deterministic</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_quantization.html">Primitive Attributes: Quantization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_post_ops.html">Primitive Attributes: Post-ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_scratchpad.html">Primitive Attributes: Scratchpad</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_data_types.html">Data Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cross_engine_reorder_cpp.html">Reorder between CPU and GPU engines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_c_and_cpp_apis.html">API</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="interop_with_dpcpp_and_opencl.html">Interoperability with DPC++ and OpenCL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_opencl_interoperability.html">OpenCL Interoperability</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_dpcpp_interoperability.html">DPC++ Interoperability</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="supported_primitives.html">Supported Primitives</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_convolution.html">Convolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inner_product.html">Inner Product</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_matmul.html">Matrix Multiplication</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">RNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_batch_normalization.html">Batch Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_binary.html">Binary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_concat.html">Concat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_eltwise.html">Eltwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_group_normalization.html">Group Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_layer_normalization.html">Layer Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_lrn.html">Local Response Normalization (LRN)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_pooling.html">Pooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_prelu.html">PReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_resampling.html">Resampling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_shuffle.html">Shuffle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_softmax.html">Softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sum.html">Sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reorder.html">Reorder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reduction.html">Reduction</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="graph_extension.html">Graph Extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_low_precision.html">Low Precision</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_supported_operations.html">Supported Operations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_abs.html">Abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_absbackward.html">AbsBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_add.html">Add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpool.html">AvgPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpoolbackward.html">AvgPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormforwardtraining.html">BatchNormForwardTraining</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnorminference.html">BatchNormInference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormtrainingbackward.html">BatchNormTrainingBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasadd.html">BiasAdd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasaddbackward.html">BiasAddBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clamp.html">Clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clampbackward.html">ClampBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_concat.html">Concat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolution.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwarddata.html">ConvolutionBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwardweights.html">ConvolutionBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtranspose.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwarddata.html">ConvTransposeBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwardweights.html">ConvTransposeBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dequantize.html">Dequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_divide.html">Divide</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicdequantize.html">DynamicDequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicquantize.html">DynamicQuantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elu.html">Elu</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elubackward.html">EluBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_end.html">End</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_exp.html">Exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelu.html">GELU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelubackward.html">GELUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_genindex.html">GenIndex</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_greaterequal.html">GreaterEqual</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_groupnorm.html">GroupNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoid.html">HardSigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoidbackward.html">HardSigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswish.html">HardSwish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswishbackward.html">HardSwishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolate.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolatebackward.html">InterpolateBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernorm.html">LayerNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernormbackward.html">LayerNormBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_leakyrelu.html">LeakyReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_log.html">Log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmax.html">LogSoftmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmaxbackward.html">LogSoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_matmul.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maximum.html">Maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpool.html">MaxPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpoolbackward.html">MaxPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_minimum.html">Minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mish.html">Mish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mishbackward.html">MishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_multiply.html">Multiply</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_pow.html">Pow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelu.html">PReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelubackward.html">PReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_quantize.html">Quantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reciprocal.html">Reciprocal</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel1.html">ReduceL1</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel2.html">ReduceL2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemax.html">ReduceMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemean.html">ReduceMean</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemin.html">ReduceMin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reduceprod.html">ReduceProd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducesum.html">ReduceSum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relu.html">ReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relubackward.html">ReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reorder.html">Reorder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_round.html">Round</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_select.html">Select</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoid.html">Sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoidbackward.html">SigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmax.html">SoftMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmaxbackward.html">SoftMaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplus.html">SoftPlus</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplusbackward.html">SoftPlusBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrt.html">Sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrtbackward.html">SqrtBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_square.html">Square</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_squareddifference.html">SquaredDifference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_staticreshape.html">StaticReshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_statictranspose.html">StaticTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_subtract.html">Subtract</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanh.html">Tanh</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanhbackward.html">TanhBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_typecast.html">TypeCast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_wildcard.html">Wildcard</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_fusion_patterns.html">Fusion Patterns</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_gated_mlp.html">Gated Multi-Layer Perceptron (Gated-MLP)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_gqa.html">Grouped Query Attention (GQA)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_sdpa_compressed_kv.html">SDPA with Compressed Key and Value</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_sdpa.html">Scaled Dot-Product Attention (SDPA)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_matmul_fusion_patterns.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_quantized_matmul_fusion_patterns.html">Quantized MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_convolution_fusion_patterns.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_quantized_convolution_fusion_patterns.html">Quantized Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_convtranspose_fusion_patterns.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_quantized_convtranspose_fusion_patterns.html">Quantized ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_binary_fusion_patterns.html">Binary</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_unary_fusion_patterns.html">Unary</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_interpolate_fusion_patterns.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_reduction_fusion_patterns.html">Reduction</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_pool_fusion_patterns.html">Pool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_norm_fusion_patterns.html">Norm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_softmax_fusion_patterns.html">SoftMax</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_dump.html">Graph Dump</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_constant_tensor_cache.html">Constant Tensor Cache</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_examples.html">Examples and Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="performance_profiling_and_inspection.html">Performance Profiling and Inspection</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose.html">Verbose Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_performance_settings.html">Configuring oneDNN for Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_benchdnn.html">Benchmarking Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_profilers.html">Profiling oneDNN Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inspecting_jit.html">Inspecting JIT Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_performance_profiling_cpp.html">Performance Profiling Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html">CPU Dispatcher Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_isa_hints.html">CPU ISA Hints</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose_table.html">Verbose Message Catalogue</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="advanced_topics.html">Advanced Topics</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_transition_to_dnnl.html">Transitioning from Intel MKL-DNN to oneDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_understanding_memory_formats.html">Understanding Memory Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_int8_computations.html">Nuances of int8 Computations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_primitive_cache.html">Primitive Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_persistent_cache.html">Persistent Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_threadpool.html">Using oneDNN with Threadpool-Based Threading</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sparsity.html">Sparse memory formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_experimental.html">Experimental features</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="ukernels.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_brgemm.html">Batch-Reduce General Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_transform.html">Data transformation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cpu_brgemm_example_cpp.html">BRGeMM ukernel example</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Developer Reference</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="group_dnnl_api.html">oneDNN API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitives.html">Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_primitives_common.html">Common</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_alg_kind_t.html">enum dnnl_alg_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags_t.html">enum dnnl_normalization_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_primitive_kind_t.html">enum dnnl_primitive_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind_t.html">enum dnnl_prop_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query_t.html">enum dnnl_query_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags.html">enum dnnl::normalization_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query.html">enum dnnl::query</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_exec_arg_t.html">struct dnnl_exec_arg_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive.html">struct dnnl_primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc.html">struct dnnl_primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive-2.html">struct dnnl::primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc-2.html">struct dnnl::primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc_base.html">struct dnnl::primitive_desc_base</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_attributes.html">Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_algorithm.html">enum dnnl::algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rounding_mode_t.html">enum dnnl_rounding_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode_t.html">enum dnnl_scratchpad_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind.html">enum dnnl::prop_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rounding_mode.html">enum dnnl::rounding_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode.html">enum dnnl::scratchpad_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops.html">struct dnnl_post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr.html">struct dnnl_primitive_attr</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops-2.html">struct dnnl::post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr-2.html">struct dnnl::primitive_attr</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reorder.html">Reorder</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reorder.html">struct dnnl::reorder</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_concat.html">Concat</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_concat.html">struct dnnl::concat</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sum.html">Sum</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_sum.html">struct dnnl::sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_binary.html">Binary</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_binary.html">struct dnnl::binary</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_convolution.html">Convolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_data.html">struct dnnl::convolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_weights.html">struct dnnl::convolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_forward.html">struct dnnl::convolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_deconvolution.html">Deconvolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_data.html">struct dnnl::deconvolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_weights.html">struct dnnl::deconvolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_forward.html">struct dnnl::deconvolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_shuffle.html">Shuffle</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_backward.html">struct dnnl::shuffle_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_forward.html">struct dnnl::shuffle_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_eltwise.html">Eltwise</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_backward.html">struct dnnl::eltwise_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_forward.html">struct dnnl::eltwise_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_softmax.html">Softmax</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_backward.html">struct dnnl::softmax_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_forward.html">struct dnnl::softmax_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_pooling.html">Pooling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_backward.html">struct dnnl::pooling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_forward.html">struct dnnl::pooling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_prelu.html">PReLU</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_backward.html">struct dnnl::prelu_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_forward.html">struct dnnl::prelu_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_lrn.html">LRN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_backward.html">struct dnnl::lrn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_forward.html">struct dnnl::lrn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_batch_normalization.html">Batch Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_backward.html">struct dnnl::batch_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_forward.html">struct dnnl::batch_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_group_normalization.html">Group Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_backward.html">struct dnnl::group_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_forward.html">struct dnnl::group_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_layer_normalization.html">Layer Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_backward.html">struct dnnl::layer_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_forward.html">struct dnnl::layer_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_inner_product.html">Inner Product</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_data.html">struct dnnl::inner_product_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_weights.html">struct dnnl::inner_product_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_forward.html">struct dnnl::inner_product_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_rnn.html">RNN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction_t.html">enum dnnl_rnn_direction_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags_t.html">enum dnnl_rnn_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction.html">enum dnnl::rnn_direction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags.html">enum dnnl::rnn_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_backward.html">struct dnnl::augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_forward.html">struct dnnl::augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_backward.html">struct dnnl::gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_forward.html">struct dnnl::gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_backward.html">struct dnnl::lbr_augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_forward.html">struct dnnl::lbr_augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_backward.html">struct dnnl::lbr_gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_forward.html">struct dnnl::lbr_gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_backward.html">struct dnnl::lstm_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_forward.html">struct dnnl::lstm_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_rnn_primitive_desc_base.html">struct dnnl::rnn_primitive_desc_base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_backward.html">struct dnnl::vanilla_rnn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_forward.html">struct dnnl::vanilla_rnn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_matmul.html">Matrix Multiplication</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_matmul.html">struct dnnl::matmul</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_resampling.html">Resampling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_backward.html">struct dnnl::resampling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_forward.html">struct dnnl::resampling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reduction.html">Reduction</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reduction.html">struct dnnl::reduction</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitive_cache.html">Primitive Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_profiling.html">Profiling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_profiling_data_kind.html">enum dnnl::profiling_data_kind</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_blas.html">BLAS functions</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_common.html">Common API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_engine_kind_t.html">enum dnnl_engine_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine.html">struct dnnl_engine</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine-2.html">struct dnnl::engine</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_stream.html">Stream</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_stream_flags_t.html">enum dnnl_stream_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream.html">struct dnnl_stream</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream-2.html">struct dnnl::stream</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_fpmath_mode.html">Floating-point Math Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode_t.html">enum dnnl_fpmath_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode.html">enum dnnl::fpmath_mode</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_service.html">Service</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa.html">enum dnnl::cpu_isa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html">enum dnnl::cpu_isa_hints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html">enum dnnl_cpu_isa_hints_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_t.html">enum dnnl_cpu_isa_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status.html">enum dnnl::status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_version_t.html">struct dnnl_version_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_utils.html">Utilities</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status_t.html">enum dnnl_status_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_error.html">struct dnnl::error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle.html">template struct dnnl::handle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle_traits.html">template struct dnnl::handle_traits</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_accumulation_mode.html">Accumulation Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode.html">enum dnnl::accumulation_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode_t.html">enum dnnl_accumulation_mode_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_data_types.html">Data types</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_data_type_t.html">enum dnnl_data_type_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_memory.html">Memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_kind_t.html">enum dnnl_format_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_tag_t.html">enum dnnl_format_tag_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_profiling_data_kind_t.html">enum dnnl_profiling_data_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sparse_encoding_t.html">enum dnnl_sparse_encoding_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory.html">struct dnnl_memory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory_desc.html">struct dnnl_memory_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory-2.html">struct dnnl::memory</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_graph_api.html">Graph API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_allocator.html">Allocator</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_allocator.html">class dnnl::graph::allocator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_logical_tensor.html">Logical Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_layout_type_t.html">enum dnnl_graph_layout_type_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_tensor_property_t.html">enum dnnl_graph_tensor_property_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_logical_tensor_t.html">struct dnnl_graph_logical_tensor_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_logical_tensor.html">class dnnl::graph::logical_tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_tensor.html">Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_tensor.html">class dnnl::graph::tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_op.html">Op</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_attr_t.html">enum dnnl_graph_op_attr_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_kind_t.html">enum dnnl_graph_op_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_op.html">class dnnl::graph::op</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_partition.html">Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_partition_policy_t.html">enum dnnl_graph_partition_policy_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_partition.html">class dnnl::graph::partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition.html">Compiled Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_inplace_pair_t.html">struct dnnl_graph_inplace_pair_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_compiled_partition.html">class dnnl::graph::compiled_partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_graph.html">Graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_graph.html">class dnnl::graph::graph</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition_cache.html">Compiled Partition Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_constant_tensor_cache.html">Constant Tensor Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_ocl_interop.html">OpenCL interoperability API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_sycl_interop.html">SYCL interoperability API</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_graph.html">namespace dnnl::graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ocl_interop.html">OpenCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_ocl_interop.html">namespace dnnl::ocl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ocl_interop_memory_kind_t.html">enum dnnl_ocl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sycl_interop.html">SYCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_sycl_interop.html">namespace dnnl::sycl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sycl_interop_memory_kind_t.html">enum dnnl_sycl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_threadpool_interop.html">Threadpool interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_threadpool_interop.html">namespace dnnl::threadpool_interop</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_ukernel.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ukernel_brgemm.html">BRGeMM ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_brgemm.html">struct dnnl::ukernel::brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_brgemm.html">struct dnnl_brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_transform.html">struct dnnl_transform</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_ukernel.html">namespace dnnl::ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_pack_type_t.html">enum dnnl_pack_type_t</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="struct_dnnl_ukernel_attr_params.html">struct dnnl_ukernel_attr_params</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_dnnl.html">namespace dnnl</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_oneapi.html">namespace oneapi</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/uxlfoundation/oneDNN" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/uxlfoundation/oneDNN/issues/new?title=Issue%20on%20page%20%2Fdev_guide_rnn.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/dev_guide_rnn.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>RNN</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#general">General</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cell-functions">Cell Functions</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#vanilla-rnn">Vanilla RNN</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm">LSTM</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm-or-vanilla-lstm">LSTM (or Vanilla LSTM)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm-with-peephole">LSTM with Peephole</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm-with-projection-or-lstmp">LSTM with Projection (or LSTMP)</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gru">GRU</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#linear-before-reset-gru">Linear-Before-Reset GRU</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#augru">AUGRU</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#linear-before-reset-augru">Linear-Before-Reset AUGRU</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#considerations-for-training">Considerations for Training</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#execution-arguments">Execution Arguments</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-details">Implementation Details</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#data-type-support">Data Type Support</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#data-representation">Data Representation</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#post-ops-and-attributes">Post-Ops and Attributes</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-limitations">Implementation Limitations</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example">Example</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="rnn">
+<span id="doxid-dev-guide-rnn"></span><span id="index-0"></span><h1>RNN<a class="headerlink" href="#rnn" title="Link to this heading">#</a></h1>
+<p><a class="reference internal" href="group_dnnl_api_rnn.html#doxid-group-dnnl-api-rnn"><span class="std std-ref">API Reference</span></a></p>
+<section id="general">
+<h2>General<a class="headerlink" href="#general" title="Link to this heading">#</a></h2>
+<p>The RNN primitive computes a stack of unrolled recurrent cells, as depicted in Figure 1. <span class="math notranslate nohighlight">\(\bias\)</span>, <span class="math notranslate nohighlight">\(\srciter\)</span> and <span class="math notranslate nohighlight">\(\dstiter\)</span> are optional parameters (the variable names follow the standard <a class="reference internal" href="dev_guide_conventions.html#doxid-dev-guide-conventions"><span class="std std-ref">Naming Conventions</span></a>). If not provided, <span class="math notranslate nohighlight">\(\bias\)</span> and <span class="math notranslate nohighlight">\(\srciter\)</span> will default to 0.</p>
+<img alt="Figure 1: Example of stacked recurrent cells unrolled over the time dimension and executed with the `left2right` direction. Dashed lines represent optional parameters." src="_images/unrolled_stack_rnn.jpg" />
+<p>The RNN primitive supports four modes for evaluation direction:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">left2right</span></code> will process the input data timestamps by increasing order</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">right2left</span></code> will process the input data timestamps by decreasing order</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bidirectional_concat</span></code> will process all the stacked layers from <code class="docutils literal notranslate"><span class="pre">left2right</span></code> and from <code class="docutils literal notranslate"><span class="pre">right2left</span></code> independently, and will concatenate the output in <span class="math notranslate nohighlight">\(\dstlayer\)</span> over the channel dimension.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">bidirectional_sum</span></code> will process all the stacked layers from <code class="docutils literal notranslate"><span class="pre">left2right</span></code> and from <code class="docutils literal notranslate"><span class="pre">right2left</span></code> independently, and will sum the two outputs to <span class="math notranslate nohighlight">\(\dstlayer\)</span>.</p></li>
+</ul>
+<p>Even though the RNN primitive supports passing a different number of channels for <span class="math notranslate nohighlight">\(\srclayer\)</span>, <span class="math notranslate nohighlight">\(\srciter\)</span>, <span class="math notranslate nohighlight">\(\dstlayer\)</span>, and <span class="math notranslate nohighlight">\(\dstiter\)</span>, we always require the following conditions in order for the dimension to be consistent:</p>
+<ul class="simple">
+<li><p><span class="math notranslate nohighlight">\(channels(\dstlayer) = channels(\dstiter)\)</span>,</p></li>
+<li><p>when <span class="math notranslate nohighlight">\(T &gt; 1\)</span>, <span class="math notranslate nohighlight">\(channels(\srciter) = channels(\dstiter)\)</span>,</p></li>
+<li><p>when <span class="math notranslate nohighlight">\(L &gt; 1\)</span>, <span class="math notranslate nohighlight">\(channels(\srclayer) = channels(\dstlayer)\)</span>,</p></li>
+<li><p>when using the <code class="docutils literal notranslate"><span class="pre">bidirectional_concat</span></code> direction, <span class="math notranslate nohighlight">\(channels(\dstlayer) = 2 * channels(\dstiter)\)</span>.</p></li>
+</ul>
+<p>The general formula for the execution of a stack of unrolled recurrent cells depends on the current iteration of the previous layer (<span class="math notranslate nohighlight">\(h_{t,l-1}\)</span> and <span class="math notranslate nohighlight">\(c_{t,l-1}\)</span>) and the previous iteration of the current layer (<span class="math notranslate nohighlight">\(h_{t-1, l}\)</span>). Here is the exact equation for non-LSTM cells:</p>
+<div class="math notranslate nohighlight">
+\[\begin{align} h_{t, l} = Cell(h_{t, l-1}, h_{t-1, l}) \end{align}\]</div>
+<p>where <span class="math notranslate nohighlight">\(t,l\)</span> are the indices of the timestamp and the layer of the cell being executed.</p>
+<p>And here is the equation for LSTM cells:</p>
+<div class="math notranslate nohighlight">
+\[(h_{t, l},c_{t,l}) = Cell(h_{t, l-1}, h_{t-1, l}, c_{t-1,l})\]</div>
+<p>where <span class="math notranslate nohighlight">\(t,l\)</span> are the indices of the timestamp and the layer of the cell being executed.</p>
+</section>
+<section id="cell-functions">
+<h2>Cell Functions<a class="headerlink" href="#cell-functions" title="Link to this heading">#</a></h2>
+<p>The RNN API provides four cell functions:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="#vanilla-rnn">Vanilla RNN</a>, a single-gate recurrent cell,</p></li>
+<li><p><a class="reference external" href="#lstm">LSTM</a>, a four-gate long short-term memory cell,</p></li>
+<li><p><a class="reference external" href="#gru">GRU</a>, a three-gate gated recurrent unit cell,</p></li>
+<li><p><a class="reference external" href="#linear-before-reset-gru">Linear-before-reset GRU</a>, a three-gate recurrent unit cell with the linear layer before the reset gate,</p></li>
+<li><p><a class="reference external" href="#augru">AUGRU</a>, a three-gate gated recurrent unit cell with the attention update gate,</p></li>
+<li><p><a class="reference external" href="#linear-before-reset-augru">Linear-before-reset AUGRU</a>, a three-gate recurrent unit cell with the linear layer before the reset gate and the attention update gate.</p></li>
+</ul>
+<section id="vanilla-rnn">
+<h3>Vanilla RNN<a class="headerlink" href="#vanilla-rnn" title="Link to this heading">#</a></h3>
+<p>A single-gate recurrent cell initialized with <a class="reference internal" href="struct_dnnl_vanilla_rnn_forward_primitive_desc.html#doxid-structdnnl-1-1vanilla-rnn-forward-1-1primitive-desc-1ac5cd59057ae4b2aa3bf1b6dbbafaa49d"><span class="std std-ref">dnnl::vanilla_rnn_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_vanilla_rnn_backward_primitive_desc.html#doxid-structdnnl-1-1vanilla-rnn-backward-1-1primitive-desc-1a8d7e9e966d54a04d4ac8e2d47df637e4"><span class="std std-ref">dnnl::vanilla_rnn_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">vanilla_rnn_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_vanilla_rnn_forward_primitive_desc.html#doxid-structdnnl-1-1vanilla-rnn-forward-1-1primitive-desc"><span class="std std-ref">dnnl::vanilla_rnn_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">activation</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span> <span class="n">dst_layer_desc</span><span class="p">,</span>
+    <span class="n">dst_iter_desc</span><span class="p">);</span></pre>
+<p>The Vanilla RNN cell supports the ReLU, Tanh and Sigmoid activation functions. The following equations defines the mathematical operation performed by the Vanilla RNN cell for the forward pass:</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}a_t &amp;= W \cdot h_{t,l-1} + U \cdot h_{t-1, l} + B \\ h_t &amp;= activation(a_t)\end{split}\]</div>
+</section>
+<section id="lstm">
+<h3>LSTM<a class="headerlink" href="#lstm" title="Link to this heading">#</a></h3>
+<section id="lstm-or-vanilla-lstm">
+<h4>LSTM (or Vanilla LSTM)<a class="headerlink" href="#lstm-or-vanilla-lstm" title="Link to this heading">#</a></h4>
+<p>A four-gate long short-term memory recurrent cell initialized with <a class="reference internal" href="struct_dnnl_lstm_forward_primitive_desc.html#doxid-structdnnl-1-1lstm-forward-1-1primitive-desc-1a5148ad45607a698afb1093c5ede64a91"><span class="std std-ref">dnnl::lstm_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_lstm_backward_primitive_desc.html#doxid-structdnnl-1-1lstm-backward-1-1primitive-desc-1a46152ef35d4c4004ae1878bef29b2775"><span class="std std-ref">dnnl::lstm_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">lstm_pd</span> <span class="o">=</span> <span class="n">lstm_forward</span><span class="o">::</span><span class="n">primitive_desc</span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_h_desc</span><span class="p">,</span>
+    <span class="n">src_iter_c_desc</span><span class="p">,</span> <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span>
+    <span class="n">dst_layer_desc</span><span class="p">,</span> <span class="n">dst_iter_h_desc</span><span class="p">,</span> <span class="n">dst_iter_c_desc</span><span class="p">);</span></pre>
+<p>Note that for all tensors with a dimension depending on the gate number, we implicitly require the order of these gates to be <code class="docutils literal notranslate"><span class="pre">i</span></code>, <code class="docutils literal notranslate"><span class="pre">f</span></code>, <span class="math notranslate nohighlight">\(\tilde c\)</span>, and <code class="docutils literal notranslate"><span class="pre">o</span></code>. The following equation gives the mathematical description of these gates and output for the forward pass:</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}i_t &amp;= \sigma(W_i \cdot h_{t,l-1} + U_i \cdot h_{t-1, l} + B_i) \\ f_t &amp;= \sigma(W_f \cdot h_{t,l-1} + U_f \cdot h_{t-1, l} + B_f) \\ \\ \tilde c_t &amp;= \tanh(W_{\tilde c} \cdot h_{t,l-1} + U_{\tilde c} \cdot h_{t-1, l} + B_{\tilde c}) \\ c_t &amp;= f_t * c_{t-1} + i_t * \tilde c_t \\ \\ o_t &amp;= \sigma(W_o \cdot h_{t,l-1} + U_o \cdot h_{t-1, l} + B_o) \\ h_t &amp;= \tanh(c_t) * o_t\end{split}\]</div>
+<p>where <span class="math notranslate nohighlight">\(W_*\)</span> are stored in <span class="math notranslate nohighlight">\(\weightslayer\)</span>, <span class="math notranslate nohighlight">\(U_*\)</span> are stored in <span class="math notranslate nohighlight">\(\weightsiter\)</span> and <span class="math notranslate nohighlight">\(B_*\)</span> are stored in <span class="math notranslate nohighlight">\(\bias\)</span>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In order for the dimensions to be consistent, we require <span class="math notranslate nohighlight">\(channels(\srciterc) = channels(\dstiterc) = channels(\dstiter)\)</span>.</p>
+</div>
+</section>
+<section id="lstm-with-peephole">
+<h4>LSTM with Peephole<a class="headerlink" href="#lstm-with-peephole" title="Link to this heading">#</a></h4>
+<p>A four-gate long short-term memory recurrent cell with peephole initialized with <a class="reference internal" href="struct_dnnl_lstm_forward_primitive_desc.html#doxid-structdnnl-1-1lstm-forward-1-1primitive-desc-1a5148ad45607a698afb1093c5ede64a91"><span class="std std-ref">dnnl::lstm_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_lstm_backward_primitive_desc.html#doxid-structdnnl-1-1lstm-backward-1-1primitive-desc-1a46152ef35d4c4004ae1878bef29b2775"><span class="std std-ref">dnnl::lstm_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">lstm_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_lstm_forward_primitive_desc.html#doxid-structdnnl-1-1lstm-forward-1-1primitive-desc"><span class="std std-ref">dnnl::lstm_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_h_desc</span><span class="p">,</span> <span class="n">src_iter_c_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">weights_peephole_desc</span><span class="p">,</span>
+    <span class="n">bias_desc</span><span class="p">,</span> <span class="n">dst_layer_desc</span><span class="p">,</span> <span class="n">dst_iter_h_desc</span><span class="p">,</span> <span class="n">dst_iter_c_desc</span><span class="p">);</span></pre>
+<p>Similarly to vanilla LSTM, we implicitly require the order of the gates to be <code class="docutils literal notranslate"><span class="pre">i</span></code>, <code class="docutils literal notranslate"><span class="pre">f</span></code>, <span class="math notranslate nohighlight">\(\tilde c\)</span>, and <code class="docutils literal notranslate"><span class="pre">o</span></code> for all tensors with a dimension depending on the gates. For peephole weights, the gates order is <code class="docutils literal notranslate"><span class="pre">i</span></code>, <code class="docutils literal notranslate"><span class="pre">f</span></code>, <code class="docutils literal notranslate"><span class="pre">o</span></code>. The following equation gives the mathematical description of these gates and output for the forward pass:</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}i_t &amp;= \sigma(W_i \cdot h_{t,l-1} + U_i \cdot h_{t-1, l} + P_i \cdot c_{t-1} + B_i) \\ f_t &amp;= \sigma(W_f \cdot h_{t,l-1} + U_f \cdot h_{t-1, l} + P_f \cdot c_{t-1} + B_f) \\ \\ \tilde c_t &amp;= \tanh(W_{\tilde c} \cdot h_{t,l-1} + U_{\tilde c} \cdot h_{t-1, l} + B_{\tilde c}) \\ c_t &amp;= f_t * c_{t-1} + i_t * \tilde c_t \\ \\ o_t &amp;= \sigma(W_o \cdot h_{t,l-1} + U_o \cdot h_{t-1, l} + P_o \cdot c_t + B_o) \\ h_t &amp;= \tanh(c_t) * o_t\end{split}\]</div>
+<p>where <span class="math notranslate nohighlight">\(P_*\)</span> are stored in <code class="docutils literal notranslate"><span class="pre">weights_peephole</span></code>, and the other parameters are the same as in vanilla LSTM.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If the <code class="docutils literal notranslate"><span class="pre">weights_peephole_desc</span></code> passed to the primitive descriptor constructor is a zero memory descriptor, the primitive will behave the same as in LSTM primitive without peephole.</p>
+</div>
+</section>
+<section id="lstm-with-projection-or-lstmp">
+<h4>LSTM with Projection (or LSTMP)<a class="headerlink" href="#lstm-with-projection-or-lstmp" title="Link to this heading">#</a></h4>
+<p>A four-gate long short-term memory recurrent cell with projection initialized with <a class="reference internal" href="struct_dnnl_lstm_forward_primitive_desc.html#doxid-structdnnl-1-1lstm-forward-1-1primitive-desc-1a5148ad45607a698afb1093c5ede64a91"><span class="std std-ref">dnnl::lstm_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_lstm_backward_primitive_desc.html#doxid-structdnnl-1-1lstm-backward-1-1primitive-desc-1a46152ef35d4c4004ae1878bef29b2775"><span class="std std-ref">dnnl::lstm_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">lstm_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_lstm_forward_primitive_desc.html#doxid-structdnnl-1-1lstm-forward-1-1primitive-desc"><span class="std std-ref">dnnl::lstm_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_h_desc</span><span class="p">,</span> <span class="n">src_iter_c_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">weights_peephole_desc</span><span class="p">,</span>
+    <span class="n">weights_projection_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span> <span class="n">dst_layer_desc</span><span class="p">,</span> <span class="n">dst_iter_h_desc</span><span class="p">,</span>
+    <span class="n">dst_iter_c_desc</span><span class="p">);</span></pre>
+<p>Similarly to vanilla LSTM, we implicitly require the order of the gates to be <code class="docutils literal notranslate"><span class="pre">i</span></code>, <code class="docutils literal notranslate"><span class="pre">f</span></code>, <span class="math notranslate nohighlight">\(\tilde c\)</span>, and <code class="docutils literal notranslate"><span class="pre">o</span></code> for all tensors with a dimension depending on the gates. The following equation gives the mathematical description of these gates and output for the forward pass (for simplicity, LSTM without peephole is shown):</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}i_t &amp;= \sigma(W_i \cdot h_{t,l-1} + U_i \cdot h_{t-1,l} + B_i) \\ f_t &amp;= \sigma(W_f \cdot h_{t,l-1} + U_f \cdot h_{t-1,l} + B_f) \\ &amp; \\ \tilde{c}_t &amp;= \tanh(W_{\tilde{c}} \cdot h_{t,l-1} + U_{\tilde{c}} \cdot h_{t-1,l} + B_{\tilde{c}}) \\ c_t &amp;= f_t * c_{t-1} + i_t * \tilde{c}_t \\ &amp; \\ o_t &amp;= \sigma(W_o \cdot h_{t,l-1} + U_o \cdot h_{t-1,l} + B_o) \\ h_t &amp;= R \cdot (\tanh(c_t) * o_t)\end{split}\]</div>
+<p>where <span class="math notranslate nohighlight">\(R\)</span> is stored in <code class="docutils literal notranslate"><span class="pre">weights_projection</span></code>, and the other parameters are the same as in vanilla LSTM.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If the <code class="docutils literal notranslate"><span class="pre">weights_projection_desc</span></code> passed to the primitive descriptor constructor is a zero memory descriptor, the primitive will behave the same as in LSTM primitive without projection.</p>
+</div>
+</section>
+</section>
+<section id="gru">
+<h3>GRU<a class="headerlink" href="#gru" title="Link to this heading">#</a></h3>
+<p>A three-gate gated recurrent unit cell, initialized with <a class="reference internal" href="struct_dnnl_gru_forward_primitive_desc.html#doxid-structdnnl-1-1gru-forward-1-1primitive-desc-1a7dec21003d026bf7cec53362134be4a6"><span class="std std-ref">dnnl::gru_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_gru_backward_primitive_desc.html#doxid-structdnnl-1-1gru-backward-1-1primitive-desc-1a9d9a3296626309417b3fb9f65e22f9ca"><span class="std std-ref">dnnl::gru_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">gru_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_gru_forward_primitive_desc.html#doxid-structdnnl-1-1gru-forward-1-1primitive-desc"><span class="std std-ref">dnnl::gru_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span>
+    <span class="n">dst_layer_desc</span><span class="p">,</span> <span class="n">dst_iter_desc</span><span class="p">);</span></pre>
+<p>Note that for all tensors with a dimension depending on the gate number, we implicitly require the order of these gates to be <code class="docutils literal notranslate"><span class="pre">u</span></code>, <code class="docutils literal notranslate"><span class="pre">r</span></code>, and <code class="docutils literal notranslate"><span class="pre">o</span></code>. The following equation gives the mathematical definition of these gates.</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}u_t &amp;= \sigma(W_u \cdot h_{t,l-1} + U_u \cdot h_{t-1, l} + B_u) \\ r_t &amp;= \sigma(W_r \cdot h_{t,l-1} + U_r \cdot h_{t-1, l} + B_r) \\ o_t &amp;= \tanh(W_o \cdot h_{t,l-1} + U_o \cdot (r_t * h_{t-1, l}) + B_o) \\ h_t &amp;= u_t * h_{t-1, l} + (1 - u_t) * o_t\end{split}\]</div>
+<p>where <span class="math notranslate nohighlight">\(W_*\)</span> are in <span class="math notranslate nohighlight">\(\weightslayer\)</span>, <span class="math notranslate nohighlight">\(U_*\)</span> are in <span class="math notranslate nohighlight">\(\weightsiter\)</span>, and <span class="math notranslate nohighlight">\(B_*\)</span> are stored in <span class="math notranslate nohighlight">\(\bias\)</span>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you need to replace u_t by (1-u_t) when computing h_t, you can achieve this by multiplying <span class="math notranslate nohighlight">\(W_u\)</span>, <span class="math notranslate nohighlight">\(U_u\)</span> and <span class="math notranslate nohighlight">\(B_u\)</span> by <span class="math notranslate nohighlight">\(-1\)</span>. This is possible as <span class="math notranslate nohighlight">\(u_t = \sigma(W_u \cdot h_{t,l-1} + U_u \cdot h_{t-1, l} + B_u)\)</span>, and <span class="math notranslate nohighlight">\(1 – \sigma(a) = \sigma(-a)\)</span>.</p>
+</div>
+</section>
+<section id="linear-before-reset-gru">
+<h3>Linear-Before-Reset GRU<a class="headerlink" href="#linear-before-reset-gru" title="Link to this heading">#</a></h3>
+<p>A three-gate gated recurrent unit cell with linear layer applied before the reset gate, initialized with <a class="reference internal" href="struct_dnnl_lbr_gru_forward_primitive_desc.html#doxid-structdnnl-1-1lbr-gru-forward-1-1primitive-desc-1ad4f6b8d67cf3232d20e880128bde2660"><span class="std std-ref">dnnl::lbr_gru_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_lbr_gru_backward_primitive_desc.html#doxid-structdnnl-1-1lbr-gru-backward-1-1primitive-desc-1a72261d946a2fe263c884aaabaaca2164"><span class="std std-ref">dnnl::lbr_gru_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">lbr_gru_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_lbr_gru_forward_primitive_desc.html#doxid-structdnnl-1-1lbr-gru-forward-1-1primitive-desc"><span class="std std-ref">dnnl::lbr_gru_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span>
+    <span class="n">dst_layer_desc</span><span class="p">,</span> <span class="n">dst_iter_desc</span><span class="p">);</span></pre>
+<p>The following equation describes the mathematical behavior of the Linear-Before-Reset GRU cell.</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}u_t &amp;= \sigma(W_u \cdot h_{t,l-1} + U_u \cdot h_{t-1, l} + B_u) \\ r_t &amp;= \sigma(W_r \cdot h_{t,l-1} + U_r \cdot h_{t-1, l} + B_r) \\ o_t &amp;= \tanh(W_o \cdot h_{t,l-1} + r_t *(U_o \cdot h_{t-1, l} + B_{u'}) + B_o) \\ h_t &amp;= u_t * h_{t-1, l} + (1 - u_t) * o_t\end{split}\]</div>
+<p>Note that for all tensors with a dimension depending on the gate number, except the bias, we implicitly require the order of these gates to be <code class="docutils literal notranslate"><span class="pre">u</span></code>, <code class="docutils literal notranslate"><span class="pre">r</span></code>, and <code class="docutils literal notranslate"><span class="pre">o</span></code>. For the <span class="math notranslate nohighlight">\(\bias\)</span> tensor, we implicitly require the order of the gates to be <code class="docutils literal notranslate"><span class="pre">u</span></code>, <code class="docutils literal notranslate"><span class="pre">r</span></code>, <code class="docutils literal notranslate"><span class="pre">o</span></code>, and u&amp;rsquo;`.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>If you need to replace u_t by (1-u_t) when computing h_t, you can achieve this by multiplying <span class="math notranslate nohighlight">\(W_u\)</span>, <span class="math notranslate nohighlight">\(U_u\)</span> and <span class="math notranslate nohighlight">\(B_u\)</span> by <span class="math notranslate nohighlight">\(-1\)</span>. This is possible as <span class="math notranslate nohighlight">\(u_t = \sigma(W_u \cdot h_{t,l-1} + U_u \cdot h_{t-1, l} + B_u)\)</span>, and <span class="math notranslate nohighlight">\(1 – \sigma(a) = \sigma(-a)\)</span>.</p>
+</div>
+</section>
+<section id="augru">
+<h3>AUGRU<a class="headerlink" href="#augru" title="Link to this heading">#</a></h3>
+<p>A three-gate gated recurrent unit cell, initialized with <a class="reference internal" href="struct_dnnl_augru_forward_primitive_desc.html#doxid-structdnnl-1-1augru-forward-1-1primitive-desc-1a46f05b511d0b13704f6bc3af4e0c5804"><span class="std std-ref">dnnl::augru_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_augru_backward_primitive_desc.html#doxid-structdnnl-1-1augru-backward-1-1primitive-desc-1a7ca7158311dc864d1bd6c56d5915defc"><span class="std std-ref">dnnl::augru_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">augru_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_augru_forward_primitive_desc.html#doxid-structdnnl-1-1augru-forward-1-1primitive-desc"><span class="std std-ref">dnnl::augru_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_desc</span><span class="p">,</span> <span class="n">attention_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span> <span class="n">dst_layer_desc</span><span class="p">,</span>
+    <span class="n">dst_iter_desc</span><span class="p">);</span></pre>
+<p>Note that for all tensors with a dimension depending on the gate number, we implicitly require the order of these gates to be <code class="docutils literal notranslate"><span class="pre">u</span></code>, <code class="docutils literal notranslate"><span class="pre">r</span></code>, and <code class="docutils literal notranslate"><span class="pre">o</span></code>. The following equation gives the mathematical definition of these gates.</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}u_t &amp;= \sigma(W_u \cdot h_{t,l-1} + U_u \cdot h_{t-1, l} + B_u) \\ r_t &amp;= \sigma(W_r \cdot h_{t,l-1} + U_r \cdot h_{t-1, l} + B_r) \\ o_t &amp;= \tanh(W_o \cdot h_{t,l-1} + U_o \cdot (r_t * h_{t-1, l}) + B_o) \\ \tilde u_t &amp;= (1 - a_t) * u_t \\ h_t &amp;= \tilde u_t * h_{t-1, l} + (1 - \tilde u_t) * o_t\end{split}\]</div>
+<p>where <span class="math notranslate nohighlight">\(W_*\)</span> are in <span class="math notranslate nohighlight">\(\weightslayer\)</span>, <span class="math notranslate nohighlight">\(U_*\)</span> are in <span class="math notranslate nohighlight">\(\weightsiter\)</span>, and <span class="math notranslate nohighlight">\(B_*\)</span> are stored in <span class="math notranslate nohighlight">\(\bias\)</span>.</p>
+</section>
+<section id="linear-before-reset-augru">
+<h3>Linear-Before-Reset AUGRU<a class="headerlink" href="#linear-before-reset-augru" title="Link to this heading">#</a></h3>
+<p>A three-gate gated recurrent unit cell with linear layer applied before the reset gate, initialized with <a class="reference internal" href="struct_dnnl_lbr_augru_forward_primitive_desc.html#doxid-structdnnl-1-1lbr-augru-forward-1-1primitive-desc-1acbbe1666db758249e8637ef2a04d8ab4"><span class="std std-ref">dnnl::lbr_augru_forward::primitive_desc::primitive_desc()</span></a> or <a class="reference internal" href="struct_dnnl_lbr_augru_backward_primitive_desc.html#doxid-structdnnl-1-1lbr-augru-backward-1-1primitive-desc-1aeef40e28d5b5279ac195f92a5ee6b067"><span class="std std-ref">dnnl::lbr_augru_backward::primitive_desc::primitive_desc()</span></a> as in the following example.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">lbr_augru_pd</span> <span class="o">=</span> <a class="reference internal" href="struct_dnnl_lbr_augru_forward_primitive_desc.html#doxid-structdnnl-1-1lbr-augru-forward-1-1primitive-desc"><span class="std std-ref">dnnl::lbr_augru_forward::primitive_desc</span></a><span></span><span class="p">(</span>
+    <span class="n">engine</span><span class="p">,</span> <span class="n">aprop</span><span class="p">,</span> <span class="n">direction</span><span class="p">,</span> <span class="n">src_layer_desc</span><span class="p">,</span> <span class="n">src_iter_desc</span><span class="p">,</span> <span class="n">attention_desc</span><span class="p">,</span>
+    <span class="n">weights_layer_desc</span><span class="p">,</span> <span class="n">weights_iter_desc</span><span class="p">,</span> <span class="n">bias_desc</span><span class="p">,</span>
+    <span class="n">dst_layer_desc</span><span class="p">,</span> <span class="n">dst_iter_desc</span><span class="p">);</span></pre>
+<p>The following equation describes the mathematical behavior of the Linear-Before-Reset AUGRU cell.</p>
+<div class="math notranslate nohighlight">
+\[\begin{split}u_t &amp;= \sigma(W_u \cdot h_{t,l-1} + U_u \cdot h_{t-1, l} + B_u) \\ r_t &amp;= \sigma(W_r \cdot h_{t,l-1} + U_r \cdot h_{t-1, l} + B_r) \\ o_t &amp;= \tanh(W_o \cdot h_{t,l-1} + r_t *(U_o \cdot h_{t-1, l} + B_{u'}) + B_o) \\ \tilde u_t &amp;= (1 - a_t) * u_t \\ h_t &amp;= \tilde u_t * h_{t-1, l} + (1 - \tilde u_t) * o_t\end{split}\]</div>
+<p>Note that for all tensors with a dimension depending on the gate number, except the bias, we implicitly require the order of these gates to be <code class="docutils literal notranslate"><span class="pre">u</span></code>, <code class="docutils literal notranslate"><span class="pre">r</span></code>, and <code class="docutils literal notranslate"><span class="pre">o</span></code>. For the <span class="math notranslate nohighlight">\(\bias\)</span> tensor, we implicitly require the order of the gates to be <code class="docutils literal notranslate"><span class="pre">u</span></code>, <code class="docutils literal notranslate"><span class="pre">r</span></code>, <code class="docutils literal notranslate"><span class="pre">o</span></code>, and u&amp;rsquo;`.</p>
+</section>
+</section>
+<section id="considerations-for-training">
+<h2>Considerations for Training<a class="headerlink" href="#considerations-for-training" title="Link to this heading">#</a></h2>
+<p>When using the RNN API for training, the forward pass should use the <code class="docutils literal notranslate"><span class="pre">forward_training</span></code> propagation kind, and a workspace should be passed to both the forward pass and the backward pass. Note that after executing the backward pass, the workspace is no more valid and should be populated once again by another forward pass.</p>
+<p>The RNN primitive backward pass accumulates gradients to its weight outputs (namely <span class="math notranslate nohighlight">\(\diffweightslayer\)</span>, <span class="math notranslate nohighlight">\(\diffweightsiter\)</span>, <span class="math notranslate nohighlight">\(\diffweightspeephole\)</span>, <span class="math notranslate nohighlight">\(\diffweightsprojection\)</span>, <span class="math notranslate nohighlight">\(\diffbias\)</span>). Hence, these tensors should be properly initialized to zero before their first use, and can be reused across calls to accumulate gradients if need be. This behavior can be altered by the RNN flag <code class="docutils literal notranslate"><span class="pre">diff_weights_overwrite</span></code>. If this flag is set weight gradients will be initialized by zeros by the RNN primitive.</p>
+<p><span class="target" id="doxid-dev-guide-rnn-1dg-rnn-impl-limits"></span></p>
+</section>
+<section id="execution-arguments">
+<h2>Execution Arguments<a class="headerlink" href="#execution-arguments" title="Link to this heading">#</a></h2>
+<p>When executed, the inputs and outputs should be mapped to an execution argument index as specified by the following table.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Primitive input/output</p></th>
+<th class="head"><p>Execution argument index</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\srclayer\)</span></p></td>
+<td><p>DNNL_ARG_SRC_LAYER</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\srclayerattention\)</span></p></td>
+<td><p>DNNL_ARG_SRC_LAYER_ATTENTION</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\srciter\)</span></p></td>
+<td><p>DNNL_ARG_SRC_ITER</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\srciterc\)</span></p></td>
+<td><p>DNNL_ARG_SRC_ITER_C</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\weightslayer\)</span></p></td>
+<td><p>DNNL_ARG_WEIGHTS_LAYER</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\weightsiter\)</span></p></td>
+<td><p>DNNL_ARG_WEIGHTS_ITER</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\weightspeephole\)</span></p></td>
+<td><p>DNNL_ARG_WEIGHTS_PEEPHOLE</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\weightsprojection\)</span></p></td>
+<td><p>DNNL_ARG_WEIGHTS_PROJECTION</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\bias\)</span></p></td>
+<td><p>DNNL_ARG_BIAS</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\dstlayer\)</span></p></td>
+<td><p>DNNL_ARG_DST_LAYER</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\dstiter\)</span></p></td>
+<td><p>DNNL_ARG_DST_ITER</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\dstiterc\)</span></p></td>
+<td><p>DNNL_ARG_DST_ITER_C</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\workspace\)</span></p></td>
+<td><p>DNNL_WORKSPACE</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\diffsrclayer\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_SRC_LAYER</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\diffsrclayerattention\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_SRC_LAYER_ATTENTION</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\diffsrciter\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_SRC_ITER</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\diffsrciterc\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_SRC_ITER_C</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\diffweightslayer\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_WEIGHTS_LAYER</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\diffweightsiter\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_WEIGHTS_ITER</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\diffweightspeephole\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_WEIGHTS_PEEPHOLE</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\diffweightsprojection\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_WEIGHTS_PROJECTION</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\diffbias\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_BIAS</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\diffdstlayer\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_DST_LAYER</p></td>
+</tr>
+<tr class="row-odd"><td><p><span class="math notranslate nohighlight">\(\diffdstiter\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_DST_ITER</p></td>
+</tr>
+<tr class="row-even"><td><p><span class="math notranslate nohighlight">\(\diffdstiterc\)</span></p></td>
+<td><p>DNNL_ARG_DIFF_DST_ITER_C</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="implementation-details">
+<h2>Implementation Details<a class="headerlink" href="#implementation-details" title="Link to this heading">#</a></h2>
+<section id="data-type-support">
+<h3>Data Type Support<a class="headerlink" href="#data-type-support" title="Link to this heading">#</a></h3>
+<p>The following table lists the combination of data types supported by the RNN primitive for each input and output memory object.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Propagation</p></th>
+<th class="head"><p>Cell Function</p></th>
+<th class="head"><p>Input data</p></th>
+<th class="head"><p>Recurrent data (1)</p></th>
+<th class="head"><p>Weights</p></th>
+<th class="head"><p>Bias</p></th>
+<th class="head"><p>Output Data</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Forward / Backward</p></td>
+<td><p>All</p></td>
+<td><p>f32</p></td>
+<td><p>f32</p></td>
+<td><p>f32</p></td>
+<td><p>f32</p></td>
+<td><p>f32</p></td>
+</tr>
+<tr class="row-odd"><td><p>Forward / Backward (2)</p></td>
+<td><p>All (3)</p></td>
+<td><p>bf16</p></td>
+<td><p>bf16</p></td>
+<td><p>bf16</p></td>
+<td><p>f32</p></td>
+<td><p>bf16</p></td>
+</tr>
+<tr class="row-even"><td><p>Forward</p></td>
+<td><p>All (3)</p></td>
+<td><p>f16</p></td>
+<td><p>f16</p></td>
+<td><p>f16</p></td>
+<td><p>f16</p></td>
+<td><p>f16</p></td>
+</tr>
+<tr class="row-odd"><td><p>Forward inference</p></td>
+<td><p>Vanilla LSTM, LSTMP and GRU</p></td>
+<td><p>u8</p></td>
+<td><p>u8</p></td>
+<td><p>s8</p></td>
+<td><p>f32</p></td>
+<td><p>u8, f32</p></td>
+</tr>
+<tr class="row-even"><td><p>Forward inference</p></td>
+<td><p>Vanilla LSTM, LSTMP</p></td>
+<td><p>s8</p></td>
+<td><p>s8</p></td>
+<td><p>s8</p></td>
+<td><p>f32</p></td>
+<td><p>s8, f32</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<ol class="arabic simple">
+<li><p>With LSTM and Peephole LSTM cells, the cell state datatype is f32, except for the f16 configuration.</p></li>
+<li><p>In backward propagation, all <code class="docutils literal notranslate"><span class="pre">diff_*</span></code> tensors are in f32.</p></li>
+<li><p>Projection LSTM is not supported.</p></li>
+</ol>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>There might be hardware and/or implementation specific restrictions. Check <a class="reference internal" href="#doxid-dev-guide-rnn-1dg-rnn-impl-limits"><span class="std std-ref">Implementation Limitations</span></a> section below.</p>
+</div>
+</section>
+<section id="data-representation">
+<h3>Data Representation<a class="headerlink" href="#data-representation" title="Link to this heading">#</a></h3>
+<p>In the oneDNN programming model, the RNN primitive is one of a few that support the placeholder memory format <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> (shortened to <code class="docutils literal notranslate"><span class="pre">any</span></code> from now on) and can define data and weight memory objects format based on the primitive parameters.</p>
+<p>The following table summarizes the data layouts supported by the RNN primitive.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Propagation</p></th>
+<th class="head"><p>Input/Output Data</p></th>
+<th class="head"><p>Recurrent Data</p></th>
+<th class="head"><p>Layer and Iteration Weights</p></th>
+<th class="head"><p>Peephole Weights and Bias</p></th>
+<th class="head"><p>Projection LSTM Weights</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Forward / Backward</p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091dafee39ac6fff0325cae43cd66495c18ac"><span class="std std-ref">dnnl_format_tag_any</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091dafee39ac6fff0325cae43cd66495c18ac"><span class="std std-ref">dnnl_format_tag_any</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091dafee39ac6fff0325cae43cd66495c18ac"><span class="std std-ref">dnnl_format_tag_any</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da2bc162b37fd0049dceab3b12300a26c7"><span class="std std-ref">dnnl_ldgo</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091dafee39ac6fff0325cae43cd66495c18ac"><span class="std std-ref">dnnl_format_tag_any</span></a></p></td>
+</tr>
+<tr class="row-odd"><td><p>Forward</p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da5d73ca7a68559ef44241be5a096e6bff"><span class="std std-ref">dnnl_ntc</span></a> , <a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da2a9735ec024c9362b717304edbfe2237"><span class="std std-ref">dnnl_tnc</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da4fd1cf9fdb67c554bcd8281695b65b3c"><span class="std std-ref">dnnl_ldnc</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da96a227ab1a1be1825c1fa596c38847fc"><span class="std std-ref">dnnl_ldigo</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da2bc162b37fd0049dceab3b12300a26c7"><span class="std std-ref">dnnl_ldgo</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da2d5a8e24d6b4904b4e8986d9b0fb4613"><span class="std std-ref">dnnl_ldio</span></a></p></td>
+</tr>
+<tr class="row-even"><td><p>Backward</p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da5d73ca7a68559ef44241be5a096e6bff"><span class="std std-ref">dnnl_ntc</span></a> , <a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da2a9735ec024c9362b717304edbfe2237"><span class="std std-ref">dnnl_tnc</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da4fd1cf9fdb67c554bcd8281695b65b3c"><span class="std std-ref">dnnl_ldnc</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da96a227ab1a1be1825c1fa596c38847fc"><span class="std std-ref">dnnl_ldigo</span></a> , <a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da5fc9120d8f52d7d7fa853aa79bf654fe"><span class="std std-ref">dnnl_ldgoi</span></a> (GPU)</p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da2bc162b37fd0049dceab3b12300a26c7"><span class="std std-ref">dnnl_ldgo</span></a></p></td>
+<td><p><a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091da475da8ead8c761bac894e6c87042355d"><span class="std std-ref">dnnl_ldoi</span></a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>While an RNN primitive can be created with memory formats specified explicitly, the performance is likely to be sub-optimal. When using <code class="docutils literal notranslate"><span class="pre">any</span></code>, it is necessary to first create an RNN primitive descriptor and then query it for the actual data and weight memory objects formats.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The RNN primitive supports padded tensors and views. So even if two memory descriptors share the same data layout, they might still be different.</p>
+</div>
+</section>
+<section id="post-ops-and-attributes">
+<h3>Post-Ops and Attributes<a class="headerlink" href="#post-ops-and-attributes" title="Link to this heading">#</a></h3>
+<p>Currently post-ops and attributes are only used by the int8 variants of LSTM and GRU. See the markdown <a class="reference internal" href="page_cpu_rnn_inference_int8_cpp.html#doxid-cpu-rnn-inference-int8-cpp"><span class="std std-ref">RNN int8 inference example</span></a> for more details on how to use and set these quantization parameters.</p>
+</section>
+</section>
+<section id="implementation-limitations">
+<h2>Implementation Limitations<a class="headerlink" href="#implementation-limitations" title="Link to this heading">#</a></h2>
+<ol class="arabic simple">
+<li><p>Refer to <a class="reference internal" href="dev_guide_data_types.html#doxid-dev-guide-data-types"><span class="std std-ref">Data Types</span></a> for limitations related to data types support.</p></li>
+<li><p>Bias must always be present (that is, the corresponding memory descriptor argument cannot be zero memory descriptor when the RNN primitive descriptor is initialized).</p></li>
+<li><p>CPU</p>
+<ul class="simple">
+<li><p>oneDNN supports s8 as input data only on systems with Advanced Matrix Extension(AMX) support.</p></li>
+<li><p>Projection LSTM for bf16 data type is not supported.</p></li>
+<li><p>f16 data type is not supported.</p></li>
+</ul>
+</li>
+<li><p>GPU</p>
+<ul class="simple">
+<li><p>No support for AUGRU.</p></li>
+<li><p>No support for Peephole LSTM and Projection LSTM.</p></li>
+<li><p>Int8 support is provided for LSTM only.</p></li>
+<li><p>Int8 workloads require weights layouts to be <a class="reference internal" href="enum_dnnl_format_tag_t.html#doxid-group-dnnl-api-memory-1gga395e42b594683adb25ed2d842bb3091dafee39ac6fff0325cae43cd66495c18ac"><span class="std std-ref">dnnl_format_tag_any</span></a>.</p></li>
+<li><p>Bias and cell state of bf16 data type is not supported.</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Link to this heading">#</a></h2>
+<p><a class="reference internal" href="page_lstm_example_cpp.html#doxid-lstm-example-cpp"><span class="std std-ref">LSTM RNN Primitive Example</span></a></p>
+<p>This C++ API example demonstrates how to create and execute an <a class="reference internal" href="#doxid-dev-guide-rnn"><span class="std std-ref">LSTM RNN</span></a> primitive in forward training propagation mode.</p>
+<p>Key optimizations included in this example:</p>
+<ul class="simple">
+<li><p>Creation of optimized memory format from the primitive descriptor.</p></li>
+</ul>
+<p><a class="reference internal" href="page_vanilla_rnn_example_cpp.html#doxid-vanilla-rnn-example-cpp"><span class="std std-ref">Vanilla RNN Primitive Example</span></a></p>
+<p>This C++ API example demonstrates how to create and execute a <a class="reference internal" href="#doxid-dev-guide-rnn"><span class="std std-ref">Vanilla RNN</span></a> primitive in forward training propagation mode.</p>
+<p>Key optimizations included in this example:</p>
+<ul class="simple">
+<li><p>Creation of optimized memory format from the primitive descriptor.</p></li>
+</ul>
+<p><a class="reference internal" href="page_augru_example_cpp.html#doxid-augru-example-cpp"><span class="std std-ref">AUGRU RNN Primitive Example</span></a></p>
+<p>This C++ API example demonstrates how to create and execute an <a class="reference internal" href="#doxid-dev-guide-rnn"><span class="std std-ref">AUGRU RNN</span></a> primitive in forward training propagation mode.</p>
+<p>Key optimizations included in this example:</p>
+<ul class="simple">
+<li><p>Creation of optimized memory format from the primitive descriptor.</p></li>
+</ul>
+<p><a class="reference internal" href="page_lbr_gru_example_cpp.html#doxid-lbr-gru-example-cpp"><span class="std std-ref">Linear-Before-Reset GRU RNN Primitive Example</span></a></p>
+<p>This C++ API example demonstrates how to create and execute a <a class="reference internal" href="#doxid-dev-guide-rnn"><span class="std std-ref">Linear-Before-Reset GRU RNN</span></a> primitive in forward training propagation mode.</p>
+<p>Key optimizations included in this example:</p>
+<ul class="simple">
+<li><p>Creation of optimized memory format from the primitive descriptor.</p></li>
+</ul>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="dev_guide_matmul.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Matrix Multiplication</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="dev_guide_batch_normalization.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Batch Normalization</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#general">General</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#cell-functions">Cell Functions</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#vanilla-rnn">Vanilla RNN</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm">LSTM</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm-or-vanilla-lstm">LSTM (or Vanilla LSTM)</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm-with-peephole">LSTM with Peephole</a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#lstm-with-projection-or-lstmp">LSTM with Projection (or LSTMP)</a></li>
+</ul>
+</li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#gru">GRU</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#linear-before-reset-gru">Linear-Before-Reset GRU</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#augru">AUGRU</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#linear-before-reset-augru">Linear-Before-Reset AUGRU</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#considerations-for-training">Considerations for Training</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#execution-arguments">Execution Arguments</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-details">Implementation Details</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#data-type-support">Data Type Support</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#data-representation">Data Representation</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#post-ops-and-attributes">Post-Ops and Attributes</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#implementation-limitations">Implementation Limitations</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example">Example</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2016-2025 Intel Corporation.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+<div class="extra_footer">
+  oneDNN is licensed under Apache License Version 2.0. Refer to the <a href='https://github.com/uxlfoundation/oneDNN/blob/main/LICENSE'>LICENSE</a> file for the full license text and copyright notice.
+</div>
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

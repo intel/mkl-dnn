@@ -1,0 +1,276 @@
+.. index:: pair: class; dnnl::graph::partition
+.. _doxid-classdnnl_1_1graph_1_1partition:
+
+class dnnl::graph::partition
+============================
+
+.. toctree::
+	:hidden:
+
+	enum_dnnl_graph_partition_policy.rst
+
+Overview
+~~~~~~~~
+
+A partition object. :ref:`More...<details-classdnnl_1_1graph_1_1partition>`
+
+
+.. ref-code-block:: cpp
+	:class: doxyrest-overview-code-block
+
+	#include <dnnl_graph.hpp>
+	
+	class partition: public partition_handle
+	{
+	public:
+		// enums
+	
+		enum :ref:`policy<doxid-classdnnl_1_1graph_1_1partition_1a439c0490ea8ea85f2a12ec7b320a9a3c>`;
+
+		// construction
+	
+		:target:`partition<doxid-classdnnl_1_1graph_1_1partition_1af74b276d676057a5faa482aaf368014b>`();
+		:ref:`partition<doxid-classdnnl_1_1graph_1_1partition_1ab688d46f8567fa69c1bebb5e351f0968>`(:ref:`dnnl_graph_partition_t<doxid-group__dnnl__graph__api__partition_1ga2fdc3001503c7b586d5fc16637872ce4>` p);
+		:ref:`partition<doxid-classdnnl_1_1graph_1_1partition_1a617cb01f02a4f7fa459fb346f552cde9>`(const :ref:`op<doxid-classdnnl_1_1graph_1_1op>`& aop, :ref:`engine::kind<doxid-structdnnl_1_1engine_1a2635da16314dcbdb9bd9ea431316bb1a>` ekind);
+
+		// methods
+	
+		size_t :ref:`get_ops_num<doxid-classdnnl_1_1graph_1_1partition_1ac86965ac32334fa986d0c05344617668>`() const;
+		std::vector<size_t> :ref:`get_ops<doxid-classdnnl_1_1graph_1_1partition_1a53eceebd7c703a14920400e330b0aa1d>`() const;
+		size_t :ref:`get_id<doxid-classdnnl_1_1graph_1_1partition_1a46aec3b49987b57ff4cce53a4fccaadd>`() const;
+	
+		:ref:`compiled_partition<doxid-classdnnl_1_1graph_1_1compiled__partition>` :ref:`compile<doxid-classdnnl_1_1graph_1_1partition_1a5c2af93c65a09c9d0a1507571ada0318>`(
+			const std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`>& inputs,
+			const std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`>& outputs,
+			const :ref:`engine<doxid-structdnnl_1_1engine>`& e
+			) const;
+	
+		bool :ref:`is_supported<doxid-classdnnl_1_1graph_1_1partition_1ad80536833d69e2660c496adbd9ec0aa3>`() const;
+		std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`> :ref:`get_input_ports<doxid-classdnnl_1_1graph_1_1partition_1a415319dcb89d9e1d77bd4b7b0058df52>`() const;
+		std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`> :ref:`get_output_ports<doxid-classdnnl_1_1graph_1_1partition_1aaa4abecc6e09f417742402ab207a1e6d>`() const;
+		:ref:`engine::kind<doxid-structdnnl_1_1engine_1a2635da16314dcbdb9bd9ea431316bb1a>` :ref:`get_engine_kind<doxid-classdnnl_1_1graph_1_1partition_1a606818ef956ac2956bbc74543a142abb>`() const;
+	};
+.. _details-classdnnl_1_1graph_1_1partition:
+
+Detailed Documentation
+~~~~~~~~~~~~~~~~~~~~~~
+
+A partition object.
+
+Construction
+------------
+
+.. index:: pair: function; partition
+.. _doxid-classdnnl_1_1graph_1_1partition_1ab688d46f8567fa69c1bebb5e351f0968:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	partition(:ref:`dnnl_graph_partition_t<doxid-group__dnnl__graph__api__partition_1ga2fdc3001503c7b586d5fc16637872ce4>` p)
+
+Constructs a partition object.
+
+
+
+.. rubric:: Parameters:
+
+.. list-table::
+	:widths: 20 80
+
+	*
+		- p
+
+		- A raw pointer to the C API handle
+
+.. index:: pair: function; partition
+.. _doxid-classdnnl_1_1graph_1_1partition_1a617cb01f02a4f7fa459fb346f552cde9:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	partition(const :ref:`op<doxid-classdnnl_1_1graph_1_1op>`& aop, :ref:`engine::kind<doxid-structdnnl_1_1engine_1a2635da16314dcbdb9bd9ea431316bb1a>` ekind)
+
+Creates a new partition with a given operator and engine kind.
+
+The API is used to create a partition from an operation directly without creating the graph and calling ``get_partitions()``. The output partition contains only one operation.
+
+
+
+.. rubric:: Parameters:
+
+.. list-table::
+	:widths: 20 80
+
+	*
+		- aop
+
+		- An operation used to create the partition.
+
+	*
+		- ekind
+
+		- Engine kind.
+
+Methods
+-------
+
+.. index:: pair: function; get_ops_num
+.. _doxid-classdnnl_1_1graph_1_1partition_1ac86965ac32334fa986d0c05344617668:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	size_t get_ops_num() const
+
+Returns the number of operations contained in the partition.
+
+
+
+.. rubric:: Returns:
+
+Number of operations.
+
+.. index:: pair: function; get_ops
+.. _doxid-classdnnl_1_1graph_1_1partition_1a53eceebd7c703a14920400e330b0aa1d:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	std::vector<size_t> get_ops() const
+
+Returns all operation IDs contained in the partition.
+
+
+
+.. rubric:: Returns:
+
+An unordered set of operation IDs.
+
+.. index:: pair: function; get_id
+.. _doxid-classdnnl_1_1graph_1_1partition_1a46aec3b49987b57ff4cce53a4fccaadd:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	size_t get_id() const
+
+Returns the unique ID of the partition.
+
+Partition ID is generated by the library internally. The ID can be used for debugging purpose or verbose.
+
+
+
+.. rubric:: Returns:
+
+ID of the partition.
+
+.. index:: pair: function; compile
+.. _doxid-classdnnl_1_1graph_1_1partition_1a5c2af93c65a09c9d0a1507571ada0318:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	:ref:`compiled_partition<doxid-classdnnl_1_1graph_1_1compiled__partition>` compile(
+		const std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`>& inputs,
+		const std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`>& outputs,
+		const :ref:`engine<doxid-structdnnl_1_1engine>`& e
+		) const
+
+Compiles a partition with given input and output logical tensors.
+
+The output logical tensors can contain unknown dimensions. For this case, the compilation will deduce the output shapes according to input shapes. The output logical tensors can also have layout type ``any``. The compilation will choose the optimal layout for output tensors. The optimal layout will be represented as an opaque layout ID saved in the output logical tensor.
+
+
+
+.. rubric:: Parameters:
+
+.. list-table::
+	:widths: 20 80
+
+	*
+		- inputs
+
+		- A list of input logical tensors.
+
+	*
+		- outputs
+
+		- A list of output logical tensors.
+
+	*
+		- e
+
+		- The engine used to compile the partition.
+
+
+
+.. rubric:: Returns:
+
+A compiled partition.
+
+.. index:: pair: function; is_supported
+.. _doxid-classdnnl_1_1graph_1_1partition_1ad80536833d69e2660c496adbd9ec0aa3:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	bool is_supported() const
+
+Returns the supporting status of a partition.
+
+Some operations may not be supported by the library under certain circumstances. During partitioning stage, unsupported partitions will be returned to users with each containing an unsupported operation. Users should check the supporting status of a partition before transforming the computation graph or compiling the partition.
+
+
+
+.. rubric:: Returns:
+
+``true`` if this partition is supported or ``false`` if this partition isn't supported by the library
+
+.. index:: pair: function; get_input_ports
+.. _doxid-classdnnl_1_1graph_1_1partition_1a415319dcb89d9e1d77bd4b7b0058df52:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`> get_input_ports() const
+
+Returns a list of input logical tensors from the partition.
+
+
+
+.. rubric:: Returns:
+
+A list of input logical tensors.
+
+.. index:: pair: function; get_output_ports
+.. _doxid-classdnnl_1_1graph_1_1partition_1aaa4abecc6e09f417742402ab207a1e6d:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	std::vector<:ref:`logical_tensor<doxid-classdnnl_1_1graph_1_1logical__tensor>`> get_output_ports() const
+
+Returns a list of output logical tensors from the partition.
+
+
+
+.. rubric:: Returns:
+
+A list of output logical tensor.
+
+.. index:: pair: function; get_engine_kind
+.. _doxid-classdnnl_1_1graph_1_1partition_1a606818ef956ac2956bbc74543a142abb:
+
+.. ref-code-block:: cpp
+	:class: doxyrest-title-code-block
+
+	:ref:`engine::kind<doxid-structdnnl_1_1engine_1a2635da16314dcbdb9bd9ea431316bb1a>` get_engine_kind() const
+
+Returns the engine kind of the partition.
+
+
+
+.. rubric:: Returns:
+
+The engine kind
+

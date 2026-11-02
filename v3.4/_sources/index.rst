@@ -1,0 +1,22 @@
+oneAPI Deep Neural Network Library Developer Guide and Reference
+=======================================================================
+
+.. toctree::
+   :maxdepth: 1
+
+   build_and_link
+   programming_model
+   supported_primitives
+   graph_extension
+   dev_guide_examples
+   performance_profiling_and_inspection
+   advanced_topics
+   group_dnnl_api.rst
+
+oneAPI Deep Neural Network Library (oneDNN) is an open-source cross-platform performance library of basic building blocks for deep learning applications. The library is optimized for Intel Architecture Processors, Intel Processor Graphics and Xe Architecture graphics. Support for other architectures such as Arm* 64-bit Architecture (AArch64) and OpenPOWER* Power ISA (PPC64) is experimental.
+
+oneDNN is intended for deep learning applications and framework developers interested in improving application performance. Deep learning practitioners should use one of the applications enabled with oneDNN.
+
+.. rubric:: Reference and Index:
+
+:ref:`genindex`

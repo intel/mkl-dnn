@@ -1,0 +1,914 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>enum dnnl::graph::op::kind &#8212; oneDNN v3.1.1 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/doxyrest-pygments.css?v=ff3f4257" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=58713ad1"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script src="_static/target-highlight.js?v=df7d332b"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'enum_dnnl_graph_op_kind';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Partition" href="group_dnnl_graph_api_partition.html" />
+    <link rel="prev" title="enum dnnl::graph::op::attr" href="enum_dnnl_graph_op_attr.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">oneDNN v3.1.1 documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="build_and_link.html">Building and Linking</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build.html">Build from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build_options.html">Build Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_link.html">Linking to the Library</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_getting_started_cpp.html">Getting started</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_memory_format_propagation_cpp.html">Memory Format Propagation</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_inference_and_training_aspects.html">Inference and Training Aspects</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference.html">Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference_int8.html">Int8 Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_training_bf16.html">Bfloat16 Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_attributes.html">Primitive Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_fpmath_mode.html">Primitive Attributes: floating-point math mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_quantization.html">Primitive Attributes: Quantization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_post_ops.html">Primitive Attributes: Post-ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_scratchpad.html">Primitive Attributes: Scratchpad</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_data_types.html">Data Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cross_engine_reorder_cpp.html">Reorder between CPU and GPU engines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_c_and_cpp_apis.html">API</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="interop_with_dpcpp_and_opencl.html">Interoperability with DPC++ and OpenCL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_opencl_interoperability.html">OpenCL Interoperability</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_dpcpp_interoperability.html">DPC++ Interoperability</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="supported_primitives.html">Supported Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_convolution.html">Convolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inner_product.html">Inner Product</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_matmul.html">Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_rnn.html">RNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_batch_normalization.html">Batch Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_binary.html">Binary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_concat.html">Concat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_eltwise.html">Eltwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_layer_normalization.html">Layer Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_lrn.html">Local Response Normalization (LRN)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_pooling.html">Pooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_prelu.html">PReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_resampling.html">Resampling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_shuffle.html">Shuffle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_softmax.html">Softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sum.html">Sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reorder.html">Reorder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reduction.html">Reduction</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="graph_extension.html">Graph Extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_low_precision.html">Low Precision</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_supported_operations.html">Supported Operations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_abs.html">Abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_absbackward.html">AbsBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_add.html">Add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpool.html">AvgPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpoolbackward.html">AvgPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormforwardtraining.html">BatchNormForwardTraining</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnorminference.html">BatchNormInference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormtrainingbackward.html">BatchNormTrainingBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasadd.html">BiasAdd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasaddbackward.html">BiasAddBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clamp.html">Clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clampbackward.html">ClampBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_concat.html">Concat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolution.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwarddata.html">ConvolutionBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwardweights.html">ConvolutionBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtranspose.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwarddata.html">ConvTransposeBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwardweights.html">ConvTransposeBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dequantize.html">Dequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_divide.html">Divide</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicdequantize.html">DynamicDequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicquantize.html">DynamicQuantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elu.html">Elu</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elubackward.html">EluBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_end.html">End</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_exp.html">Exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelu.html">GELU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelubackward.html">GELUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoid.html">HardSigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoidbackward.html">HardSigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswish.html">HardSwish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswishbackward.html">HardSwishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolate.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolatebackward.html">InterpolateBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernorm.html">LayerNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernormbackward.html">LayerNormBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_leakyrelu.html">LeakyReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_log.html">Log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmax.html">LogSoftmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmaxbackward.html">LogSoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_matmul.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maximum.html">Maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpool.html">MaxPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpoolbackward.html">MaxPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_minimum.html">Minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mish.html">Mish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mishbackward.html">MishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_multiply.html">Multiply</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelu.html">PReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelubackward.html">PReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_quantize.html">Quantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reciprocal.html">Reciprocal</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel1.html">ReduceL1</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel2.html">ReduceL2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemax.html">ReduceMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemean.html">ReduceMean</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemin.html">ReduceMin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reduceprod.html">ReduceProd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducesum.html">ReduceSum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relu.html">ReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relubackward.html">ReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reorder.html">Reorder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_round.html">Round</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoid.html">Sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoidbackward.html">SigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmax.html">Softmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmaxbackward.html">SoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplus.html">SoftPlus</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplusbackward.html">SoftPlusBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrt.html">Sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrtbackward.html">SqrtBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_square.html">Square</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_squareddifference.html">SquaredDifference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_staticreshape.html">StaticReshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_statictranspose.html">StaticTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_subtract.html">Subtract</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanh.html">Tanh</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanhbackward.html">TanhBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_typecast.html">TypeCast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_wildcard.html">Wildcard</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_fusion_patterns.html">Supported Fusion Patterns</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_dump.html">Graph Dump</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_examples.html">Examples</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="performance_profiling_and_inspection.html">Performance Profiling and Inspection</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose.html">Verbose Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_performance_settings.html">Configuring oneDNN for Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_benchdnn.html">Benchmarking Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_profilers.html">Profiling oneDNN Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inspecting_jit.html">Inspecting JIT Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_performance_profiling_cpp.html">Performance Profiling Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html">CPU Dispatcher Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_isa_hints.html">CPU ISA Hints</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="advanced_topics.html">Advanced Topics</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_transition_to_dnnl.html">Transitioning from Intel MKL-DNN to oneDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_understanding_memory_formats.html">Understanding Memory Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_int8_computations.html">Nuances of int8 Computations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_primitive_cache.html">Primitive Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_persistent_cache.html">Persistent Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_threadpool.html">Using oneDNN with Threadpool-Based Threading</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_experimental.html">Experimental features</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="group_dnnl_api.html">oneDNN API</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitives.html">Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_primitives_common.html">Common</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_alg_kind_t.html">enum dnnl_alg_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags_t.html">enum dnnl_normalization_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_primitive_kind_t.html">enum dnnl_primitive_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind_t.html">enum dnnl_prop_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query_t.html">enum dnnl_query_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags.html">enum dnnl::normalization_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query.html">enum dnnl::query</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_exec_arg_t.html">struct dnnl_exec_arg_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive.html">struct dnnl_primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc.html">struct dnnl_primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive-2.html">struct dnnl::primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc-2.html">struct dnnl::primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc_base.html">struct dnnl::primitive_desc_base</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_attributes.html">Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_algorithm.html">enum dnnl::algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode_t.html">enum dnnl_scratchpad_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind.html">enum dnnl::prop_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode.html">enum dnnl::scratchpad_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops.html">struct dnnl_post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr.html">struct dnnl_primitive_attr</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops-2.html">struct dnnl::post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr-2.html">struct dnnl::primitive_attr</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reorder.html">Reorder</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reorder.html">struct dnnl::reorder</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_concat.html">Concat</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_concat.html">struct dnnl::concat</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sum.html">Sum</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_sum.html">struct dnnl::sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_binary.html">Binary</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_binary.html">struct dnnl::binary</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_convolution.html">Convolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_data.html">struct dnnl::convolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_weights.html">struct dnnl::convolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_forward.html">struct dnnl::convolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_deconvolution.html">Deconvolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_data.html">struct dnnl::deconvolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_weights.html">struct dnnl::deconvolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_forward.html">struct dnnl::deconvolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_shuffle.html">Shuffle</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_backward.html">struct dnnl::shuffle_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_forward.html">struct dnnl::shuffle_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_eltwise.html">Eltwise</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_backward.html">struct dnnl::eltwise_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_forward.html">struct dnnl::eltwise_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_softmax.html">Softmax</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_backward.html">struct dnnl::softmax_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_forward.html">struct dnnl::softmax_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_pooling.html">Pooling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_backward.html">struct dnnl::pooling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_forward.html">struct dnnl::pooling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_prelu.html">PReLU</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_backward.html">struct dnnl::prelu_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_forward.html">struct dnnl::prelu_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_lrn.html">LRN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_backward.html">struct dnnl::lrn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_forward.html">struct dnnl::lrn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_batch_normalization.html">Batch Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_backward.html">struct dnnl::batch_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_forward.html">struct dnnl::batch_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_layer_normalization.html">Layer Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_backward.html">struct dnnl::layer_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_forward.html">struct dnnl::layer_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_inner_product.html">Inner Product</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_data.html">struct dnnl::inner_product_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_weights.html">struct dnnl::inner_product_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_forward.html">struct dnnl::inner_product_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_rnn.html">RNN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction_t.html">enum dnnl_rnn_direction_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags_t.html">enum dnnl_rnn_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction.html">enum dnnl::rnn_direction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags.html">enum dnnl::rnn_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_backward.html">struct dnnl::augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_forward.html">struct dnnl::augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_backward.html">struct dnnl::gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_forward.html">struct dnnl::gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_backward.html">struct dnnl::lbr_augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_forward.html">struct dnnl::lbr_augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_backward.html">struct dnnl::lbr_gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_forward.html">struct dnnl::lbr_gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_backward.html">struct dnnl::lstm_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_forward.html">struct dnnl::lstm_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_rnn_primitive_desc_base.html">struct dnnl::rnn_primitive_desc_base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_backward.html">struct dnnl::vanilla_rnn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_forward.html">struct dnnl::vanilla_rnn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_matmul.html">Matrix Multiplication</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_matmul.html">struct dnnl::matmul</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_resampling.html">Resampling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_backward.html">struct dnnl::resampling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_forward.html">struct dnnl::resampling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reduction.html">Reduction</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reduction.html">struct dnnl::reduction</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_memory.html">Memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_format_kind_t.html">enum dnnl_format_kind_t</a></li>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_format_tag_t.html">enum dnnl_format_tag_t</a></li>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_sparse_encoding_t.html">enum dnnl_sparse_encoding_t</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="struct_dnnl_memory.html">struct dnnl_memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="struct_dnnl_memory_desc.html">struct dnnl_memory_desc</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="struct_dnnl_memory-2.html">struct dnnl::memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_memory_data_type.html">enum dnnl::memory::data_type</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_memory_format_kind.html">enum dnnl::memory::format_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_memory_format_tag.html">enum dnnl::memory::format_tag</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_memory_sparse_encoding.html">enum dnnl::memory::sparse_encoding</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory_desc-2.html">struct dnnl::memory::desc</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitive_cache.html">Primitive Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_blas.html">BLAS functions</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_common.html">Common API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_engine_kind_t.html">enum dnnl_engine_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine.html">struct dnnl_engine</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine-2.html">struct dnnl::engine</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_stream.html">Stream</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_stream_flags_t.html">enum dnnl_stream_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream.html">struct dnnl_stream</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream-2.html">struct dnnl::stream</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_fpmath_mode.html">Floating-point Math Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode_t.html">enum dnnl_fpmath_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode.html">enum dnnl::fpmath_mode</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_service.html">Service</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa.html">enum dnnl::cpu_isa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html">enum dnnl::cpu_isa_hints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html">enum dnnl_cpu_isa_hints_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_t.html">enum dnnl_cpu_isa_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status.html">enum dnnl::status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_version_t.html">struct dnnl_version_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_utils.html">Utilities</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status_t.html">enum dnnl_status_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_error.html">struct dnnl::error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle.html">template struct dnnl::handle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle_traits.html">template struct dnnl::handle_traits</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_data_types.html">Data types</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_data_type_t.html">enum dnnl_data_type_t</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 current active has-children"><a class="reference internal" href="group_dnnl_graph_api.html">Graph API</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_allocator.html">Allocator</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_allocator.html">class dnnl::graph::allocator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_logical_tensor.html">Logical Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_layout_type_t.html">enum dnnl_graph_layout_type_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_tensor_property_t.html">enum dnnl_graph_tensor_property_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_logical_tensor_t.html">struct dnnl_graph_logical_tensor_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_logical_tensor.html">class dnnl::graph::logical_tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_tensor.html">Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_tensor.html">class dnnl::graph::tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 current active has-children"><a class="reference internal" href="group_dnnl_graph_api_op.html">Op</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_attr_t.html">enum dnnl_graph_op_attr_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_kind_t.html">enum dnnl_graph_op_kind_t</a></li>
+<li class="toctree-l4 current active"><a class="reference internal" href="class_dnnl_graph_op.html">class dnnl::graph::op</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_partition.html">Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_partition_policy_t.html">enum dnnl_graph_partition_policy_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_partition.html">class dnnl::graph::partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition.html">Compiled Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_inplace_pair_t.html">struct dnnl_graph_inplace_pair_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_compiled_partition.html">class dnnl::graph::compiled_partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_graph.html">Graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_graph.html">class dnnl::graph::graph</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition_cache.html">Compiled Partition Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_constant_tensor_cache.html">Constant Tensor Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_sycl_interop.html">SYCL interoperability API</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl.html">namespace dnnl</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_graph.html">namespace dnnl::graph</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ocl_interop.html">OpenCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_ocl_interop.html">namespace dnnl::ocl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ocl_interop_memory_kind_t.html">enum dnnl_ocl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sycl_interop.html">SYCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_sycl_interop.html">namespace dnnl::sycl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sycl_interop_memory_kind_t.html">enum dnnl_sycl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_threadpool_interop.html">Threadpool interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_threadpool_interop.html">namespace dnnl::threadpool_interop</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_oneapi.html">namespace oneapi</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/enum_dnnl_graph_op_kind.rst" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.rst</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>enum dnnl::graph::op::kind</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="enum-dnnl-graph-op-kind">
+<span id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568c"></span><span id="index-0"></span><h1>enum dnnl::graph::op::kind<a class="headerlink" href="#enum-dnnl-graph-op-kind" title="Link to this heading">#</a></h1>
+<p>Kinds of operations.</p>
+<pre class="highlight doxyrest-overview-code-block literal-block"><span></span><span class="cp">#include</span> <span class="cpf">&lt;dnnl_graph.hpp&gt;</span>
+
+<span class="k">enum</span> <span class="n">kind</span>
+<span class="p">{</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca1e34af023adeb7d5f484f8eb4b9826b6"><span></span><span class="n">Abs</span></span><span></span>                          <span class="o">=</span> <span class="n">dnnl_graph_op_abs</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca669e7d6b1ac0e5f3d94230004e27c2d9"><span></span><span class="n">AbsBackward</span></span><span></span>                  <span class="o">=</span> <span class="n">dnnl_graph_op_abs_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caec211f7c20af43e742bf2570c3cb84f9"><span></span><span class="n">Add</span></span><span></span>                          <span class="o">=</span> <span class="n">dnnl_graph_op_add</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca42c43b58c74c88c7ba8e108ce5a0a01a"><span></span><span class="n">AvgPool</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_avg_pool</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caf21729fddf530a10fdb701ad5e5e9d91"><span></span><span class="n">AvgPoolBackward</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_avg_pool_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cade3b4309a065139b7fd0f0514255bbf5"><span></span><span class="n">BatchNormForwardTraining</span></span><span></span>     <span class="o">=</span> <span class="n">dnnl_graph_op_batch_norm_forward_training</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cabe929ebf54f954ad577d5255ee3447b0"><span></span><span class="n">BatchNormInference</span></span><span></span>           <span class="o">=</span> <span class="n">dnnl_graph_op_batch_norm_inference</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca40da751e84bfce763d13da53d4cfec5b"><span></span><span class="n">BatchNormTrainingBackward</span></span><span></span>    <span class="o">=</span> <span class="n">dnnl_graph_op_batch_norm_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caffc00d5d35e0e00ff76996c5af883d95"><span></span><span class="n">BiasAdd</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_bias_add</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cabe475e9b2909f0106dca1a49ca39fde0"><span></span><span class="n">BiasAddBackward</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_bias_add_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca08825280e3f8137556325061ba67ff8c"><span></span><span class="n">Clamp</span></span><span></span>                        <span class="o">=</span> <span class="n">dnnl_graph_op_clamp</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca61c8476e649d3353608f09fc14170e81"><span></span><span class="n">ClampBackward</span></span><span></span>                <span class="o">=</span> <span class="n">dnnl_graph_op_clamp_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cae20f0f2826a6549809f050b86274567f"><span></span><span class="n">Concat</span></span><span></span>                       <span class="o">=</span> <span class="n">dnnl_graph_op_concat</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cafa0f0ae43fdca46d1d68255409ec0b89"><span></span><span class="n">Convolution</span></span><span></span>                  <span class="o">=</span> <span class="n">dnnl_graph_op_convolution</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca024d27be8d959484b864f0ab51635190"><span></span><span class="n">ConvolutionBackwardData</span></span><span></span>      <span class="o">=</span> <span class="n">dnnl_graph_op_convolution_backward_data</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cafab42ac7c003ae0e458559672ba075c8"><span></span><span class="n">ConvolutionBackwardWeights</span></span><span></span>   <span class="o">=</span> <span class="n">dnnl_graph_op_convolution_backward_weights</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca670f69d7d69132701f3bb0fa5a2e7eec"><span></span><span class="n">ConvTranspose</span></span><span></span>                <span class="o">=</span> <span class="n">dnnl_graph_op_conv_transpose</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca356b19e0abce668e7db6850696e0c943"><span></span><span class="n">ConvTransposeBackwardData</span></span><span></span>    <span class="o">=</span> <span class="n">dnnl_graph_op_conv_transpose_backward_data</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca3ce57d17c3931f3292a4b18f697c4fb2"><span></span><span class="n">ConvTransposeBackwardWeights</span></span><span></span> <span class="o">=</span> <span class="n">dnnl_graph_op_conv_transpose_backward_weights</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca9bc35e069257a508e14ed82965a8661d"><span></span><span class="n">Dequantize</span></span><span></span>                   <span class="o">=</span> <span class="n">dnnl_graph_op_dequantize</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca0b914e196182d02615487e9793ecff3d"><span></span><span class="n">Divide</span></span><span></span>                       <span class="o">=</span> <span class="n">dnnl_graph_op_divide</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cae5ed480a52d5ec18bec4a7daf69ab5ca"><span></span><span class="n">DynamicDequantize</span></span><span></span>            <span class="o">=</span> <span class="n">dnnl_graph_op_dynamic_dequantize</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca8178f2b749b7ef30f1e67f17ee62fd67"><span></span><span class="n">DynamicQuantize</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_dynamic_quantize</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caed67cf7d54c570e4c4891800f085f41d"><span></span><span class="n">Elu</span></span><span></span>                          <span class="o">=</span> <span class="n">dnnl_graph_op_elu</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca63aa332f0d9a640d7e8d66b6c4bf2b08"><span></span><span class="n">EluBackward</span></span><span></span>                  <span class="o">=</span> <span class="n">dnnl_graph_op_elu_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca87557f11575c0ad78e4e28abedc13b6e"><span></span><span class="n">End</span></span><span></span>                          <span class="o">=</span> <span class="n">dnnl_graph_op_end</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cacad39a154bffb61175f674d6eefaf6d0"><span></span><span class="n">Exp</span></span><span></span>                          <span class="o">=</span> <span class="n">dnnl_graph_op_exp</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca6c83d4d579e33c2e1b09f2e9825fcbc6"><span></span><span class="n">GELU</span></span><span></span>                         <span class="o">=</span> <span class="n">dnnl_graph_op_gelu</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caa24ae8d62d39dadcc3f6a815b21a9321"><span></span><span class="n">GELUBackward</span></span><span></span>                 <span class="o">=</span> <span class="n">dnnl_graph_op_gelu_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca97097feff8bd1c5d47291569316d4339"><span></span><span class="n">HardSigmoid</span></span><span></span>                  <span class="o">=</span> <span class="n">dnnl_graph_op_hard_sigmoid</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca2f0513bf2be05a6ecae301a0d9d8295c"><span></span><span class="n">HardSigmoidBackward</span></span><span></span>          <span class="o">=</span> <span class="n">dnnl_graph_op_hard_sigmoid_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca0877e5b3fbe9d7569df6399609ed0186"><span></span><span class="n">HardSwish</span></span><span></span>                    <span class="o">=</span> <span class="n">dnnl_graph_op_hard_swish</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caa47d20311af12259fe7c31b0175aaadf"><span></span><span class="n">HardSwishBackward</span></span><span></span>            <span class="o">=</span> <span class="n">dnnl_graph_op_hard_swish_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cad53238014015da17926bca398282211f"><span></span><span class="n">Interpolate</span></span><span></span>                  <span class="o">=</span> <span class="n">dnnl_graph_op_interpolate</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cad8e1c1bdb9ab4a14f08a9efde1bd68be"><span></span><span class="n">InterpolateBackward</span></span><span></span>          <span class="o">=</span> <span class="n">dnnl_graph_op_interpolate_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cac363ac7ca063bb8a75fb8a11883bcb2c"><span></span><span class="n">LayerNorm</span></span><span></span>                    <span class="o">=</span> <span class="n">dnnl_graph_op_layer_norm</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca1270acc90c83da820e612aad1ed70d57"><span></span><span class="n">LayerNormBackward</span></span><span></span>            <span class="o">=</span> <span class="n">dnnl_graph_op_layer_norm_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cabb7ba525e0c40179fab22b4f7021e1f8"><span></span><span class="n">LeakyReLU</span></span><span></span>                    <span class="o">=</span> <span class="n">dnnl_graph_op_leaky_relu</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cace0be71e33226e4c1db2bcea5959f16b"><span></span><span class="n">Log</span></span><span></span>                          <span class="o">=</span> <span class="n">dnnl_graph_op_log</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cac21dbda57d88c21ec9857f5d1522c488"><span></span><span class="n">LogSoftmax</span></span><span></span>                   <span class="o">=</span> <span class="n">dnnl_graph_op_log_softmax</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca5a84eca175aa10749ea6f271ff003051"><span></span><span class="n">LogSoftmaxBackward</span></span><span></span>           <span class="o">=</span> <span class="n">dnnl_graph_op_log_softmax_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca5debeabaece967a6732b4182ba0269ae"><span></span><span class="n">MatMul</span></span><span></span>                       <span class="o">=</span> <span class="n">dnnl_graph_op_matmul</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca8321e79c278ec510f63675c040594892"><span></span><span class="n">Maximum</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_maximum</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca5c3dda2f5672002a992bf6ca7301dceb"><span></span><span class="n">MaxPool</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_max_pool</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cac9a94ef1134b1823141d4e10775b8895"><span></span><span class="n">MaxPoolBackward</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_max_pool_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caa1d0ec6d56f8833a078b5a7ac4caf2d4"><span></span><span class="n">Minimum</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_minimum</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caeb72370b2ec1d826723f8aa9d818261c"><span></span><span class="n">Mish</span></span><span></span>                         <span class="o">=</span> <span class="n">dnnl_graph_op_mish</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca0c99478efe1f7f5d0f0ceeec045599f6"><span></span><span class="n">MishBackward</span></span><span></span>                 <span class="o">=</span> <span class="n">dnnl_graph_op_mish_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cae257376d913f3b53cbb4a9b19d770648"><span></span><span class="n">Multiply</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_multiply</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca474e0c94ac3a455d2b98a72feba8fba4"><span></span><span class="n">PReLU</span></span><span></span>                        <span class="o">=</span> <span class="n">dnnl_graph_op_prelu</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cabcf5fc5e8677093764c3c66344a8fde1"><span></span><span class="n">PReLUBackward</span></span><span></span>                <span class="o">=</span> <span class="n">dnnl_graph_op_prelu_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caca39930e22f40d10155a57dba32240bb"><span></span><span class="n">Quantize</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_quantize</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca217a1d605e6707538902ff7a0368e90e"><span></span><span class="n">Reciprocal</span></span><span></span>                   <span class="o">=</span> <span class="n">dnnl_graph_op_reciprocal</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cad9f3424fab477afb77458fd87086e1ff"><span></span><span class="n">ReduceL1</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_l1</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca507bf5cd29a034c8e82157dc3b2cc38a"><span></span><span class="n">ReduceL2</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_l2</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca2f4f9fb3a3e5a318cf6125b3fe8ddfdd"><span></span><span class="n">ReduceMax</span></span><span></span>                    <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_max</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca37d94f45ecc4c2e1cde5522b0cbe7206"><span></span><span class="n">ReduceMean</span></span><span></span>                   <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_mean</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca03caa9192d391006927f9de0dded537e"><span></span><span class="n">ReduceMin</span></span><span></span>                    <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_min</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca917a7552d46508d5ddbf327a3bc33cd5"><span></span><span class="n">ReduceProd</span></span><span></span>                   <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_prod</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca5e47e6e2afb2e1368df09735cc13205a"><span></span><span class="n">ReduceSum</span></span><span></span>                    <span class="o">=</span> <span class="n">dnnl_graph_op_reduce_sum</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cadd10d919fa85cf27fc78c0e06fe0b378"><span></span><span class="n">ReLU</span></span><span></span>                         <span class="o">=</span> <span class="n">dnnl_graph_op_relu</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cab1af02514fdcb59d7a36089967706eda"><span></span><span class="n">ReLUBackward</span></span><span></span>                 <span class="o">=</span> <span class="n">dnnl_graph_op_relu_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca332c80b1838dc515f5031e09da3b7f3f"><span></span><span class="n">Reorder</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_reorder</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cab7f41fc1412ad2ee75e9b2635d3b9d5c"><span></span><span class="n">Round</span></span><span></span>                        <span class="o">=</span> <span class="n">dnnl_graph_op_round</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca21eebb164e4b8b9bcf64fdb4d8d5dff4"><span></span><span class="n">Sigmoid</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_sigmoid</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca0f0448710ed382375b32fa44a09c13ad"><span></span><span class="n">SigmoidBackward</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_sigmoid_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca9accec944de94c5de06927ebb662bc74"><span></span><span class="n">SoftMax</span></span><span></span>                      <span class="o">=</span> <span class="n">dnnl_graph_op_softmax</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca27017e617886475c0a8afb6fe87b57a7"><span></span><span class="n">SoftMaxBackward</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_softmax_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca28be2ec1c34271f6b669a690b603047e"><span></span><span class="n">SoftPlus</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_softplus</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca1edcd24ba2ad5b4f920f2bee864a3545"><span></span><span class="n">SoftPlusBackward</span></span><span></span>             <span class="o">=</span> <span class="n">dnnl_graph_op_softplus_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caae77f3ad25595e35b327334d89410054"><span></span><span class="n">Sqrt</span></span><span></span>                         <span class="o">=</span> <span class="n">dnnl_graph_op_sqrt</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cab48abec186eac227b41595c120bbbb6b"><span></span><span class="n">SqrtBackward</span></span><span></span>                 <span class="o">=</span> <span class="n">dnnl_graph_op_sqrt_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caceb46ca115d05c51aa5a16a8867c3304"><span></span><span class="n">Square</span></span><span></span>                       <span class="o">=</span> <span class="n">dnnl_graph_op_square</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568caad29ae855c59cd79aecc6f0e5e49f237"><span></span><span class="n">SquaredDifference</span></span><span></span>            <span class="o">=</span> <span class="n">dnnl_graph_op_squared_difference</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cac49367a982e1c363f214cca3205ad197"><span></span><span class="n">StaticReshape</span></span><span></span>                <span class="o">=</span> <span class="n">dnnl_graph_op_static_reshape</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca257e611507c69aac9b9ed9498d64e223"><span></span><span class="n">StaticTranspose</span></span><span></span>              <span class="o">=</span> <span class="n">dnnl_graph_op_static_transpose</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca1d9baf077ee87921f57a8fe42d510b65"><span></span><span class="n">Subtract</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_subtract</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cacc132a41cab5676334f353a22a0aa5c5"><span></span><span class="n">Tanh</span></span><span></span>                         <span class="o">=</span> <span class="n">dnnl_graph_op_tanh</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca053d15d40ee6f59e14c099b75f58aace"><span></span><span class="n">TanhBackward</span></span><span></span>                 <span class="o">=</span> <span class="n">dnnl_graph_op_tanh_backward</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cab22a33d3b2e6fae95268c208cca57e2a"><span></span><span class="n">TypeCast</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_type_cast</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568cac4a0dbaac3bd0f3bf581ad822f5fb4b4"><span></span><span class="n">Wildcard</span></span><span></span>                     <span class="o">=</span> <span class="n">dnnl_graph_op_wildcard</span><span class="p">,</span>
+    <span class="doxyrest-code-target target" id="doxid-classdnnl-1-1graph-1-1op-1ad54d9bef2fbf3c2a5f4190fa2497568ca0dba9d29480f864da919cf40b3a9aae3"><span></span><span class="n">LastSymbol</span></span><span></span>                   <span class="o">=</span> <span class="n">dnnl_graph_op_last_symbol</span><span class="p">,</span>
+<span class="p">};</span></pre>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="enum_dnnl_graph_op_attr.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">enum dnnl::graph::op::attr</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="group_dnnl_graph_api_partition.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Partition</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2016-2022 Intel Corporation.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

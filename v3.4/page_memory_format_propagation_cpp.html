@@ -1,0 +1,1073 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Memory Format Propagation &#8212; oneDNN v3.4.4 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/doxyrest-pygments.css?v=ff3f4257" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=d8bc54a5"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script src="_static/target-highlight.js?v=df7d332b"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'page_memory_format_propagation_cpp';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Inference and Training Aspects" href="dev_guide_inference_and_training_aspects.html" />
+    <link rel="prev" title="Getting started" href="page_getting_started_cpp.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">oneDNN v3.4.4 documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="build_and_link.html">Building and Linking</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build.html">Build from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build_options.html">Build Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_link.html">Linking to the Library</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="programming_model.html">Programming Model</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_getting_started_cpp.html">Getting started</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Memory Format Propagation</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_inference_and_training_aspects.html">Inference and Training Aspects</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference.html">Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference_int8.html">Int8 Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_training_bf16.html">Bfloat16 Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_attributes.html">Primitive Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_fpmath_mode.html">Primitive Attributes: floating-point math mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_accumulation_mode.html">Primitive Attributes: accumulation mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_deterministic.html">Primitive Attributes: deterministic</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_quantization.html">Primitive Attributes: Quantization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_post_ops.html">Primitive Attributes: Post-ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_scratchpad.html">Primitive Attributes: Scratchpad</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_data_types.html">Data Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cross_engine_reorder_cpp.html">Reorder between CPU and GPU engines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_c_and_cpp_apis.html">API</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="interop_with_dpcpp_and_opencl.html">Interoperability with DPC++ and OpenCL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_opencl_interoperability.html">OpenCL Interoperability</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_dpcpp_interoperability.html">DPC++ Interoperability</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="supported_primitives.html">Supported Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_convolution.html">Convolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inner_product.html">Inner Product</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_matmul.html">Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_rnn.html">RNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_batch_normalization.html">Batch Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_binary.html">Binary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_concat.html">Concat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_eltwise.html">Eltwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_group_normalization.html">Group Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_layer_normalization.html">Layer Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_lrn.html">Local Response Normalization (LRN)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_pooling.html">Pooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_prelu.html">PReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_resampling.html">Resampling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_shuffle.html">Shuffle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_softmax.html">Softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sum.html">Sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reorder.html">Reorder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reduction.html">Reduction</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="graph_extension.html">Graph Extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_low_precision.html">Low Precision</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_supported_operations.html">Supported Operations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_abs.html">Abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_absbackward.html">AbsBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_add.html">Add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpool.html">AvgPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpoolbackward.html">AvgPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormforwardtraining.html">BatchNormForwardTraining</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnorminference.html">BatchNormInference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormtrainingbackward.html">BatchNormTrainingBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasadd.html">BiasAdd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasaddbackward.html">BiasAddBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clamp.html">Clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clampbackward.html">ClampBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_concat.html">Concat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolution.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwarddata.html">ConvolutionBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwardweights.html">ConvolutionBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtranspose.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwarddata.html">ConvTransposeBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwardweights.html">ConvTransposeBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dequantize.html">Dequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_divide.html">Divide</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicdequantize.html">DynamicDequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicquantize.html">DynamicQuantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elu.html">Elu</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elubackward.html">EluBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_end.html">End</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_exp.html">Exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelu.html">GELU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelubackward.html">GELUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoid.html">HardSigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoidbackward.html">HardSigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswish.html">HardSwish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswishbackward.html">HardSwishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolate.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolatebackward.html">InterpolateBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernorm.html">LayerNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernormbackward.html">LayerNormBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_leakyrelu.html">LeakyReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_log.html">Log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmax.html">LogSoftmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmaxbackward.html">LogSoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_matmul.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maximum.html">Maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpool.html">MaxPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpoolbackward.html">MaxPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_minimum.html">Minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mish.html">Mish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mishbackward.html">MishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_multiply.html">Multiply</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_pow.html">Pow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelu.html">PReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelubackward.html">PReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_quantize.html">Quantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reciprocal.html">Reciprocal</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel1.html">ReduceL1</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel2.html">ReduceL2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemax.html">ReduceMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemean.html">ReduceMean</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemin.html">ReduceMin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reduceprod.html">ReduceProd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducesum.html">ReduceSum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relu.html">ReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relubackward.html">ReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reorder.html">Reorder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_round.html">Round</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_select.html">Select</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoid.html">Sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoidbackward.html">SigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmax.html">SoftMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmaxbackward.html">SoftMaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplus.html">SoftPlus</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplusbackward.html">SoftPlusBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrt.html">Sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrtbackward.html">SqrtBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_square.html">Square</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_squareddifference.html">SquaredDifference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_staticreshape.html">StaticReshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_statictranspose.html">StaticTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_subtract.html">Subtract</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanh.html">Tanh</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanhbackward.html">TanhBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_typecast.html">TypeCast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_wildcard.html">Wildcard</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_fusion_patterns.html">Supported Fusion Patterns</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_dump.html">Graph Dump</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_constant_tensor_cache.html">Constant Tensor Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_compiler.html">Graph Compiler</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_examples.html">Examples</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="performance_profiling_and_inspection.html">Performance Profiling and Inspection</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose.html">Verbose Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_performance_settings.html">Configuring oneDNN for Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_benchdnn.html">Benchmarking Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_profilers.html">Profiling oneDNN Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inspecting_jit.html">Inspecting JIT Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_performance_profiling_cpp.html">Performance Profiling Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html">CPU Dispatcher Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_isa_hints.html">CPU ISA Hints</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="advanced_topics.html">Advanced Topics</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_transition_to_dnnl.html">Transitioning from Intel MKL-DNN to oneDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_understanding_memory_formats.html">Understanding Memory Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_int8_computations.html">Nuances of int8 Computations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_primitive_cache.html">Primitive Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_persistent_cache.html">Persistent Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_threadpool.html">Using oneDNN with Threadpool-Based Threading</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_experimental.html">Experimental features</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="group_dnnl_api.html">oneDNN API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitives.html">Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_primitives_common.html">Common</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_alg_kind_t.html">enum dnnl_alg_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags_t.html">enum dnnl_normalization_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_primitive_kind_t.html">enum dnnl_primitive_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind_t.html">enum dnnl_prop_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query_t.html">enum dnnl_query_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags.html">enum dnnl::normalization_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query.html">enum dnnl::query</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_exec_arg_t.html">struct dnnl_exec_arg_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive.html">struct dnnl_primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc.html">struct dnnl_primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive-2.html">struct dnnl::primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc-2.html">struct dnnl::primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc_base.html">struct dnnl::primitive_desc_base</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_attributes.html">Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_algorithm.html">enum dnnl::algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode_t.html">enum dnnl_scratchpad_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind.html">enum dnnl::prop_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode.html">enum dnnl::scratchpad_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops.html">struct dnnl_post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr.html">struct dnnl_primitive_attr</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops-2.html">struct dnnl::post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr-2.html">struct dnnl::primitive_attr</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reorder.html">Reorder</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reorder.html">struct dnnl::reorder</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_concat.html">Concat</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_concat.html">struct dnnl::concat</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sum.html">Sum</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_sum.html">struct dnnl::sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_binary.html">Binary</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_binary.html">struct dnnl::binary</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_convolution.html">Convolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_data.html">struct dnnl::convolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_weights.html">struct dnnl::convolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_forward.html">struct dnnl::convolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_deconvolution.html">Deconvolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_data.html">struct dnnl::deconvolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_weights.html">struct dnnl::deconvolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_forward.html">struct dnnl::deconvolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_shuffle.html">Shuffle</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_backward.html">struct dnnl::shuffle_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_forward.html">struct dnnl::shuffle_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_eltwise.html">Eltwise</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_backward.html">struct dnnl::eltwise_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_forward.html">struct dnnl::eltwise_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_softmax.html">Softmax</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_backward.html">struct dnnl::softmax_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_forward.html">struct dnnl::softmax_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_pooling.html">Pooling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_backward.html">struct dnnl::pooling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_forward.html">struct dnnl::pooling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_prelu.html">PReLU</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_backward.html">struct dnnl::prelu_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_forward.html">struct dnnl::prelu_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_lrn.html">LRN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_backward.html">struct dnnl::lrn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_forward.html">struct dnnl::lrn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_batch_normalization.html">Batch Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_backward.html">struct dnnl::batch_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_forward.html">struct dnnl::batch_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_group_normalization.html">Group Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_backward.html">struct dnnl::group_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_forward.html">struct dnnl::group_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_layer_normalization.html">Layer Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_backward.html">struct dnnl::layer_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_forward.html">struct dnnl::layer_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_inner_product.html">Inner Product</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_data.html">struct dnnl::inner_product_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_weights.html">struct dnnl::inner_product_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_forward.html">struct dnnl::inner_product_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_rnn.html">RNN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction_t.html">enum dnnl_rnn_direction_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags_t.html">enum dnnl_rnn_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction.html">enum dnnl::rnn_direction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags.html">enum dnnl::rnn_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_backward.html">struct dnnl::augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_forward.html">struct dnnl::augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_backward.html">struct dnnl::gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_forward.html">struct dnnl::gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_backward.html">struct dnnl::lbr_augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_forward.html">struct dnnl::lbr_augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_backward.html">struct dnnl::lbr_gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_forward.html">struct dnnl::lbr_gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_backward.html">struct dnnl::lstm_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_forward.html">struct dnnl::lstm_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_rnn_primitive_desc_base.html">struct dnnl::rnn_primitive_desc_base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_backward.html">struct dnnl::vanilla_rnn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_forward.html">struct dnnl::vanilla_rnn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_matmul.html">Matrix Multiplication</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_matmul.html">struct dnnl::matmul</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_resampling.html">Resampling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_backward.html">struct dnnl::resampling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_forward.html">struct dnnl::resampling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reduction.html">Reduction</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reduction.html">struct dnnl::reduction</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitive_cache.html">Primitive Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_profiling.html">Profiling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_profiling_data_kind.html">enum dnnl::profiling_data_kind</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_blas.html">BLAS functions</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_common.html">Common API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_engine_kind_t.html">enum dnnl_engine_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine.html">struct dnnl_engine</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine-2.html">struct dnnl::engine</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_stream.html">Stream</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_stream_flags_t.html">enum dnnl_stream_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream.html">struct dnnl_stream</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream-2.html">struct dnnl::stream</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_fpmath_mode.html">Floating-point Math Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode_t.html">enum dnnl_fpmath_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode.html">enum dnnl::fpmath_mode</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_service.html">Service</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa.html">enum dnnl::cpu_isa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html">enum dnnl::cpu_isa_hints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html">enum dnnl_cpu_isa_hints_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_t.html">enum dnnl_cpu_isa_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status.html">enum dnnl::status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_version_t.html">struct dnnl_version_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_utils.html">Utilities</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status_t.html">enum dnnl_status_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_error.html">struct dnnl::error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle.html">template struct dnnl::handle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle_traits.html">template struct dnnl::handle_traits</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_accumulation_mode.html">Accumulation Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode.html">enum dnnl::accumulation_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode_t.html">enum dnnl_accumulation_mode_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_data_types.html">Data types</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_data_type_t.html">enum dnnl_data_type_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_memory.html">Memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_kind_t.html">enum dnnl_format_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_tag_t.html">enum dnnl_format_tag_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_profiling_data_kind_t.html">enum dnnl_profiling_data_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sparse_encoding_t.html">enum dnnl_sparse_encoding_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory.html">struct dnnl_memory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory_desc.html">struct dnnl_memory_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory-2.html">struct dnnl::memory</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_graph_api.html">Graph API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_allocator.html">Allocator</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_allocator.html">class dnnl::graph::allocator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_logical_tensor.html">Logical Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_layout_type_t.html">enum dnnl_graph_layout_type_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_tensor_property_t.html">enum dnnl_graph_tensor_property_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_logical_tensor_t.html">struct dnnl_graph_logical_tensor_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_logical_tensor.html">class dnnl::graph::logical_tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_tensor.html">Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_tensor.html">class dnnl::graph::tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_op.html">Op</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_attr_t.html">enum dnnl_graph_op_attr_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_kind_t.html">enum dnnl_graph_op_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_op.html">class dnnl::graph::op</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_partition.html">Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_partition_policy_t.html">enum dnnl_graph_partition_policy_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_partition.html">class dnnl::graph::partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition.html">Compiled Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_inplace_pair_t.html">struct dnnl_graph_inplace_pair_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_compiled_partition.html">class dnnl::graph::compiled_partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_graph.html">Graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_graph.html">class dnnl::graph::graph</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition_cache.html">Compiled Partition Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_constant_tensor_cache.html">Constant Tensor Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_sycl_interop.html">SYCL interoperability API</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl.html">namespace dnnl</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_graph.html">namespace dnnl::graph</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ocl_interop.html">OpenCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_ocl_interop.html">namespace dnnl::ocl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ocl_interop_memory_kind_t.html">enum dnnl_ocl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sycl_interop.html">SYCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_sycl_interop.html">namespace dnnl::sycl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sycl_interop_memory_kind_t.html">enum dnnl_sycl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_threadpool_interop.html">Threadpool interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_threadpool_interop.html">namespace dnnl::threadpool_interop</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_oneapi.html">namespace oneapi</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/oneapi-src/oneDNN" target="_blank"
+   class="btn btn-sm btn-source-repository-button"
+   title="Source repository"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Memory Format Propagation</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#introduction-to-the-tutorial">Introduction to the tutorial</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#memory-format-propagation-function">memory_format_propagation() function</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#initialization">Initialization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-convolution-and-pooling-primitives">Create convolution and pooling primitives</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-source-and-destination-memory-objects">Create source and destination memory objects</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#determine-if-source-and-destination-need-to-be-reordered">Determine if source and destination need to be reordered</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#allocate-intermediate-buffers-if-necessary">Allocate intermediate buffers if necessary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#perform-reorders-for-source-data-if-necessary">Perform reorders for source data if necessary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-and-execute-convolution-and-pooling-primitives">Create and execute convolution and pooling primitives</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#reorder-destination-data-if-necessary">Reorder destination data if necessary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#results">Results</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="memory-format-propagation">
+<span id="doxid-memory-format-propagation-cpp"></span><span id="index-0"></span><h1>Memory Format Propagation<a class="headerlink" href="#memory-format-propagation" title="Link to this heading">#</a></h1>
+<p>This example demonstrates memory format propagation, which is critical for deep learning applications performance.</p>
+<p>This example demonstrates memory format propagation, which is critical for deep learning applications performance.</p>
+<p>Example code: <a class="reference internal" href="example_memory_format_propagation.cpp.html#doxid-memory-format-propagation-8cpp-example"><span class="std std-ref">memory_format_propagation.cpp</span></a></p>
+<p>Memory format propagation is one of the central notions that needs to be well-understood to use oneDNN correctly.</p>
+<p>Convolution and inner product primitives choose the memory format when you create them with the placeholder memory format <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> for input or output. The memory format chosen is based on different circumstances such as hardware and convolutional parameters. Using the placeholder memory format is the recommended practice for convolutions, since they are the most compute-intensive operations in most topologies where they are present.</p>
+<p>Other primitives, such as Elementwise, LRN, batch normalization and other, on forward propagation should use the same memory format as the preceding layer thus propagating the memory format through multiple oneDNN primitives. This avoids unnecessary reorders which may be expensive and should be avoided unless a compute-intensive primitive requires a different format. For performance reasons, backward computations of such primitives requires consistent memory format with the corresponding forward computations. Hence, when initializing there primitives for backward computations you should use <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> memory format tag as well.</p>
+<p>Below is the short summary when to use and not to use memory format <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> during operation description initialization:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Primitive Kinds</p></th>
+<th class="head"><p>Forward Propagation</p></th>
+<th class="head"><p>Backward Propagation</p></th>
+<th class="head"><p>No Propagation</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Compute intensive: (De-)convolution, Inner product, RNN</p></td>
+<td><p>Use <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a></p></td>
+<td><p>Use <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a></p></td>
+<td><p>N/A</p></td>
+</tr>
+<tr class="row-odd"><td><p>Compute intensive (no propagation): Matrix Multiplication</p></td>
+<td><p>N/A</p></td>
+<td><p>N/A</p></td>
+<td><p>Use <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a></p></td>
+</tr>
+<tr class="row-even"><td><p>Memory-bandwidth limited: Pooling, Layer and Batch Normalization, Local Response Normalization, Elementwise, Shuffle, Softmax</p></td>
+<td><p>Use memory format from preceding layer for inputs, and <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> for outputs</p></td>
+<td><p>Use <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> for gradient tensors, and actual memory formats for data tensors</p></td>
+<td><p>N/A</p></td>
+</tr>
+<tr class="row-odd"><td><p>Memory-bandwidth limited: Reorder, Concat, Sum, Binary</p></td>
+<td><p>N/A</p></td>
+<td><p>N/A</p></td>
+<td><p>Use memory format from preceding layer for inputs, and <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> for outputs</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Additional format synchronization is required between forward and backward computations when running training workloads. This topic is covered in <a class="reference internal" href="dev_guide_inference_and_training_aspects.html#doxid-dev-guide-inference-and-training-aspects-1dev-guide-inference-and-training-aspects-training"><span class="std std-ref">Training-Specific Aspects</span></a>.</p>
+<p>For better understanding of the architecture and design of oneDNN as well as the concepts used in the library, please refer to <a class="reference internal" href="dev_guide_understanding_memory_formats.html#doxid-dev-guide-understanding-memory-formats"><span class="std std-ref">Understanding Memory Formats</span></a>.</p>
+<section id="introduction-to-the-tutorial">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-intro"></span><h2>Introduction to the tutorial<a class="headerlink" href="#introduction-to-the-tutorial" title="Link to this heading">#</a></h2>
+<p>This C++ API example demonstrates how to use optimized memory formats supported by oneDNN:</p>
+<ul class="simple">
+<li><p>How to configure primitives to use optimized memory formats.</p></li>
+<li><p>How to determine whether data needs to be reordered from/to optimized memory formats.</p></li>
+</ul>
+<p>This tutorial assumes that the reader has already reviewed the <a class="reference internal" href="page_getting_started_cpp.html#doxid-getting-started-cpp"><span class="std std-ref">Getting started</span></a> tutorial.</p>
+<p>The example is built around a CNN consisting of a convolution followed by a pooling and consists of the following steps:</p>
+<ol class="arabic simple">
+<li><p>Create a pooling primitive descriptor based on the memory format chosen by the convolution primitive.</p></li>
+<li><p>Create memory descriptors for input and output data in the NCHW memory format.</p></li>
+<li><p>Determine if input and output data needs to be reordered from/to the optimized memory format.</p></li>
+<li><p>Create memory objects; and necessary primitives and execute them.</p></li>
+</ol>
+<p>These steps are implemented in the <a class="reference internal" href="#doxid-memory-format-propagation-cpp-1memory-format-propagation-tutorial"><span class="std std-ref">memory_format_propagation() function</span></a> which in turn is called from <code class="docutils literal notranslate"><span class="pre">main()</span></code> which is also responsible for error handling.</p>
+</section>
+<section id="memory-format-propagation-function">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-tutorial"></span><h2>memory_format_propagation() function<a class="headerlink" href="#memory-format-propagation-function" title="Link to this heading">#</a></h2>
+<section id="initialization">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub1"></span><h3>Initialization<a class="headerlink" href="#initialization" title="Link to this heading">#</a></h3>
+<p>We start by creating an engine and a stream that we will use when creating primitive descriptors and executing primitives.</p>
+<pre class="highlight literal-block"><a class="reference internal" href="enum_dnnl_query.html#doxid-group-dnnl-api-primitives-common-1gga94efdd650364f4d9776cfb9b711cbdc1aad1943a9fd6d3d7ee1e6af41a5b0d3e7"><span class="std std-ref">engine</span></a><span></span> <span class="n">eng</span><span class="p">(</span><span class="n">engine_kind</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+<span class="n">stream</span> <span class="nf">s</span><span class="p">(</span><span class="n">eng</span><span class="p">);</span></pre>
+</section>
+<section id="create-convolution-and-pooling-primitives">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub2"></span><h3>Create convolution and pooling primitives<a class="headerlink" href="#create-convolution-and-pooling-primitives" title="Link to this heading">#</a></h3>
+<p>To specify that a primitive should pick an optimized format for the specified computation parameters, we create memory descriptors with memory format set to <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a>.</p>
+<p>This approach works only for a limited set of primitives: convolutions and inner products. Additionally, <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa100b8cad7cf2a56f6df78f171f97a1ec"><span class="std std-ref">dnnl::memory::format_tag::any</span></a> can be specified for destination memory descriptors which implies that destination will have the same memory format as the source.</p>
+<pre class="highlight literal-block"><span></span><span class="c1">// Tensor and kernel dimensions. We use the same 3x3 kernel with padding=1</span>
+<span class="c1">// for both convolution and pooling primitives, which means that the</span>
+<span class="c1">// activation tensor shapes do not change.</span>
+<span class="k">const</span> <span class="kt">int</span> <span class="n">N</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">H</span> <span class="o">=</span> <span class="mi">14</span><span class="p">,</span> <span class="n">W</span> <span class="o">=</span> <span class="mi">14</span><span class="p">,</span> <span class="n">IC</span> <span class="o">=</span> <span class="mi">128</span><span class="p">,</span> <span class="n">OC</span> <span class="o">=</span> <span class="mi">256</span><span class="p">,</span> <span class="n">KH</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span> <span class="n">KW</span> <span class="o">=</span> <span class="mi">3</span><span class="p">;</span>
+<span class="k">auto</span> <span class="n">conv_src_md</span> <span class="o">=</span> <span class="n">memory</span><span class="o">::</span><span class="n">desc</span><span class="p">({</span><span class="n">N</span><span class="p">,</span> <span class="n">IC</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">W</span><span class="p">},</span> <span class="n">memory</span><span class="o">::</span><span class="n">data_type</span><span class="o">::</span><span class="n">f32</span><span class="p">,</span>
+        <span class="n">memory</span><span class="o">::</span><span class="n">format_tag</span><span class="o">::</span><span class="n">any</span> <span class="c1">// let convolution choose memory format</span>
+<span class="p">);</span>
+<span class="k">auto</span> <span class="n">conv_weights_md</span> <span class="o">=</span> <span class="n">memory</span><span class="o">::</span><span class="n">desc</span><span class="p">(</span>
+        <span class="p">{</span><span class="n">OC</span><span class="p">,</span> <span class="n">IC</span><span class="p">,</span> <span class="n">KH</span><span class="p">,</span> <span class="n">KW</span><span class="p">},</span> <span class="n">memory</span><span class="o">::</span><span class="n">data_type</span><span class="o">::</span><span class="n">f32</span><span class="p">,</span>
+        <span class="n">memory</span><span class="o">::</span><span class="n">format_tag</span><span class="o">::</span><span class="n">any</span> <span class="c1">// let convolution choose memory format</span>
+<span class="p">);</span>
+<span class="k">auto</span> <span class="n">conv_dst_md</span> <span class="o">=</span> <span class="n">memory</span><span class="o">::</span><span class="n">desc</span><span class="p">({</span><span class="n">N</span><span class="p">,</span> <span class="n">OC</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">W</span><span class="p">},</span> <span class="n">memory</span><span class="o">::</span><span class="n">data_type</span><span class="o">::</span><span class="n">f32</span><span class="p">,</span>
+        <span class="n">memory</span><span class="o">::</span><span class="n">format_tag</span><span class="o">::</span><span class="n">any</span> <span class="c1">// let convolution choose memory format</span>
+<span class="p">);</span>
+<span class="k">const</span> <span class="k">auto</span> <span class="o">&amp;</span><span class="n">pool_dst_md</span> <span class="o">=</span> <span class="n">conv_dst_md</span><span class="p">;</span> <span class="c1">// shape does not change</span></pre>
+<p>Next, we pass the memory descriptors to primitive descriptors constructors.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">conv_pd</span> <span class="o">=</span> <span class="n">convolution_forward</span><span class="o">::</span><span class="n">primitive_desc</span><span class="p">(</span>
+        <span class="n">eng</span><span class="p">,</span> <span class="n">prop_kind</span><span class="o">::</span><span class="n">forward_inference</span><span class="p">,</span> <span class="n">algorithm</span><span class="o">::</span><span class="n">convolution_auto</span><span class="p">,</span>
+        <span class="n">conv_src_md</span><span class="p">,</span> <span class="n">conv_weights_md</span><span class="p">,</span>
+        <span class="n">conv_dst_md</span><span class="p">,</span> <span class="c1">// shape information</span>
+        <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">},</span> <span class="c1">// strides</span>
+        <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">},</span> <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">}</span> <span class="c1">// left and right padding</span>
+<span class="p">);</span>
+
+<span class="k">auto</span> <span class="n">pool_pd</span>
+        <span class="o">=</span> <span class="n">pooling_forward</span><span class="o">::</span><span class="n">primitive_desc</span><span class="p">(</span><span class="n">eng</span><span class="p">,</span> <span class="n">prop_kind</span><span class="o">::</span><span class="n">forward_inference</span><span class="p">,</span>
+                <span class="n">algorithm</span><span class="o">::</span><span class="n">pooling_max</span><span class="p">,</span> <span class="n">conv_pd</span><span class="p">.</span><span class="n">dst_desc</span><span class="p">(),</span>
+                <span class="n">pool_dst_md</span><span class="p">,</span> <span class="c1">// shape information</span>
+                <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">},</span> <span class="p">{</span><span class="n">KH</span><span class="p">,</span> <span class="n">KW</span><span class="p">},</span> <span class="c1">// strides and kernel</span>
+                <span class="p">{</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">},</span> <span class="c1">// dilation</span>
+                <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">},</span> <span class="p">{</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">}</span> <span class="c1">// left and right padding</span>
+        <span class="p">);</span></pre>
+</section>
+<section id="create-source-and-destination-memory-objects">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub3"></span><h3>Create source and destination memory objects<a class="headerlink" href="#create-source-and-destination-memory-objects" title="Link to this heading">#</a></h3>
+<p>We assume that the ‘user’ source and destination memory format is NCHW. Since there is no result validation in this tutorial, we do not bother with filling the data with some values and let oneDNN allocate the memory.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">src_mem</span> <span class="o">=</span> <span class="n">memory</span><span class="p">(</span>
+        <span class="p">{{</span><span class="n">N</span><span class="p">,</span> <span class="n">IC</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">W</span><span class="p">},</span> <span class="n">memory</span><span class="o">::</span><span class="n">data_type</span><span class="o">::</span><span class="n">f32</span><span class="p">,</span> <span class="n">memory</span><span class="o">::</span><span class="n">format_tag</span><span class="o">::</span><span class="n">nchw</span><span class="p">},</span>
+        <span class="n">eng</span><span class="p">);</span>
+<span class="k">auto</span> <span class="n">weights_mem</span> <span class="o">=</span> <span class="n">memory</span><span class="p">({{</span><span class="n">OC</span><span class="p">,</span> <span class="n">IC</span><span class="p">,</span> <span class="n">KH</span><span class="p">,</span> <span class="n">KW</span><span class="p">},</span> <span class="n">memory</span><span class="o">::</span><span class="n">data_type</span><span class="o">::</span><span class="n">f32</span><span class="p">,</span>
+                                  <span class="n">memory</span><span class="o">::</span><span class="n">format_tag</span><span class="o">::</span><span class="n">oihw</span><span class="p">},</span>
+        <span class="n">eng</span><span class="p">);</span>
+<span class="k">auto</span> <span class="n">dst_mem</span> <span class="o">=</span> <span class="n">memory</span><span class="p">(</span>
+        <span class="p">{{</span><span class="n">N</span><span class="p">,</span> <span class="n">OC</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">W</span><span class="p">},</span> <span class="n">memory</span><span class="o">::</span><span class="n">data_type</span><span class="o">::</span><span class="n">f32</span><span class="p">,</span> <span class="n">memory</span><span class="o">::</span><span class="n">format_tag</span><span class="o">::</span><span class="n">nchw</span><span class="p">},</span>
+        <span class="n">eng</span><span class="p">);</span></pre>
+</section>
+<section id="determine-if-source-and-destination-need-to-be-reordered">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub4"></span><h3>Determine if source and destination need to be reordered<a class="headerlink" href="#determine-if-source-and-destination-need-to-be-reordered" title="Link to this heading">#</a></h3>
+<p>The idiomatic way to check if a reorder is necessary between the memory format expected a primitive (the convolution in our case) and the available memory format is to compare the corresponding memory descriptors.</p>
+<pre class="highlight literal-block"><span></span><span class="kt">bool</span> <span class="n">need_reorder_src</span> <span class="o">=</span> <span class="n">conv_pd</span><span class="p">.</span><span class="n">src_desc</span><span class="p">()</span> <span class="o">!=</span> <span class="n">src_mem</span><span class="p">.</span><span class="n">get_desc</span><span class="p">();</span></pre>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>It is by design that it is not possible to just compare memory tags. The reason behind this is that a memory format tags only provide a partial description of how data is laid out in memory and do not, for example, describe memory objects obtained via sub-memory constructor.</p>
+</div>
+<p>We repeat the process for the weights and destination memory format descriptors as well.</p>
+<pre class="highlight literal-block"><span></span><span class="kt">bool</span> <span class="n">need_reorder_weights</span>
+        <span class="o">=</span> <span class="n">conv_pd</span><span class="p">.</span><span class="n">weights_desc</span><span class="p">()</span> <span class="o">!=</span> <span class="n">weights_mem</span><span class="p">.</span><span class="n">get_desc</span><span class="p">();</span>
+<span class="kt">bool</span> <span class="n">need_reorder_dst</span> <span class="o">=</span> <span class="n">conv_pd</span><span class="p">.</span><span class="n">dst_desc</span><span class="p">()</span> <span class="o">!=</span> <span class="n">dst_mem</span><span class="p">.</span><span class="n">get_desc</span><span class="p">();</span></pre>
+</section>
+<section id="allocate-intermediate-buffers-if-necessary">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub45"></span><h3>Allocate intermediate buffers if necessary<a class="headerlink" href="#allocate-intermediate-buffers-if-necessary" title="Link to this heading">#</a></h3>
+<p>Based on the flags computed before, we can now decide if we need extra intermediate buffers to hold the source and weights data for the convolution and the output of the pooling.</p>
+<p>Memory objects for the intermediate buffers are created based on the memory descriptors obtained from the primitive descriptors to ensure consistency.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">conv_src_mem</span>
+        <span class="o">=</span> <span class="n">need_reorder_src</span> <span class="o">?</span> <span class="n">memory</span><span class="p">(</span><span class="n">conv_pd</span><span class="p">.</span><span class="n">src_desc</span><span class="p">(),</span> <span class="n">eng</span><span class="p">)</span> <span class="o">:</span> <span class="n">src_mem</span><span class="p">;</span>
+<span class="k">auto</span> <span class="n">conv_weights_mem</span> <span class="o">=</span> <span class="n">need_reorder_weights</span>
+        <span class="o">?</span> <span class="n">memory</span><span class="p">(</span><span class="n">conv_pd</span><span class="p">.</span><span class="n">weights_desc</span><span class="p">(),</span> <span class="n">eng</span><span class="p">)</span>
+        <span class="o">:</span> <span class="n">weights_mem</span><span class="p">;</span>
+<span class="k">auto</span> <span class="n">conv_dst_mem</span> <span class="o">=</span> <span class="n">memory</span><span class="p">(</span><span class="n">conv_pd</span><span class="p">.</span><span class="n">dst_desc</span><span class="p">(),</span> <span class="n">eng</span><span class="p">);</span>
+<span class="k">auto</span> <span class="n">pool_dst_mem</span>
+        <span class="o">=</span> <span class="n">need_reorder_dst</span> <span class="o">?</span> <span class="n">memory</span><span class="p">(</span><span class="n">pool_pd</span><span class="p">.</span><span class="n">dst_desc</span><span class="p">(),</span> <span class="n">eng</span><span class="p">)</span> <span class="o">:</span> <span class="n">dst_mem</span><span class="p">;</span></pre>
+</section>
+<section id="perform-reorders-for-source-data-if-necessary">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub5"></span><h3>Perform reorders for source data if necessary<a class="headerlink" href="#perform-reorders-for-source-data-if-necessary" title="Link to this heading">#</a></h3>
+<p>Now we get to the part where we actually start executing things. We check if reorders are necessary based on the flags computed before and create and execute them immediately.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>We call <a class="reference internal" href="struct_dnnl_stream-2.html#doxid-structdnnl-1-1stream-1a59985fa8746436057cf51a820ef8929c"><span class="std std-ref">dnnl::stream::wait()</span></a> before reorder primitives get out of scope and destroyed to accommodate for potentially asynchronous execution.</p>
+</div>
+<pre class="highlight literal-block"><span></span><span class="k">if</span> <span class="p">(</span><span class="n">need_reorder_src</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">auto</span> <span class="n">reorder_src</span> <span class="o">=</span> <span class="n">reorder</span><span class="p">(</span><span class="n">src_mem</span><span class="p">,</span> <span class="n">conv_src_mem</span><span class="p">);</span>
+    <span class="n">reorder_src</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="n">s</span><span class="p">,</span> <span class="p">{{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1ga953b34f004a8222b04e21851487c611a"><span class="std std-ref">DNNL_ARG_FROM</span></a><span></span><span class="p">,</span> <span class="n">src_mem</span><span class="p">},</span> <span class="p">{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1gaf700c3396987b450413c8df5d78bafd9"><span class="std std-ref">DNNL_ARG_TO</span></a><span></span><span class="p">,</span> <span class="n">conv_src_mem</span><span class="p">}});</span>
+    <span class="n">s</span><span class="p">.</span><span class="n">wait</span><span class="p">();</span> <span class="c1">// wait for the reorder to complete</span>
+<span class="p">}</span>
+
+<span class="k">if</span> <span class="p">(</span><span class="n">need_reorder_weights</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">auto</span> <span class="n">reorder_weights</span> <span class="o">=</span> <span class="n">reorder</span><span class="p">(</span><span class="n">weights_mem</span><span class="p">,</span> <span class="n">conv_weights_mem</span><span class="p">);</span>
+    <span class="n">reorder_weights</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span><span class="n">s</span><span class="p">,</span>
+            <span class="p">{{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1ga953b34f004a8222b04e21851487c611a"><span class="std std-ref">DNNL_ARG_FROM</span></a><span></span><span class="p">,</span> <span class="n">weights_mem</span><span class="p">},</span>
+                    <span class="p">{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1gaf700c3396987b450413c8df5d78bafd9"><span class="std std-ref">DNNL_ARG_TO</span></a><span></span><span class="p">,</span> <span class="n">conv_weights_mem</span><span class="p">}});</span>
+    <span class="n">s</span><span class="p">.</span><span class="n">wait</span><span class="p">();</span> <span class="c1">// wait for the reorder to complete</span>
+<span class="p">}</span></pre>
+</section>
+<section id="create-and-execute-convolution-and-pooling-primitives">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub6"></span><h3>Create and execute convolution and pooling primitives<a class="headerlink" href="#create-and-execute-convolution-and-pooling-primitives" title="Link to this heading">#</a></h3>
+<p>After the reorders, we are now ready to compute convolution and pooling.</p>
+<pre class="highlight literal-block"><span></span><span class="k">auto</span> <span class="n">conv_scratchpad_mem</span> <span class="o">=</span> <span class="n">memory</span><span class="p">(</span><span class="n">conv_pd</span><span class="p">.</span><span class="n">scratchpad_desc</span><span class="p">(),</span> <span class="n">eng</span><span class="p">);</span>
+<span class="k">auto</span> <span class="n">conv</span> <span class="o">=</span> <span class="n">convolution_forward</span><span class="p">(</span><span class="n">conv_pd</span><span class="p">);</span>
+<span class="n">conv</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span><span class="n">s</span><span class="p">,</span>
+        <span class="p">{{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1gac37ad67b48edeb9e742af0e50b70fe09"><span class="std std-ref">DNNL_ARG_SRC</span></a><span></span><span class="p">,</span> <span class="n">conv_src_mem</span><span class="p">},</span> <span class="p">{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1gaf279f28c59a807e71a70c719db56c5b3"><span class="std std-ref">DNNL_ARG_WEIGHTS</span></a><span></span><span class="p">,</span> <span class="n">conv_weights_mem</span><span class="p">},</span>
+                <span class="p">{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1ga3ca217e4a06d42a0ede3c018383c388f"><span class="std std-ref">DNNL_ARG_DST</span></a><span></span><span class="p">,</span> <span class="n">conv_dst_mem</span><span class="p">}});</span>
+<span class="k">auto</span> <span class="n">pool_scratchpad_mem</span> <span class="o">=</span> <span class="n">memory</span><span class="p">(</span><span class="n">pool_pd</span><span class="p">.</span><span class="n">scratchpad_desc</span><span class="p">(),</span> <span class="n">eng</span><span class="p">);</span>
+<span class="k">auto</span> <span class="n">pool</span> <span class="o">=</span> <span class="n">pooling_forward</span><span class="p">(</span><span class="n">pool_pd</span><span class="p">);</span>
+<span class="n">pool</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span>
+        <span class="n">s</span><span class="p">,</span> <span class="p">{{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1gac37ad67b48edeb9e742af0e50b70fe09"><span class="std std-ref">DNNL_ARG_SRC</span></a><span></span><span class="p">,</span> <span class="n">conv_dst_mem</span><span class="p">},</span> <span class="p">{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1ga3ca217e4a06d42a0ede3c018383c388f"><span class="std std-ref">DNNL_ARG_DST</span></a><span></span><span class="p">,</span> <span class="n">pool_dst_mem</span><span class="p">}});</span>
+<span class="n">s</span><span class="p">.</span><span class="n">wait</span><span class="p">();</span></pre>
+</section>
+<section id="reorder-destination-data-if-necessary">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-sub7"></span><h3>Reorder destination data if necessary<a class="headerlink" href="#reorder-destination-data-if-necessary" title="Link to this heading">#</a></h3>
+<p>The only potentially remaining operation is a reorder from the pooling destination memory object to the user’s one. Similarly to the reorders for the source and weights memory objects, it is performed depending on the value of the previously computed flag.</p>
+<pre class="highlight literal-block"><span></span><span class="k">if</span> <span class="p">(</span><span class="n">need_reorder_dst</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">auto</span> <span class="n">reorder_dst</span> <span class="o">=</span> <span class="n">reorder</span><span class="p">(</span><span class="n">pool_dst_mem</span><span class="p">,</span> <span class="n">dst_mem</span><span class="p">);</span>
+    <span class="n">reorder_dst</span><span class="p">.</span><span class="n">execute</span><span class="p">(</span>
+            <span class="n">s</span><span class="p">,</span> <span class="p">{{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1ga953b34f004a8222b04e21851487c611a"><span class="std std-ref">DNNL_ARG_FROM</span></a><span></span><span class="p">,</span> <span class="n">pool_dst_mem</span><span class="p">},</span> <span class="p">{</span><a class="reference internal" href="group_dnnl_api_primitives_common.html#doxid-group-dnnl-api-primitives-common-1gaf700c3396987b450413c8df5d78bafd9"><span class="std std-ref">DNNL_ARG_TO</span></a><span></span><span class="p">,</span> <span class="n">dst_mem</span><span class="p">}});</span>
+    <span class="n">s</span><span class="p">.</span><span class="n">wait</span><span class="p">();</span>
+<span class="p">}</span></pre>
+</section>
+<section id="results">
+<span id="doxid-memory-format-propagation-cpp-1memory-format-propagation-results"></span><h3>Results<a class="headerlink" href="#results" title="Link to this heading">#</a></h3>
+<p>Upon compiling and run the example the output should be just:</p>
+<pre class="highlight literal-block"><span></span><span class="n">Example</span> <span class="n">passed</span><span class="p">.</span></pre>
+<p>It may be interesting to check what really happens during the run. We can use <code class="docutils literal notranslate"><span class="pre">ONEDNN_VERBOSE</span></code> environment variable for that (see also <a class="reference internal" href="dev_guide_verbose.html#doxid-dev-guide-verbose"><span class="std std-ref">Verbose Mode</span></a>). Here’s an example output:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">ONEDNN_VERBOSE</span><span class="o">=</span><span class="mi">1</span> <span class="p">.</span><span class="o">/</span><span class="n">memory</span><span class="o">-</span><span class="n">format</span><span class="o">-</span><span class="n">propagation</span><span class="o">-</span><span class="n">cpp</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">info</span><span class="p">,</span><span class="n">oneDNN</span> <span class="o">&lt;</span><span class="n">ver</span><span class="o">&gt;</span> <span class="p">(</span><span class="n">Git</span> <span class="n">Hash</span> <span class="o">&lt;</span><span class="n">hash</span><span class="o">&gt;</span><span class="p">)</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">info</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">runtime</span><span class="p">:</span><span class="n">OpenMP</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">info</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">isa</span><span class="p">:</span><span class="n">Intel</span> <span class="n">AVX2</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">info</span><span class="p">,</span><span class="n">gpu</span><span class="p">,</span><span class="nl">runtime</span><span class="p">:</span><span class="n">none</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">exec</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="n">reorder</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">uni</span><span class="p">,</span><span class="n">undef</span><span class="p">,</span>
+    <span class="n">src_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">abcd</span><span class="p">:</span><span class="n">f0</span> <span class="n">dst_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">aBcd8b</span><span class="p">:</span><span class="n">f0</span><span class="p">,,,</span><span class="mi">1</span><span class="n">x128x14x14</span><span class="p">,</span><span class="mf">0.326904</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">exec</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="n">reorder</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">uni</span><span class="p">,</span><span class="n">undef</span><span class="p">,</span>
+    <span class="n">src_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">abcd</span><span class="p">:</span><span class="n">f0</span> <span class="n">dst_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">ABcd8b8a</span><span class="p">:</span><span class="n">f0</span><span class="p">,,,</span><span class="mi">256</span><span class="n">x128x3x3</span><span class="p">,</span><span class="mf">0.244141</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">exec</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="n">convolution</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx2</span><span class="p">,</span><span class="n">forward_inference</span><span class="p">,</span>
+    <span class="n">src_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">aBcd8b</span><span class="p">:</span><span class="n">f0</span> <span class="n">wei_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">ABcd8b8a</span><span class="p">:</span><span class="n">f0</span> <span class="n">bia_undef</span><span class="o">::</span><span class="n">undef</span><span class="o">::</span><span class="n">f0</span> <span class="n">dst_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">aBcd8b</span><span class="p">:</span><span class="n">f0</span><span class="p">,,</span>
+    <span class="nl">alg</span><span class="p">:</span><span class="n">convolution_direct</span><span class="p">,</span><span class="n">mb1_ic128oc256_ih14oh14kh3sh1dh0ph1_iw14ow14kw3sw1dw0pw1</span><span class="p">,</span><span class="mf">1.20312</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">exec</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="n">pooling</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx</span><span class="p">,</span><span class="n">forward_inference</span><span class="p">,</span>
+    <span class="n">src_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">aBcd8b</span><span class="p">:</span><span class="n">f0</span> <span class="n">dst_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">aBcd8b</span><span class="p">:</span><span class="n">f0</span> <span class="n">ws_undef</span><span class="o">::</span><span class="n">undef</span><span class="o">::</span><span class="n">f0</span><span class="p">,,</span>
+    <span class="nl">alg</span><span class="p">:</span><span class="n">pooling_max</span><span class="p">,</span><span class="n">mb1ic256_ih14oh14kh3sh1ph1_iw14ow14kw3sw1pw1</span><span class="p">,</span><span class="mf">0.187012</span>
+<span class="n">onednn_verbose</span><span class="p">,</span><span class="n">exec</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="n">reorder</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">uni</span><span class="p">,</span><span class="n">undef</span><span class="p">,</span>
+    <span class="n">src_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">aBcd8b</span><span class="p">:</span><span class="n">f0</span> <span class="n">dst_f32</span><span class="o">::</span><span class="nl">blocked</span><span class="p">:</span><span class="nl">abcd</span><span class="p">:</span><span class="n">f0</span><span class="p">,,,</span><span class="mi">1</span><span class="n">x256x14x14</span><span class="p">,</span><span class="mf">0.0419922</span>
+<span class="n">Example</span> <span class="n">passed</span> <span class="n">on</span> <span class="n">CPU</span><span class="p">.</span></pre>
+<p>From this output we can deduce that:</p>
+<ul class="simple">
+<li><p>The convolution primitive picked up <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fa448a7fc9219294ce172b0edf9498b5c4"><span class="std std-ref">dnnl::memory::format_tag::aBcd8b</span></a> optimized memory format for activations. In this format the channels dimension (denoted by letter B since it is the second dimension; see also <a class="reference internal" href="dev_guide_conventions.html#doxid-dev-guide-conventions"><span class="std std-ref">Naming Conventions</span></a>) is blocked by a factor of 8. Because of this memory format is different from the NCHW format the tutorial uses, the source and destination had to be reordered to and from this optimized memory layout.</p></li>
+<li><p>The convolution primitive picked up <a class="reference internal" href="enum_dnnl_memory_format_tag.html#doxid-structdnnl-1-1memory-1a8e71077ed6a5f7fb7b3e6e1a5a2ecf3fabcbce50e9c241458767871fa053e1ba0"><span class="std std-ref">dnnl::memory::format_tag::ABcd8b8a</span></a> optimized memory format (output (A) and input (B) channel dimensions blocked by 8) which we also had to reorder the initial weights to since they are in the OIHW memory format.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="page_getting_started_cpp.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Getting started</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="dev_guide_inference_and_training_aspects.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Inference and Training Aspects</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#introduction-to-the-tutorial">Introduction to the tutorial</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#memory-format-propagation-function">memory_format_propagation() function</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#initialization">Initialization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-convolution-and-pooling-primitives">Create convolution and pooling primitives</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-source-and-destination-memory-objects">Create source and destination memory objects</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#determine-if-source-and-destination-need-to-be-reordered">Determine if source and destination need to be reordered</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#allocate-intermediate-buffers-if-necessary">Allocate intermediate buffers if necessary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#perform-reorders-for-source-data-if-necessary">Perform reorders for source data if necessary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#create-and-execute-convolution-and-pooling-primitives">Create and execute convolution and pooling primitives</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#reorder-destination-data-if-necessary">Reorder destination data if necessary</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#results">Results</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2016-2022 Intel Corporation.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

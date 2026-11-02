@@ -1,0 +1,1349 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Service &#8212; oneDNN v3.5.3 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/doxyrest-pygments.css?v=ff3f4257" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=b173e398"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script src="_static/target-highlight.js?v=df7d332b"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'group_dnnl_api_service';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="enum dnnl::cpu_isa" href="enum_dnnl_cpu_isa.html" />
+    <link rel="prev" title="enum dnnl::fpmath_mode" href="enum_dnnl_fpmath_mode.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">oneDNN v3.5.3 documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="build_and_link.html">Building and Linking</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build.html">Build from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build_options.html">Build Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_link.html">Linking to the Library</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_getting_started_cpp.html">Getting started</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_memory_format_propagation_cpp.html">Memory Format Propagation</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_inference_and_training_aspects.html">Inference and Training Aspects</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference.html">Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference_int8.html">Int8 Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_training_bf16.html">Bfloat16 Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_attributes.html">Primitive Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_fpmath_mode.html">Primitive Attributes: floating-point math mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_accumulation_mode.html">Primitive Attributes: accumulation mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_deterministic.html">Primitive Attributes: deterministic</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_quantization.html">Primitive Attributes: Quantization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_post_ops.html">Primitive Attributes: Post-ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_scratchpad.html">Primitive Attributes: Scratchpad</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_data_types.html">Data Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cross_engine_reorder_cpp.html">Reorder between CPU and GPU engines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_c_and_cpp_apis.html">API</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="interop_with_dpcpp_and_opencl.html">Interoperability with DPC++ and OpenCL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_opencl_interoperability.html">OpenCL Interoperability</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_dpcpp_interoperability.html">DPC++ Interoperability</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="supported_primitives.html">Supported Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_convolution.html">Convolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inner_product.html">Inner Product</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_matmul.html">Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_rnn.html">RNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_batch_normalization.html">Batch Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_binary.html">Binary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_concat.html">Concat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_eltwise.html">Eltwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_group_normalization.html">Group Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_layer_normalization.html">Layer Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_lrn.html">Local Response Normalization (LRN)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_pooling.html">Pooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_prelu.html">PReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_resampling.html">Resampling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_shuffle.html">Shuffle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_softmax.html">Softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sum.html">Sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reorder.html">Reorder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reduction.html">Reduction</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="graph_extension.html">Graph Extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_low_precision.html">Low Precision</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_supported_operations.html">Supported Operations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_abs.html">Abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_absbackward.html">AbsBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_add.html">Add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpool.html">AvgPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpoolbackward.html">AvgPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormforwardtraining.html">BatchNormForwardTraining</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnorminference.html">BatchNormInference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormtrainingbackward.html">BatchNormTrainingBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasadd.html">BiasAdd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasaddbackward.html">BiasAddBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clamp.html">Clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clampbackward.html">ClampBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_concat.html">Concat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolution.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwarddata.html">ConvolutionBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwardweights.html">ConvolutionBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtranspose.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwarddata.html">ConvTransposeBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwardweights.html">ConvTransposeBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dequantize.html">Dequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_divide.html">Divide</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicdequantize.html">DynamicDequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicquantize.html">DynamicQuantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elu.html">Elu</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elubackward.html">EluBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_end.html">End</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_exp.html">Exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelu.html">GELU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelubackward.html">GELUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoid.html">HardSigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoidbackward.html">HardSigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswish.html">HardSwish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswishbackward.html">HardSwishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolate.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolatebackward.html">InterpolateBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernorm.html">LayerNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernormbackward.html">LayerNormBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_leakyrelu.html">LeakyReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_log.html">Log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmax.html">LogSoftmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmaxbackward.html">LogSoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_matmul.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maximum.html">Maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpool.html">MaxPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpoolbackward.html">MaxPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_minimum.html">Minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mish.html">Mish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mishbackward.html">MishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_multiply.html">Multiply</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_pow.html">Pow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelu.html">PReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelubackward.html">PReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_quantize.html">Quantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reciprocal.html">Reciprocal</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel1.html">ReduceL1</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel2.html">ReduceL2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemax.html">ReduceMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemean.html">ReduceMean</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemin.html">ReduceMin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reduceprod.html">ReduceProd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducesum.html">ReduceSum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relu.html">ReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relubackward.html">ReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reorder.html">Reorder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_round.html">Round</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_select.html">Select</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoid.html">Sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoidbackward.html">SigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmax.html">SoftMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmaxbackward.html">SoftMaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplus.html">SoftPlus</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplusbackward.html">SoftPlusBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrt.html">Sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrtbackward.html">SqrtBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_square.html">Square</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_squareddifference.html">SquaredDifference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_staticreshape.html">StaticReshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_statictranspose.html">StaticTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_subtract.html">Subtract</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanh.html">Tanh</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanhbackward.html">TanhBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_typecast.html">TypeCast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_wildcard.html">Wildcard</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_fusion_patterns.html">Supported Fusion Patterns</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_dump.html">Graph Dump</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_constant_tensor_cache.html">Constant Tensor Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_compiler.html">Graph Compiler</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_examples.html">Examples</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="performance_profiling_and_inspection.html">Performance Profiling and Inspection</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose.html">Verbose Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_performance_settings.html">Configuring oneDNN for Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_benchdnn.html">Benchmarking Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_profilers.html">Profiling oneDNN Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inspecting_jit.html">Inspecting JIT Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_performance_profiling_cpp.html">Performance Profiling Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html">CPU Dispatcher Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_isa_hints.html">CPU ISA Hints</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose_table.html">Verbose Message Catalogue</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="advanced_topics.html">Advanced Topics</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_transition_to_dnnl.html">Transitioning from Intel MKL-DNN to oneDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_understanding_memory_formats.html">Understanding Memory Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_int8_computations.html">Nuances of int8 Computations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_primitive_cache.html">Primitive Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_persistent_cache.html">Persistent Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_threadpool.html">Using oneDNN with Threadpool-Based Threading</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_experimental.html">Experimental features</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="ukernels.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_brgemm.html">Batch-Reduce General Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_transform.html">Data transformation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cpu_brgemm_example_cpp.html">BRGeMM ukernel example</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="group_dnnl_api.html">oneDNN API</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitives.html">Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_primitives_common.html">Common</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_alg_kind_t.html">enum dnnl_alg_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags_t.html">enum dnnl_normalization_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_primitive_kind_t.html">enum dnnl_primitive_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind_t.html">enum dnnl_prop_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query_t.html">enum dnnl_query_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags.html">enum dnnl::normalization_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query.html">enum dnnl::query</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_exec_arg_t.html">struct dnnl_exec_arg_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive.html">struct dnnl_primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc.html">struct dnnl_primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive-2.html">struct dnnl::primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc-2.html">struct dnnl::primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc_base.html">struct dnnl::primitive_desc_base</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_attributes.html">Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_algorithm.html">enum dnnl::algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode_t.html">enum dnnl_scratchpad_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind.html">enum dnnl::prop_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode.html">enum dnnl::scratchpad_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops.html">struct dnnl_post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr.html">struct dnnl_primitive_attr</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops-2.html">struct dnnl::post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr-2.html">struct dnnl::primitive_attr</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reorder.html">Reorder</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reorder.html">struct dnnl::reorder</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_concat.html">Concat</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_concat.html">struct dnnl::concat</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sum.html">Sum</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_sum.html">struct dnnl::sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_binary.html">Binary</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_binary.html">struct dnnl::binary</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_convolution.html">Convolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_data.html">struct dnnl::convolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_weights.html">struct dnnl::convolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_forward.html">struct dnnl::convolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_deconvolution.html">Deconvolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_data.html">struct dnnl::deconvolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_weights.html">struct dnnl::deconvolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_forward.html">struct dnnl::deconvolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_shuffle.html">Shuffle</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_backward.html">struct dnnl::shuffle_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_forward.html">struct dnnl::shuffle_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_eltwise.html">Eltwise</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_backward.html">struct dnnl::eltwise_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_forward.html">struct dnnl::eltwise_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_softmax.html">Softmax</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_backward.html">struct dnnl::softmax_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_forward.html">struct dnnl::softmax_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_pooling.html">Pooling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_backward.html">struct dnnl::pooling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_forward.html">struct dnnl::pooling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_prelu.html">PReLU</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_backward.html">struct dnnl::prelu_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_forward.html">struct dnnl::prelu_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_lrn.html">LRN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_backward.html">struct dnnl::lrn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_forward.html">struct dnnl::lrn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_batch_normalization.html">Batch Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_backward.html">struct dnnl::batch_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_forward.html">struct dnnl::batch_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_group_normalization.html">Group Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_backward.html">struct dnnl::group_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_forward.html">struct dnnl::group_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_layer_normalization.html">Layer Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_backward.html">struct dnnl::layer_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_forward.html">struct dnnl::layer_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_inner_product.html">Inner Product</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_data.html">struct dnnl::inner_product_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_weights.html">struct dnnl::inner_product_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_forward.html">struct dnnl::inner_product_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_rnn.html">RNN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction_t.html">enum dnnl_rnn_direction_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags_t.html">enum dnnl_rnn_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction.html">enum dnnl::rnn_direction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags.html">enum dnnl::rnn_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_backward.html">struct dnnl::augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_forward.html">struct dnnl::augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_backward.html">struct dnnl::gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_forward.html">struct dnnl::gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_backward.html">struct dnnl::lbr_augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_forward.html">struct dnnl::lbr_augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_backward.html">struct dnnl::lbr_gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_forward.html">struct dnnl::lbr_gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_backward.html">struct dnnl::lstm_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_forward.html">struct dnnl::lstm_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_rnn_primitive_desc_base.html">struct dnnl::rnn_primitive_desc_base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_backward.html">struct dnnl::vanilla_rnn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_forward.html">struct dnnl::vanilla_rnn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_matmul.html">Matrix Multiplication</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_matmul.html">struct dnnl::matmul</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_resampling.html">Resampling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_backward.html">struct dnnl::resampling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_forward.html">struct dnnl::resampling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reduction.html">Reduction</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reduction.html">struct dnnl::reduction</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitive_cache.html">Primitive Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_profiling.html">Profiling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_profiling_data_kind.html">enum dnnl::profiling_data_kind</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_blas.html">BLAS functions</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 current active has-children"><a class="reference internal" href="group_dnnl_api_common.html">Common API</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_engine_kind_t.html">enum dnnl_engine_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine.html">struct dnnl_engine</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine-2.html">struct dnnl::engine</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_stream.html">Stream</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_stream_flags_t.html">enum dnnl_stream_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream.html">struct dnnl_stream</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream-2.html">struct dnnl::stream</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_fpmath_mode.html">Floating-point Math Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode_t.html">enum dnnl_fpmath_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode.html">enum dnnl::fpmath_mode</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 current active has-children"><a class="current reference internal" href="#">Service</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa.html">enum dnnl::cpu_isa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html">enum dnnl::cpu_isa_hints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html">enum dnnl_cpu_isa_hints_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_t.html">enum dnnl_cpu_isa_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status.html">enum dnnl::status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_version_t.html">struct dnnl_version_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_utils.html">Utilities</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status_t.html">enum dnnl_status_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_error.html">struct dnnl::error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle.html">template struct dnnl::handle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle_traits.html">template struct dnnl::handle_traits</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_accumulation_mode.html">Accumulation Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode.html">enum dnnl::accumulation_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode_t.html">enum dnnl_accumulation_mode_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_data_types.html">Data types</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_data_type_t.html">enum dnnl_data_type_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_memory.html">Memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_kind_t.html">enum dnnl_format_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_tag_t.html">enum dnnl_format_tag_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_profiling_data_kind_t.html">enum dnnl_profiling_data_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sparse_encoding_t.html">enum dnnl_sparse_encoding_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory.html">struct dnnl_memory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory_desc.html">struct dnnl_memory_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory-2.html">struct dnnl::memory</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_graph_api.html">Graph API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_allocator.html">Allocator</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_allocator.html">class dnnl::graph::allocator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_logical_tensor.html">Logical Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_layout_type_t.html">enum dnnl_graph_layout_type_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_tensor_property_t.html">enum dnnl_graph_tensor_property_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_logical_tensor_t.html">struct dnnl_graph_logical_tensor_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_logical_tensor.html">class dnnl::graph::logical_tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_tensor.html">Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_tensor.html">class dnnl::graph::tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_op.html">Op</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_attr_t.html">enum dnnl_graph_op_attr_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_kind_t.html">enum dnnl_graph_op_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_op.html">class dnnl::graph::op</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_partition.html">Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_partition_policy_t.html">enum dnnl_graph_partition_policy_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_partition.html">class dnnl::graph::partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition.html">Compiled Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_inplace_pair_t.html">struct dnnl_graph_inplace_pair_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_compiled_partition.html">class dnnl::graph::compiled_partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_graph.html">Graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_graph.html">class dnnl::graph::graph</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition_cache.html">Compiled Partition Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_constant_tensor_cache.html">Constant Tensor Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_ocl_interop.html">OpenCL interoperability API API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_sycl_interop.html">SYCL interoperability API</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl.html">namespace dnnl</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_graph.html">namespace dnnl::graph</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ocl_interop.html">OpenCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_ocl_interop.html">namespace dnnl::ocl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ocl_interop_memory_kind_t.html">enum dnnl_ocl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sycl_interop.html">SYCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_sycl_interop.html">namespace dnnl::sycl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sycl_interop_memory_kind_t.html">enum dnnl_sycl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_threadpool_interop.html">Threadpool interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_threadpool_interop.html">namespace dnnl::threadpool_interop</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_ukernel.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ukernel_brgemm.html">BRGeMM ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_brgemm.html">struct dnnl::ukernel::brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_brgemm_pack_b.html">struct dnnl::ukernel::brgemm_pack_b</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_brgemm.html">struct dnnl_brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_brgemm_pack_b.html">struct dnnl_brgemm_pack_b</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_ukernel.html">namespace dnnl::ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_oneapi.html">namespace oneapi</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/oneapi-src/oneDNN" target="_blank"
+   class="btn btn-sm btn-source-repository-button"
+   title="Source repository"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Service</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#detailed-documentation">Detailed Documentation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#typedefs">Typedefs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#global-functions">Global Functions</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#macros">Macros</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="service">
+<span id="doxid-group-dnnl-api-service"></span><span id="index-0"></span><h1>Service<a class="headerlink" href="#service" title="Link to this heading">#</a></h1>
+<div class="toctree-wrapper compound">
+</div>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">#</a></h2>
+<p>A set of functions that aid in oneDNN debugging and profiling. <a class="reference internal" href="#details-group-dnnl-api-service"><span class="std std-ref">More…</span></a></p>
+<pre class="highlight doxyrest-overview-code-block literal-block"><span></span><span class="c1">// typedefs</span>
+
+<span class="k">typedef</span> <a class="reference internal" href="struct_dnnl_version_t.html#doxid-structdnnl-version-t"><span class="std std-ref">dnnl_version_t</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga7b6ec8722f5ad94170755b8be0cdd3af"><span class="std std-ref">dnnl::version_t</span></a><span></span><span class="p">;</span>
+
+<span class="c1">// enums</span>
+
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">dnnl::cpu_isa</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">dnnl::cpu_isa_hints</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a><span></span><span class="p">;</span>
+<span class="k">enum</span> <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">dnnl::status</span></a><span></span><span class="p">;</span>
+
+<span class="c1">// structs</span>
+
+<span class="k">struct</span> <a class="reference internal" href="struct_dnnl_version_t.html#doxid-structdnnl-version-t"><span class="std std-ref">dnnl_version_t</span></a><span></span><span class="p">;</span>
+
+<span class="c1">// global functions</span>
+
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga37bcab6f832df551a9fc418e48743b15"><span class="std std-ref">dnnl::set_verbose</span></a><span></span><span class="p">(</span><span class="kt">int</span> <span class="n">level</span><span class="p">);</span>
+<span class="k">const</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga7b6ec8722f5ad94170755b8be0cdd3af"><span class="std std-ref">version_t</span></a><span></span><span class="o">*</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1gaad8292408620d0296f22bdf65afb752d"><span class="std std-ref">dnnl::version</span></a><span></span><span class="p">();</span>
+<a class="reference internal" href="enum_dnnl_fpmath_mode.html#doxid-group-dnnl-api-fpmath-mode-1ga0ad94cbef13dce222933422bfdcfa725"><span class="std std-ref">fpmath_mode</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga782a2388fc46e80deac409110886db75"><span class="std std-ref">dnnl::get_default_fpmath_mode</span></a><span></span><span class="p">();</span>
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga0d55da5f92d60a7324cfdc97004ad975"><span class="std std-ref">dnnl::set_default_fpmath_mode</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_fpmath_mode.html#doxid-group-dnnl-api-fpmath-mode-1ga0ad94cbef13dce222933422bfdcfa725"><span class="std std-ref">fpmath_mode</span></a><span></span> <span class="n">mode</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga2344639528a341878d2ce46fe1c1ac83"><span class="std std-ref">dnnl::set_jit_dump</span></a><span></span><span class="p">(</span><span class="kt">int</span> <span class="n">enable</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga966c54ccb1d9ff33d20c4ea47e34675d"><span class="std std-ref">dnnl::set_jit_profiling_flags</span></a><span></span><span class="p">(</span><span class="kt">unsigned</span> <span class="n">flags</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga533341aaf1402e27d1225d1a59819a62"><span class="std std-ref">dnnl::set_jit_profiling_jitdumpdir</span></a><span></span><span class="p">(</span><span class="k">const</span> <span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&amp;</span> <span class="n">dir</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga08734310b5f1ca794c64b6a5b944b698"><span class="std std-ref">dnnl::set_max_cpu_isa</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">cpu_isa</span></a><span></span> <span class="n">isa</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">cpu_isa</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga3953f71c3f0126d9cc005a1ceff65e8b"><span class="std std-ref">dnnl::get_effective_cpu_isa</span></a><span></span><span class="p">();</span>
+<a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga29aa5fb708d803e091ac61dc67f9e6ed"><span class="std std-ref">dnnl::set_cpu_isa_hints</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">cpu_isa_hints</span></a><span></span> <span class="n">isa_hints</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">cpu_isa_hints</span></a><span></span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga8bee13aa79a9711489b401e9c4252ff2"><span class="std std-ref">dnnl::get_cpu_isa_hints</span></a><span></span><span class="p">();</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga03c8f4af3d01f76060f98e78039837fc"><span class="std std-ref">dnnl_set_jit_dump</span></a><span></span><span class="p">(</span><span class="kt">int</span> <span class="n">enable</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga51ef634e4f201a12d32e573955943f48"><span class="std std-ref">dnnl_set_jit_profiling_flags</span></a><span></span><span class="p">(</span><span class="kt">unsigned</span> <span class="n">flags</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1gafb0fb0d37d72bc58386ba97bb858f8f7"><span class="std std-ref">dnnl_set_jit_profiling_jitdumpdir</span></a><span></span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">dir</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga4b7f3b3299482f88f1a0aa61a4707156"><span class="std std-ref">dnnl_set_max_cpu_isa</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a><span></span> <span class="n">isa</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1gac55836cf36bc25f8635e459678303570"><span class="std std-ref">dnnl_get_effective_cpu_isa</span></a><span></span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1gad078a384ab0e078d81595686efd26ed2"><span class="std std-ref">dnnl_set_cpu_isa_hints</span></a><span></span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a><span></span> <span class="n">isa_hints</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1gad93f9f4bf3c9e12a2be7337b1e41d145"><span class="std std-ref">dnnl_get_cpu_isa_hints</span></a><span></span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+<a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga14cc3b56337322e1e5132c5ee0c84856"><span class="std std-ref">dnnl_set_verbose</span></a><span></span><span class="p">(</span><span class="kt">int</span> <span class="n">level</span><span class="p">);</span>
+<span class="k">const</span> <a class="reference internal" href="struct_dnnl_version_t.html#doxid-structdnnl-version-t"><span class="std std-ref">dnnl_version_t</span></a><span></span> <span class="n">DNNL_API</span><span class="o">*</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga73e40d184386e9d9ca917756e76fb232"><span class="std std-ref">dnnl_version</span></a><span></span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+
+<span class="c1">// macros</span>
+
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga5afb7d615d8507b8d5469553e6dde2a7"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_JITDUMP</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga66a48a940ab2916d360b0bb677a70e5f"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_JITDUMP_USE_TSC</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga5a1d61af9d5b15dbc6d7d33f0f3e22bc"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_PERF</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-service-1gacb5b174589525cce34589ef4ef56462f"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_PERFMAP</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga7ceacd6430988ed4bf58f5b01cd9c5a4"><span class="std std-ref">DNNL_JIT_PROFILE_NONE</span></a><span></span>
+<span class="cp">#define </span><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga137013d98ef736973ebbe1ecd4a4b2c9"><span class="std std-ref">DNNL_JIT_PROFILE_VTUNE</span></a></pre>
+</section>
+<section id="detailed-documentation">
+<span id="details-group-dnnl-api-service"></span><h2>Detailed Documentation<a class="headerlink" href="#detailed-documentation" title="Link to this heading">#</a></h2>
+<p>A set of functions that aid in oneDNN debugging and profiling.</p>
+<section id="typedefs">
+<h3>Typedefs<a class="headerlink" href="#typedefs" title="Link to this heading">#</a></h3>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga7b6ec8722f5ad94170755b8be0cdd3af"><span id="index-1"></span><span></span><span class="k">typedef</span> <a class="reference internal" href="struct_dnnl_version_t.html#doxid-structdnnl-version-t"><span class="std std-ref">dnnl_version_t</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">version_t</span></pre>
+<p>Structure containing version information as per <a class="reference external" href="https://semver.org">Semantic Versioning</a></p>
+</section>
+<section id="global-functions">
+<h3>Global Functions<a class="headerlink" href="#global-functions" title="Link to this heading">#</a></h3>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga37bcab6f832df551a9fc418e48743b15"><span id="index-2"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_verbose</span><span class="p">(</span><span class="kt">int</span> <span class="n">level</span><span class="p">)</span></pre>
+<p>Configures verbose output to stdout.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Enabling verbose output affects performance. This setting overrides the ONEDNN_VERBOSE environment variable.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>level</p></td>
+<td><p>Verbosity level:</p>
+<ul class="simple">
+<li><p>0: no verbose output (default),</p></li>
+<li><p>1: primitive and graph information at execution,</p></li>
+<li><p>2: primitive and graph information at creation/compilation and execution.</p></li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">level</span></code> value is invalid, and <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1gaad8292408620d0296f22bdf65afb752d"><span id="index-3"></span><span></span><span class="k">const</span> <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga7b6ec8722f5ad94170755b8be0cdd3af"><span class="std std-ref">version_t</span></a><span></span><span class="o">*</span> <span class="n">dnnl</span><span class="o">::</span><span class="n">version</span><span class="p">()</span></pre>
+<p>Returns library version information.</p>
+<p class="rubric">Returns:</p>
+<p>Pointer to a constant structure containing</p>
+<ul class="simple">
+<li><p>major: major version number,</p></li>
+<li><p>minor: minor version number,</p></li>
+<li><p>patch: patch release number,</p></li>
+<li><p>hash: git commit hash.</p></li>
+</ul>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga782a2388fc46e80deac409110886db75"><span id="index-4"></span><a class="reference internal" href="enum_dnnl_fpmath_mode.html#doxid-group-dnnl-api-fpmath-mode-1ga0ad94cbef13dce222933422bfdcfa725"><span class="std std-ref">fpmath_mode</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">get_default_fpmath_mode</span><span class="p">()</span></pre>
+<p>Returns the floating-point math mode that will be used by default for all subsequently created primitives.</p>
+<p class="rubric">Returns:</p>
+<p>Output FP math mode.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga0d55da5f92d60a7324cfdc97004ad975"><span id="index-5"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_default_fpmath_mode</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_fpmath_mode.html#doxid-group-dnnl-api-fpmath-mode-1ga0ad94cbef13dce222933422bfdcfa725"><span class="std std-ref">fpmath_mode</span></a><span></span> <span class="n">mode</span><span class="p">)</span></pre>
+<p>Sets the floating-point math mode that will be used by default for all subsequently created primitives.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>mode</p></td>
+<td><p>FP math mode. The possible values are: <a class="reference internal" href="enum_dnnl_fpmath_mode_t.html#doxid-group-dnnl-api-fpmath-mode-1gga62f956692c5a70353f164e09ff524912ab062cd5c71803f26ab700073c8f18bd3"><span class="std std-ref">dnnl_fpmath_mode_strict</span></a>, <a class="reference internal" href="enum_dnnl_fpmath_mode_t.html#doxid-group-dnnl-api-fpmath-mode-1gga62f956692c5a70353f164e09ff524912ac7e140804cd26325c9c5563fa421b7f7"><span class="std std-ref">dnnl_fpmath_mode_bf16</span></a>, <a class="reference internal" href="enum_dnnl_fpmath_mode_t.html#doxid-group-dnnl-api-fpmath-mode-1gga62f956692c5a70353f164e09ff524912aa128d95a43cba562c8b90cd820d3faaf"><span class="std std-ref">dnnl_fpmath_mode_f16</span></a>, <a class="reference internal" href="enum_dnnl_fpmath_mode_t.html#doxid-group-dnnl-api-fpmath-mode-1gga62f956692c5a70353f164e09ff524912a7c89cac55a7b6a6e4692a5805ba10edc"><span class="std std-ref">dnnl_fpmath_mode_tf32</span></a>, <a class="reference internal" href="enum_dnnl_fpmath_mode_t.html#doxid-group-dnnl-api-fpmath-mode-1gga62f956692c5a70353f164e09ff524912ad54e0a51f937a49dd4c2c3d50ca1b94c"><span class="std std-ref">dnnl_fpmath_mode_any</span></a>.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> on success and a status describing the error otherwise.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga2344639528a341878d2ce46fe1c1ac83"><span id="index-6"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_jit_dump</span><span class="p">(</span><span class="kt">int</span> <span class="n">enable</span><span class="p">)</span></pre>
+<p>Configures dumping of JIT-generated code.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This setting overrides the DNNL_JIT_DUMP environment variable.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>enable</p></td>
+<td><p>Flag value. Set to 0 to disable and set to 1 to enable.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">flag</span></code> value is invalid, and <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga966c54ccb1d9ff33d20c4ea47e34675d"><span id="index-7"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_jit_profiling_flags</span><span class="p">(</span><span class="kt">unsigned</span> <span class="n">flags</span><span class="p">)</span></pre>
+<p>Sets library profiling flags.</p>
+<p>The flags define which profilers are supported.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This setting overrides DNNL_JIT_PROFILE environment variable.</p>
+</div>
+<p>Passing <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga7ceacd6430988ed4bf58f5b01cd9c5a4"><span class="std std-ref">DNNL_JIT_PROFILE_NONE</span></a> disables profiling completely.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>flags</p></td>
+<td><p>Profiling flags that can contain the following bits:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga137013d98ef736973ebbe1ecd4a4b2c9"><span class="std std-ref">DNNL_JIT_PROFILE_VTUNE</span></a> integration with VTune Profiler (on by default)</p></li>
+<li><p><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga5afb7d615d8507b8d5469553e6dde2a7"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_JITDUMP</span></a> produce Linux-specific jit-pid.dump output (off by default). The location of the output is controlled via JITDUMPDIR environment variable or via <a class="reference internal" href="#doxid-group-dnnl-api-service-1gafb0fb0d37d72bc58386ba97bb858f8f7"><span class="std std-ref">dnnl_set_jit_profiling_jitdumpdir()</span></a> function.</p></li>
+<li><p><a class="reference internal" href="#doxid-group-dnnl-api-service-1gacb5b174589525cce34589ef4ef56462f"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_PERFMAP</span></a> produce Linux-specific perf-pid.map output (off by default). The output is always placed into /tmp.</p></li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">flags</span></code> value is invalid, and <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_profilers.html#doxid-dev-guide-profilers"><span class="std std-ref">Profiling oneDNN Performance</span></a></p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga533341aaf1402e27d1225d1a59819a62"><span id="index-8"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_jit_profiling_jitdumpdir</span><span class="p">(</span><span class="k">const</span> <span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&amp;</span> <span class="n">dir</span><span class="p">)</span></pre>
+<p>Sets JIT dump output path.</p>
+<p>Only applicable to Linux and is only used when profiling flags have DNNL_JIT_PROFILE_LINUX_PERF bit set.</p>
+<p>After the first JIT kernel is generated, the jitdump output will be placed into temporary directory created using the mkdtemp template ‘dir/.debug/jit/dnnl.XXXXXX’.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This setting overrides JITDUMPDIR environment variable. If JITDUMPDIR is not set, and this function is never called, the path defaults to HOME. Passing NULL reverts the value to default.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The directory is accessed only when the first JIT kernel is being created. JIT profiling will be disabled in case of any errors accessing or creating this directory.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>dir</p></td>
+<td><p>JIT dump output path.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> if the output directory was set correctly and an error status otherwise.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa3a8579e8afc4e23344cd3115b0e81de1"><span class="std std-ref">dnnl_unimplemented</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda4316423dfe3ade85c292aa38185f9817"><span class="std std-ref">dnnl::status::unimplemented</span></a> on Windows.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_profilers.html#doxid-dev-guide-profilers"><span class="std std-ref">Profiling oneDNN Performance</span></a></p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga08734310b5f1ca794c64b6a5b944b698"><span id="index-9"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_max_cpu_isa</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">cpu_isa</span></a><span></span> <span class="n">isa</span><span class="p">)</span></pre>
+<p>Sets the maximal ISA the library can dispatch to on the CPU.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">dnnl::cpu_isa</span></a> for the list of the values accepted by the C and C++ API functions respectively.</p>
+<p>This function has effect only once, and returns an error on subsequent calls. It should also be invoked before any other oneDNN API call, otherwise it may return an error.</p>
+<p>This function overrides the DNNL_MAX_CPU_ISA environment variable. The environment variable can be set to the desired maximal ISA name in upper case and with dnnl_cpu_isa prefix removed. For example: <code class="docutils literal notranslate"><span class="pre">DNNL_MAX_CPU_ISA=AVX2</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The ISAs are only partially ordered:</p>
+<ul class="simple">
+<li><p>SSE41 &lt; AVX &lt; AVX2 &lt; AVX2_VNNI &lt; AVX2_VNNI_2,</p></li>
+<li><p>AVX2 &lt; AVX512_CORE &lt; AVX512_CORE_VNNI &lt; AVX512_CORE_BF16 &lt; AVX10_1_512 &lt; AVX10_1_512_AMX &lt; AVX10_1_512_AMX_FP16,</p></li>
+<li><p>AVX2_VNNI &lt; AVX10_1_512. Aliases:</p></li>
+<li><p>AVX512_CORE_FP16 = AVX10_1_512</p></li>
+<li><p>AVX512_CORE_AMX = AVX10_1_512_AMX</p></li>
+<li><p>AVX512_CORE_AMX_FP16 = AVX10_1_512_AMX_FP16</p></li>
+</ul>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>isa</p></td>
+<td><p>Maximal ISA the library should dispatch to. Pass <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1gga303bab5d2e7b371bb44495864df21dd2a334f526a8651da897123990b8c919928"><span class="std std-ref">dnnl_cpu_isa_default</span></a> / <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1ggabad017feb1850634bf3babdb68234f83a56a0edddbeaaf449d233434fb1860724"><span class="std std-ref">dnnl::cpu_isa::isa_default</span></a> to remove ISA restrictions (except for ISAs with initial support in the library).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success and a <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">isa</span></code> parameter is invalid or the ISA cannot be changed at this time.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa3a8579e8afc4e23344cd3115b0e81de1"><span class="std std-ref">dnnl_unimplemented</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda4316423dfe3ade85c292aa38185f9817"><span class="std std-ref">dnnl::status::unimplemented</span></a> if the feature was disabled at build time (see <a class="reference internal" href="dev_guide_build_options.html#doxid-dev-guide-build-options"><span class="std std-ref">Build Options</span></a> for more details).</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html#doxid-dev-guide-cpu-dispatcher-control"><span class="std std-ref">CPU Dispatcher Control</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga3953f71c3f0126d9cc005a1ceff65e8b"><span id="index-10"></span><a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">cpu_isa</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">get_effective_cpu_isa</span><span class="p">()</span></pre>
+<p>Gets the maximal ISA the library can dispatch to on the CPU.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">dnnl::cpu_isa</span></a> for the list of the values returned by the C and C++ API functions respectively.</p>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a> value reflecting the maximal ISA the library may dispatch to.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html#doxid-dev-guide-cpu-dispatcher-control"><span class="std std-ref">CPU Dispatcher Control</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga29aa5fb708d803e091ac61dc67f9e6ed"><span id="index-11"></span><a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1ga7acc4d3516304ae68a1289551d8f2cdd"><span class="std std-ref">status</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">set_cpu_isa_hints</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">cpu_isa_hints</span></a><span></span> <span class="n">isa_hints</span><span class="p">)</span></pre>
+<p>Sets the hints flag for the CPU ISA.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">dnnl::cpu_isa_hints</span></a> for the list of the values accepted by the C and C++ API functions respectively.</p>
+<p>This function has effect only once, and returns an error on subsequent calls. It should also be invoked before any other oneDNN API call, otherwise it may return an error.</p>
+<p>This function overrides the DNNL_CPU_ISA_HINTS environment variable.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>isa_hints</p></td>
+<td><p>CPU ISA hints to be passed over to the implementation. Pass <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1ggaf356412d94e35579bd509ed1fa174f5da9e598ac27ce94827b20cab264d623da4"><span class="std std-ref">dnnl_cpu_isa_no_hints</span></a> / <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1ggaf574021058ebc6965da14fc4387dd0c4a5c2d3f6f845dca6d90d7a1c445644c99"><span class="std std-ref">dnnl::cpu_isa_hints::no_hints</span></a> to use default features i.e. no hints.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success and a <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa38efb4adabcae7c9e6479e8ee1242b9b"><span class="std std-ref">dnnl_runtime_error</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda5b32065884bcc1f2ed126c47e6410808"><span class="std std-ref">dnnl::status::runtime_error</span></a> if the ISA hints cannot be specified at the current time.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa3a8579e8afc4e23344cd3115b0e81de1"><span class="std std-ref">dnnl_unimplemented</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda4316423dfe3ade85c292aa38185f9817"><span class="std std-ref">dnnl::status::unimplemented</span></a> if the feature was disabled at build time (see <a class="reference internal" href="dev_guide_build_options.html#doxid-dev-guide-build-options"><span class="std std-ref">Build Options</span></a> for more details).</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_isa_hints.html#doxid-dev-guide-cpu-isa-hints"><span class="std std-ref">CPU ISA Hints</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga8bee13aa79a9711489b401e9c4252ff2"><span id="index-12"></span><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">cpu_isa_hints</span></a><span></span> <span class="n">dnnl</span><span class="o">::</span><span class="n">get_cpu_isa_hints</span><span class="p">()</span></pre>
+<p>Gets the ISA specific hints that library can follow.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">dnnl::cpu_isa_hints</span></a> for the list of the values returned by the C and C++ API functions respectively.</p>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a> value reflecting the ISA specific hints the library can follow.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_isa_hints.html#doxid-dev-guide-cpu-isa-hints"><span class="std std-ref">CPU ISA Hints</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga03c8f4af3d01f76060f98e78039837fc"><span id="index-13"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_set_jit_dump</span><span class="p">(</span><span class="kt">int</span> <span class="n">enable</span><span class="p">)</span></pre>
+<p>Configures dumping of JIT-generated code.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This setting overrides the DNNL_JIT_DUMP environment variable.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>enable</p></td>
+<td><p>Flag value. Set to 0 to disable and set to 1 to enable.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">flag</span></code> value is invalid, and <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga51ef634e4f201a12d32e573955943f48"><span id="index-14"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_set_jit_profiling_flags</span><span class="p">(</span><span class="kt">unsigned</span> <span class="n">flags</span><span class="p">)</span></pre>
+<p>Sets library profiling flags.</p>
+<p>The flags define which profilers are supported.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This setting overrides DNNL_JIT_PROFILE environment variable.</p>
+</div>
+<p>Passing <a class="reference internal" href="#doxid-group-dnnl-api-service-1ga7ceacd6430988ed4bf58f5b01cd9c5a4"><span class="std std-ref">DNNL_JIT_PROFILE_NONE</span></a> disables profiling completely.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>flags</p></td>
+<td><p>Profiling flags that can contain the following bits:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga137013d98ef736973ebbe1ecd4a4b2c9"><span class="std std-ref">DNNL_JIT_PROFILE_VTUNE</span></a> integration with VTune Profiler (on by default)</p></li>
+<li><p><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga5afb7d615d8507b8d5469553e6dde2a7"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_JITDUMP</span></a> produce Linux-specific jit-pid.dump output (off by default). The location of the output is controlled via JITDUMPDIR environment variable or via <a class="reference internal" href="#doxid-group-dnnl-api-service-1gafb0fb0d37d72bc58386ba97bb858f8f7"><span class="std std-ref">dnnl_set_jit_profiling_jitdumpdir()</span></a> function.</p></li>
+<li><p><a class="reference internal" href="#doxid-group-dnnl-api-service-1gacb5b174589525cce34589ef4ef56462f"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_PERFMAP</span></a> produce Linux-specific perf-pid.map output (off by default). The output is always placed into /tmp.</p></li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">flags</span></code> value is invalid, and <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_profilers.html#doxid-dev-guide-profilers"><span class="std std-ref">Profiling oneDNN Performance</span></a></p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1gafb0fb0d37d72bc58386ba97bb858f8f7"><span id="index-15"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_set_jit_profiling_jitdumpdir</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">dir</span><span class="p">)</span></pre>
+<p>Sets JIT dump output path.</p>
+<p>Only applicable to Linux and is only used when profiling flags have DNNL_JIT_PROFILE_LINUX_PERF bit set.</p>
+<p>After the first JIT kernel is generated, the jitdump output will be placed into temporary directory created using the mkdtemp template ‘dir/.debug/jit/dnnl.XXXXXX’.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This setting overrides JITDUMPDIR environment variable. If JITDUMPDIR is not set, and this function is never called, the path defaults to HOME. Passing NULL reverts the value to default.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The directory is accessed only when the first JIT kernel is being created. JIT profiling will be disabled in case of any errors accessing or creating this directory.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>dir</p></td>
+<td><p>JIT dump output path.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> if the output directory was set correctly and an error status otherwise.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa3a8579e8afc4e23344cd3115b0e81de1"><span class="std std-ref">dnnl_unimplemented</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda4316423dfe3ade85c292aa38185f9817"><span class="std std-ref">dnnl::status::unimplemented</span></a> on Windows.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_profilers.html#doxid-dev-guide-profilers"><span class="std std-ref">Profiling oneDNN Performance</span></a></p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga4b7f3b3299482f88f1a0aa61a4707156"><span id="index-16"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_set_max_cpu_isa</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a><span></span> <span class="n">isa</span><span class="p">)</span></pre>
+<p>Sets the maximal ISA the library can dispatch to on the CPU.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">dnnl::cpu_isa</span></a> for the list of the values accepted by the C and C++ API functions respectively.</p>
+<p>This function has effect only once, and returns an error on subsequent calls. It should also be invoked before any other oneDNN API call, otherwise it may return an error.</p>
+<p>This function overrides the DNNL_MAX_CPU_ISA environment variable. The environment variable can be set to the desired maximal ISA name in upper case and with dnnl_cpu_isa prefix removed. For example: <code class="docutils literal notranslate"><span class="pre">DNNL_MAX_CPU_ISA=AVX2</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The ISAs are only partially ordered:</p>
+<ul class="simple">
+<li><p>SSE41 &lt; AVX &lt; AVX2 &lt; AVX2_VNNI &lt; AVX2_VNNI_2,</p></li>
+<li><p>AVX2 &lt; AVX512_CORE &lt; AVX512_CORE_VNNI &lt; AVX512_CORE_BF16 &lt; AVX10_1_512 &lt; AVX10_1_512_AMX &lt; AVX10_1_512_AMX_FP16,</p></li>
+<li><p>AVX2_VNNI &lt; AVX10_1_512. Aliases:</p></li>
+<li><p>AVX512_CORE_FP16 = AVX10_1_512</p></li>
+<li><p>AVX512_CORE_AMX = AVX10_1_512_AMX</p></li>
+<li><p>AVX512_CORE_AMX_FP16 = AVX10_1_512_AMX_FP16</p></li>
+</ul>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>isa</p></td>
+<td><p>Maximal ISA the library should dispatch to. Pass <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1gga303bab5d2e7b371bb44495864df21dd2a334f526a8651da897123990b8c919928"><span class="std std-ref">dnnl_cpu_isa_default</span></a> / <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1ggabad017feb1850634bf3babdb68234f83a56a0edddbeaaf449d233434fb1860724"><span class="std std-ref">dnnl::cpu_isa::isa_default</span></a> to remove ISA restrictions (except for ISAs with initial support in the library).</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success and a <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">isa</span></code> parameter is invalid or the ISA cannot be changed at this time.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa3a8579e8afc4e23344cd3115b0e81de1"><span class="std std-ref">dnnl_unimplemented</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda4316423dfe3ade85c292aa38185f9817"><span class="std std-ref">dnnl::status::unimplemented</span></a> if the feature was disabled at build time (see <a class="reference internal" href="dev_guide_build_options.html#doxid-dev-guide-build-options"><span class="std std-ref">Build Options</span></a> for more details).</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html#doxid-dev-guide-cpu-dispatcher-control"><span class="std std-ref">CPU Dispatcher Control</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1gac55836cf36bc25f8635e459678303570"><span id="index-17"></span><a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_get_effective_cpu_isa</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span></pre>
+<p>Gets the maximal ISA the library can dispatch to on the CPU.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa.html#doxid-group-dnnl-api-service-1gabad017feb1850634bf3babdb68234f83"><span class="std std-ref">dnnl::cpu_isa</span></a> for the list of the values returned by the C and C++ API functions respectively.</p>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_cpu_isa_t.html#doxid-group-dnnl-api-service-1ga303bab5d2e7b371bb44495864df21dd2"><span class="std std-ref">dnnl_cpu_isa_t</span></a> value reflecting the maximal ISA the library may dispatch to.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html#doxid-dev-guide-cpu-dispatcher-control"><span class="std std-ref">CPU Dispatcher Control</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1gad078a384ab0e078d81595686efd26ed2"><span id="index-18"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_set_cpu_isa_hints</span><span class="p">(</span><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a><span></span> <span class="n">isa_hints</span><span class="p">)</span></pre>
+<p>Sets the hints flag for the CPU ISA.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">dnnl::cpu_isa_hints</span></a> for the list of the values accepted by the C and C++ API functions respectively.</p>
+<p>This function has effect only once, and returns an error on subsequent calls. It should also be invoked before any other oneDNN API call, otherwise it may return an error.</p>
+<p>This function overrides the DNNL_CPU_ISA_HINTS environment variable.</p>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>isa_hints</p></td>
+<td><p>CPU ISA hints to be passed over to the implementation. Pass <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1ggaf356412d94e35579bd509ed1fa174f5da9e598ac27ce94827b20cab264d623da4"><span class="std std-ref">dnnl_cpu_isa_no_hints</span></a> / <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1ggaf574021058ebc6965da14fc4387dd0c4a5c2d3f6f845dca6d90d7a1c445644c99"><span class="std std-ref">dnnl::cpu_isa_hints::no_hints</span></a> to use default features i.e. no hints.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success and a <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa38efb4adabcae7c9e6479e8ee1242b9b"><span class="std std-ref">dnnl_runtime_error</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda5b32065884bcc1f2ed126c47e6410808"><span class="std std-ref">dnnl::status::runtime_error</span></a> if the ISA hints cannot be specified at the current time.</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aa3a8579e8afc4e23344cd3115b0e81de1"><span class="std std-ref">dnnl_unimplemented</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda4316423dfe3ade85c292aa38185f9817"><span class="std std-ref">dnnl::status::unimplemented</span></a> if the feature was disabled at build time (see <a class="reference internal" href="dev_guide_build_options.html#doxid-dev-guide-build-options"><span class="std std-ref">Build Options</span></a> for more details).</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_isa_hints.html#doxid-dev-guide-cpu-isa-hints"><span class="std std-ref">CPU ISA Hints</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1gad93f9f4bf3c9e12a2be7337b1e41d145"><span id="index-19"></span><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_get_cpu_isa_hints</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span></pre>
+<p>Gets the ISA specific hints that library can follow.</p>
+<p>See <a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a> and <a class="reference internal" href="enum_dnnl_cpu_isa_hints.html#doxid-group-dnnl-api-service-1gaf574021058ebc6965da14fc4387dd0c4"><span class="std std-ref">dnnl::cpu_isa_hints</span></a> for the list of the values returned by the C and C++ API functions respectively.</p>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html#doxid-group-dnnl-api-service-1gaf356412d94e35579bd509ed1fa174f5d"><span class="std std-ref">dnnl_cpu_isa_hints_t</span></a> value reflecting the ISA specific hints the library can follow.</p>
+<p class="rubric">See also:</p>
+<p><a class="reference internal" href="dev_guide_cpu_isa_hints.html#doxid-dev-guide-cpu-isa-hints"><span class="std std-ref">CPU ISA Hints</span></a> for more details</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga14cc3b56337322e1e5132c5ee0c84856"><span id="index-20"></span><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1gad24f9ded06e34d3ee71e7fc4b408d57a"><span class="std std-ref">dnnl_status_t</span></a><span></span> <span class="n">DNNL_API</span> <span class="n">dnnl_set_verbose</span><span class="p">(</span><span class="kt">int</span> <span class="n">level</span><span class="p">)</span></pre>
+<p>Configures verbose output to stdout.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Enabling verbose output affects performance. This setting overrides the ONEDNN_VERBOSE environment variable.</p>
+</div>
+<p class="rubric">Parameters:</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<colgroup>
+<col style="width: 20.0%" />
+<col style="width: 80.0%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p>level</p></td>
+<td><p>Verbosity level:</p>
+<ul class="simple">
+<li><p>0: no verbose output (default),</p></li>
+<li><p>1: primitive and graph information at execution,</p></li>
+<li><p>2: primitive and graph information at creation/compilation and execution.</p></li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="rubric">Returns:</p>
+<p><a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaecec97c787d74a33924abcf16ae4f51c"><span class="std std-ref">dnnl_invalid_arguments</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda242ac674d98ee2191f0bbf6de851d2d0"><span class="std std-ref">dnnl::status::invalid_arguments</span></a> if the <code class="docutils literal notranslate"><span class="pre">level</span></code> value is invalid, and <a class="reference internal" href="enum_dnnl_status_t.html#doxid-group-dnnl-api-utils-1ggad24f9ded06e34d3ee71e7fc4b408d57aaa31395e9dccc103cf166cf7b38fc5b9c"><span class="std std-ref">dnnl_success</span></a> / <a class="reference internal" href="enum_dnnl_status.html#doxid-group-dnnl-api-service-1gga7acc4d3516304ae68a1289551d8f2cdda260ca9dd8a4577fc00b7bd5810298076"><span class="std std-ref">dnnl::status::success</span></a> on success.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga73e40d184386e9d9ca917756e76fb232"><span id="index-21"></span><span></span><span class="k">const</span> <a class="reference internal" href="struct_dnnl_version_t.html#doxid-structdnnl-version-t"><span class="std std-ref">dnnl_version_t</span></a><span></span> <span class="n">DNNL_API</span><span class="o">*</span> <span class="n">dnnl_version</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span></pre>
+<p>Returns library version information.</p>
+<p class="rubric">Returns:</p>
+<p>Pointer to a constant structure containing</p>
+<ul class="simple">
+<li><p>major: major version number,</p></li>
+<li><p>minor: minor version number,</p></li>
+<li><p>patch: patch release number,</p></li>
+<li><p>hash: git commit hash.</p></li>
+</ul>
+</section>
+<section id="macros">
+<h3>Macros<a class="headerlink" href="#macros" title="Link to this heading">#</a></h3>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga5afb7d615d8507b8d5469553e6dde2a7"><span id="index-22"></span><span></span><span class="cp">#define DNNL_JIT_PROFILE_LINUX_JITDUMP</span></pre>
+<p>Enable Linux perf integration via jitdump files.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga66a48a940ab2916d360b0bb677a70e5f"><span id="index-23"></span><span></span><span class="cp">#define DNNL_JIT_PROFILE_LINUX_JITDUMP_USE_TSC</span></pre>
+<p>Instruct Linux perf integration via jitdump files to use TSC.</p>
+<p><a class="reference internal" href="#doxid-group-dnnl-api-service-1ga5afb7d615d8507b8d5469553e6dde2a7"><span class="std std-ref">DNNL_JIT_PROFILE_LINUX_JITDUMP</span></a> must be set too for this to take effect.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga5a1d61af9d5b15dbc6d7d33f0f3e22bc"><span id="index-24"></span><span></span><span class="cp">#define DNNL_JIT_PROFILE_LINUX_PERF</span></pre>
+<p>Enable Linux perf integration (both jitdump and perfmap)</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1gacb5b174589525cce34589ef4ef56462f"><span id="index-25"></span><span></span><span class="cp">#define DNNL_JIT_PROFILE_LINUX_PERFMAP</span></pre>
+<p>Enable Linux perf integration via perfmap files.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga7ceacd6430988ed4bf58f5b01cd9c5a4"><span id="index-26"></span><span></span><span class="cp">#define DNNL_JIT_PROFILE_NONE</span></pre>
+<p>Disable profiling completely.</p>
+<pre class="highlight doxyrest-title-code-block literal-block" id="doxid-group-dnnl-api-service-1ga137013d98ef736973ebbe1ecd4a4b2c9"><span id="index-27"></span><span></span><span class="cp">#define DNNL_JIT_PROFILE_VTUNE</span></pre>
+<p>Enable VTune Profiler integration.</p>
+</section>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="enum_dnnl_fpmath_mode.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">enum dnnl::fpmath_mode</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="enum_dnnl_cpu_isa.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">enum dnnl::cpu_isa</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#overview">Overview</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#detailed-documentation">Detailed Documentation</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#typedefs">Typedefs</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#global-functions">Global Functions</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#macros">Macros</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2016-2024 Intel Corporation.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

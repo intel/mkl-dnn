@@ -1,0 +1,1168 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Profiling oneDNN Performance &#8212; oneDNN v3.6.2 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=3c74b3bc" />
+    <link rel="stylesheet" type="text/css" href="_static/doxyrest-pygments.css?v=ff3f4257" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=d49039f0"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script src="_static/target-highlight.js?v=df7d332b"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'dev_guide_profilers';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Inspecting JIT Code" href="dev_guide_inspecting_jit.html" />
+    <link rel="prev" title="Benchmarking Performance" href="dev_guide_benchdnn.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">oneDNN v3.6.2 documentation</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="build_and_link.html">Building and Linking</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build.html">Build from Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_build_options.html">Build Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_link.html">Linking to the Library</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_getting_started_cpp.html">Getting started</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_memory_format_propagation_cpp.html">Memory Format Propagation</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_inference_and_training_aspects.html">Inference and Training Aspects</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference.html">Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_inference_int8.html">Int8 Inference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_training_bf16.html">Bfloat16 Training</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="dev_guide_attributes.html">Primitive Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_fpmath_mode.html">Primitive Attributes: floating-point math mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_accumulation_mode.html">Primitive Attributes: accumulation mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_rounding_mode.html">Primitive Attributes: rounding mode</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_deterministic.html">Primitive Attributes: deterministic</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_quantization.html">Primitive Attributes: Quantization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_post_ops.html">Primitive Attributes: Post-ops</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_attributes_scratchpad.html">Primitive Attributes: Scratchpad</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_data_types.html">Data Types</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cross_engine_reorder_cpp.html">Reorder between CPU and GPU engines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_c_and_cpp_apis.html">API</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="interop_with_dpcpp_and_opencl.html">Interoperability with DPC++ and OpenCL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_opencl_interoperability.html">OpenCL Interoperability</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_dpcpp_interoperability.html">DPC++ Interoperability</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="supported_primitives.html">Supported Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_convolution.html">Convolution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inner_product.html">Inner Product</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_matmul.html">Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_rnn.html">RNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_batch_normalization.html">Batch Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_binary.html">Binary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_concat.html">Concat</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_eltwise.html">Eltwise</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_group_normalization.html">Group Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_layer_normalization.html">Layer Normalization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_lrn.html">Local Response Normalization (LRN)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_pooling.html">Pooling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_prelu.html">PReLU</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_resampling.html">Resampling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_shuffle.html">Shuffle</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_softmax.html">Softmax</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_sum.html">Sum</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reorder.html">Reorder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_reduction.html">Reduction</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="graph_extension.html">Graph Extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_graph_low_precision.html">Low Precision</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="graph_supported_operations.html">Supported Operations</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_abs.html">Abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_absbackward.html">AbsBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_add.html">Add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpool.html">AvgPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_avgpoolbackward.html">AvgPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormforwardtraining.html">BatchNormForwardTraining</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnorminference.html">BatchNormInference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_batchnormtrainingbackward.html">BatchNormTrainingBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasadd.html">BiasAdd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_biasaddbackward.html">BiasAddBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clamp.html">Clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_clampbackward.html">ClampBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_concat.html">Concat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolution.html">Convolution</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwarddata.html">ConvolutionBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convolutionbackwardweights.html">ConvolutionBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtranspose.html">ConvTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwarddata.html">ConvTransposeBackwardData</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_convtransposebackwardweights.html">ConvTransposeBackwardWeights</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dequantize.html">Dequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_divide.html">Divide</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicdequantize.html">DynamicDequantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_dynamicquantize.html">DynamicQuantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elu.html">Elu</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_elubackward.html">EluBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_end.html">End</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_exp.html">Exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_groupnorm.html">GroupNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelu.html">GELU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_gelubackward.html">GELUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoid.html">HardSigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardsigmoidbackward.html">HardSigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswish.html">HardSwish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_hardswishbackward.html">HardSwishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolate.html">Interpolate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_interpolatebackward.html">InterpolateBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernorm.html">LayerNorm</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_layernormbackward.html">LayerNormBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_leakyrelu.html">LeakyReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_log.html">Log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmax.html">LogSoftmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_logsoftmaxbackward.html">LogSoftmaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_matmul.html">MatMul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maximum.html">Maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpool.html">MaxPool</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_maxpoolbackward.html">MaxPoolBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_minimum.html">Minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mish.html">Mish</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_mishbackward.html">MishBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_multiply.html">Multiply</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_pow.html">Pow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelu.html">PReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_prelubackward.html">PReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_quantize.html">Quantize</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reciprocal.html">Reciprocal</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel1.html">ReduceL1</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducel2.html">ReduceL2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemax.html">ReduceMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemean.html">ReduceMean</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducemin.html">ReduceMin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reduceprod.html">ReduceProd</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reducesum.html">ReduceSum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relu.html">ReLU</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_relubackward.html">ReLUBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_reorder.html">Reorder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_round.html">Round</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_select.html">Select</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoid.html">Sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sigmoidbackward.html">SigmoidBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmax.html">SoftMax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softmaxbackward.html">SoftMaxBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplus.html">SoftPlus</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_softplusbackward.html">SoftPlusBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrt.html">Sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_sqrtbackward.html">SqrtBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_square.html">Square</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_squareddifference.html">SquaredDifference</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_staticreshape.html">StaticReshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_statictranspose.html">StaticTranspose</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_subtract.html">Subtract</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanh.html">Tanh</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_tanhbackward.html">TanhBackward</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_typecast.html">TypeCast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="dev_guide_op_wildcard.html">Wildcard</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_fusion_patterns.html">Supported Fusion Patterns</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_dump.html">Graph Dump</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_constant_tensor_cache.html">Constant Tensor Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_graph_compiler.html">Graph Compiler</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="dev_guide_examples.html">Examples</a></li>
+<li class="toctree-l1 current active has-children"><a class="reference internal" href="performance_profiling_and_inspection.html">Performance Profiling and Inspection</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose.html">Verbose Mode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_performance_settings.html">Configuring oneDNN for Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_benchdnn.html">Benchmarking Performance</a></li>
+<li class="toctree-l2 current active"><a class="current reference internal" href="#">Profiling oneDNN Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_inspecting_jit.html">Inspecting JIT Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_performance_profiling_cpp.html">Performance Profiling Example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_dispatcher_control.html">CPU Dispatcher Control</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_cpu_isa_hints.html">CPU ISA Hints</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_verbose_table.html">Verbose Message Catalogue</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="advanced_topics.html">Advanced Topics</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_transition_to_dnnl.html">Transitioning from Intel MKL-DNN to oneDNN</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_understanding_memory_formats.html">Understanding Memory Formats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_int8_computations.html">Nuances of int8 Computations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_primitive_cache.html">Primitive Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_persistent_cache.html">Persistent Cache</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_threadpool.html">Using oneDNN with Threadpool-Based Threading</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_experimental.html">Experimental features</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="ukernels.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_basic_concepts.html">Basic Concepts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_brgemm.html">Batch-Reduce General Matrix Multiplication</a></li>
+<li class="toctree-l2"><a class="reference internal" href="dev_guide_ukernel_transform.html">Data transformation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="page_cpu_brgemm_example_cpp.html">BRGeMM ukernel example</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="group_dnnl_api.html">oneDNN API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitives.html">Primitives</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_primitives_common.html">Common</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_alg_kind_t.html">enum dnnl_alg_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags_t.html">enum dnnl_normalization_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_primitive_kind_t.html">enum dnnl_primitive_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind_t.html">enum dnnl_prop_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query_t.html">enum dnnl_query_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_normalization_flags.html">enum dnnl::normalization_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_query.html">enum dnnl::query</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_exec_arg_t.html">struct dnnl_exec_arg_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive.html">struct dnnl_primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc.html">struct dnnl_primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive-2.html">struct dnnl::primitive</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc-2.html">struct dnnl::primitive_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_desc_base.html">struct dnnl::primitive_desc_base</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_attributes.html">Attributes</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_algorithm.html">enum dnnl::algorithm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rounding_mode_t.html">enum dnnl_rounding_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode_t.html">enum dnnl_scratchpad_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_prop_kind.html">enum dnnl::prop_kind</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rounding_mode.html">enum dnnl::rounding_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_scratchpad_mode.html">enum dnnl::scratchpad_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops.html">struct dnnl_post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr.html">struct dnnl_primitive_attr</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_post_ops-2.html">struct dnnl::post_ops</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_primitive_attr-2.html">struct dnnl::primitive_attr</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reorder.html">Reorder</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reorder.html">struct dnnl::reorder</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_concat.html">Concat</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_concat.html">struct dnnl::concat</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sum.html">Sum</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_sum.html">struct dnnl::sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_binary.html">Binary</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_binary.html">struct dnnl::binary</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_convolution.html">Convolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_data.html">struct dnnl::convolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_backward_weights.html">struct dnnl::convolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_convolution_forward.html">struct dnnl::convolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_deconvolution.html">Deconvolution</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_data.html">struct dnnl::deconvolution_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_backward_weights.html">struct dnnl::deconvolution_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_deconvolution_forward.html">struct dnnl::deconvolution_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_shuffle.html">Shuffle</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_backward.html">struct dnnl::shuffle_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_shuffle_forward.html">struct dnnl::shuffle_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_eltwise.html">Eltwise</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_backward.html">struct dnnl::eltwise_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_eltwise_forward.html">struct dnnl::eltwise_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_softmax.html">Softmax</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_backward.html">struct dnnl::softmax_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_softmax_forward.html">struct dnnl::softmax_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_pooling.html">Pooling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_backward.html">struct dnnl::pooling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_pooling_forward.html">struct dnnl::pooling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_prelu.html">PReLU</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_backward.html">struct dnnl::prelu_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_prelu_forward.html">struct dnnl::prelu_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_lrn.html">LRN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_backward.html">struct dnnl::lrn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lrn_forward.html">struct dnnl::lrn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_batch_normalization.html">Batch Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_backward.html">struct dnnl::batch_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_batch_normalization_forward.html">struct dnnl::batch_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_group_normalization.html">Group Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_backward.html">struct dnnl::group_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_group_normalization_forward.html">struct dnnl::group_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_layer_normalization.html">Layer Normalization</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_backward.html">struct dnnl::layer_normalization_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_layer_normalization_forward.html">struct dnnl::layer_normalization_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_inner_product.html">Inner Product</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_data.html">struct dnnl::inner_product_backward_data</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_backward_weights.html">struct dnnl::inner_product_backward_weights</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_inner_product_forward.html">struct dnnl::inner_product_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_rnn.html">RNN</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction_t.html">enum dnnl_rnn_direction_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags_t.html">enum dnnl_rnn_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_direction.html">enum dnnl::rnn_direction</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_rnn_flags.html">enum dnnl::rnn_flags</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_backward.html">struct dnnl::augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_augru_forward.html">struct dnnl::augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_backward.html">struct dnnl::gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_gru_forward.html">struct dnnl::gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_backward.html">struct dnnl::lbr_augru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_augru_forward.html">struct dnnl::lbr_augru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_backward.html">struct dnnl::lbr_gru_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lbr_gru_forward.html">struct dnnl::lbr_gru_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_backward.html">struct dnnl::lstm_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_lstm_forward.html">struct dnnl::lstm_forward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_rnn_primitive_desc_base.html">struct dnnl::rnn_primitive_desc_base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_backward.html">struct dnnl::vanilla_rnn_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_vanilla_rnn_forward.html">struct dnnl::vanilla_rnn_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_matmul.html">Matrix Multiplication</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_matmul.html">struct dnnl::matmul</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_resampling.html">Resampling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_backward.html">struct dnnl::resampling_backward</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_resampling_forward.html">struct dnnl::resampling_forward</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_reduction.html">Reduction</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_reduction.html">struct dnnl::reduction</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_primitive_cache.html">Primitive Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_profiling.html">Profiling</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_profiling_data_kind.html">enum dnnl::profiling_data_kind</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_blas.html">BLAS functions</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_common.html">Common API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_engine_kind_t.html">enum dnnl_engine_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine.html">struct dnnl_engine</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_engine-2.html">struct dnnl::engine</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_stream.html">Stream</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_stream_flags_t.html">enum dnnl_stream_flags_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream.html">struct dnnl_stream</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_stream-2.html">struct dnnl::stream</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_fpmath_mode.html">Floating-point Math Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode_t.html">enum dnnl_fpmath_mode_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_fpmath_mode.html">enum dnnl::fpmath_mode</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_service.html">Service</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa.html">enum dnnl::cpu_isa</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints.html">enum dnnl::cpu_isa_hints</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_hints_t.html">enum dnnl_cpu_isa_hints_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_cpu_isa_t.html">enum dnnl_cpu_isa_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status.html">enum dnnl::status</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_version_t.html">struct dnnl_version_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_utils.html">Utilities</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_status_t.html">enum dnnl_status_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_error.html">struct dnnl::error</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle.html">template struct dnnl::handle</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_handle_traits.html">template struct dnnl::handle_traits</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_accumulation_mode.html">Accumulation Mode</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode.html">enum dnnl::accumulation_mode</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_accumulation_mode_t.html">enum dnnl_accumulation_mode_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_data_types.html">Data types</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_data_type_t.html">enum dnnl_data_type_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_memory.html">Memory</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_kind_t.html">enum dnnl_format_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_format_tag_t.html">enum dnnl_format_tag_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_profiling_data_kind_t.html">enum dnnl_profiling_data_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sparse_encoding_t.html">enum dnnl_sparse_encoding_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory.html">struct dnnl_memory</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory_desc.html">struct dnnl_memory_desc</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_memory-2.html">struct dnnl::memory</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_graph_api.html">Graph API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_allocator.html">Allocator</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_allocator.html">class dnnl::graph::allocator</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_engine.html">Engine</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_logical_tensor.html">Logical Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_layout_type_t.html">enum dnnl_graph_layout_type_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_tensor_property_t.html">enum dnnl_graph_tensor_property_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_logical_tensor_t.html">struct dnnl_graph_logical_tensor_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_logical_tensor.html">class dnnl::graph::logical_tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_tensor.html">Tensor</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_tensor.html">class dnnl::graph::tensor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_op.html">Op</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_attr_t.html">enum dnnl_graph_op_attr_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_op_kind_t.html">enum dnnl_graph_op_kind_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_op.html">class dnnl::graph::op</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_partition.html">Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_graph_partition_policy_t.html">enum dnnl_graph_partition_policy_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_partition.html">class dnnl::graph::partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition.html">Compiled Partition</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_graph_inplace_pair_t.html">struct dnnl_graph_inplace_pair_t</a></li>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_compiled_partition.html">class dnnl::graph::compiled_partition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_graph.html">Graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="class_dnnl_graph_graph.html">class dnnl::graph::graph</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_compiled_partition_cache.html">Compiled Partition Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_constant_tensor_cache.html">Constant Tensor Cache</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_graph_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_ocl_interop.html">OpenCL interoperability API</a></li>
+<li class="toctree-l4"><a class="reference internal" href="group_dnnl_graph_api_sycl_interop.html">SYCL interoperability API</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_graph.html">namespace dnnl::graph</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_interop.html">Runtime interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ocl_interop.html">OpenCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_ocl_interop.html">namespace dnnl::ocl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ocl_interop_memory_kind_t.html">enum dnnl_ocl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_sycl_interop.html">SYCL interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_sycl_interop.html">namespace dnnl::sycl_interop</a></li>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_sycl_interop_memory_kind_t.html">enum dnnl_sycl_interop_memory_kind_t</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_threadpool_interop.html">Threadpool interoperability API</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="namespace_dnnl_threadpool_interop.html">namespace dnnl::threadpool_interop</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="group_dnnl_api_ukernel.html">Ukernels</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3 has-children"><a class="reference internal" href="group_dnnl_api_ukernel_brgemm.html">BRGeMM ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_brgemm.html">struct dnnl::ukernel::brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_brgemm.html">struct dnnl_brgemm</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_transform.html">struct dnnl_transform</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_transform.html">struct dnnl::ukernel::transform</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="namespace_dnnl_ukernel.html">namespace dnnl::ukernel</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l4"><a class="reference internal" href="enum_dnnl_ukernel_pack_type.html">enum dnnl::ukernel::pack_type</a></li>
+<li class="toctree-l4"><a class="reference internal" href="struct_dnnl_ukernel_attr_params-2.html">struct dnnl::ukernel::attr_params</a></li>
+</ul>
+</details></li>
+<li class="toctree-l3"><a class="reference internal" href="enum_dnnl_pack_type_t.html">enum dnnl_pack_type_t</a></li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="struct_dnnl_ukernel_attr_params.html">struct dnnl_ukernel_attr_params</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_dnnl.html">namespace dnnl</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="namespace_oneapi.html">namespace oneapi</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul class="simple">
+</ul>
+</details></li>
+</ul>
+</details></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+<a href="https://github.com/oneapi-src/oneDNN" target="_blank"
+   class="btn btn-sm btn-source-repository-button"
+   title="Source repository"
+   data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+
+</a>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Profiling oneDNN Performance</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-time-controls">Build-Time Controls</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#run-time-controls">Run-Time Controls</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#features-for-vtune-profiler">Features for VTune Profiler</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#itt-tagging-for-primitive-execution">ITT Tagging for Primitive Execution</a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Build-Time Controls</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Run-Time Controls</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-profiling-with-vtune-profiler">Example: Profiling with VTune Profiler</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#profiling-for-hotspots">Profiling for Hotspots</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#profiling-for-microarchitecture-information">Profiling for Microarchitecture Information</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-profiling-with-linux-perf">Example: Profiling with Linux Perf</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="profiling-onednn-performance">
+<span id="doxid-dev-guide-profilers"></span><span id="index-0"></span><h1>Profiling oneDNN Performance<a class="headerlink" href="#profiling-onednn-performance" title="Link to this heading">#</a></h1>
+<p>oneDNN uses JIT (just-in-time) code generation based on the primitive parameters and instruction set supported by the system. In order to correctly attribute performance event information, profilers must be notified about address ranges containing JIT-ed code. oneDNN supports two profilers: VTune(TM) Profiler and Linux perf.</p>
+<section id="build-time-controls">
+<h2>Build-Time Controls<a class="headerlink" href="#build-time-controls" title="Link to this heading">#</a></h2>
+<p>At build-time, support for this feature is controlled by the CMake option <code class="docutils literal notranslate"><span class="pre">ONEDNN_ENABLE_JIT_PROFILING</span></code>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>CMake Option</p></th>
+<th class="head"><p>Supported Values</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>ONEDNN_ENABLE_JIT_PROFILING</p></td>
+<td><p><strong>ON</strong> (default), OFF</p></td>
+<td><p>Enables performance profilers integration</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="run-time-controls">
+<h2>Run-Time Controls<a class="headerlink" href="#run-time-controls" title="Link to this heading">#</a></h2>
+<p>When the feature is enabled at build-time, the <code class="docutils literal notranslate"><span class="pre">ONEDNN_JIT_PROFILE</span></code> environment variable can be used to manage integration with performance profilers.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Environment Variable</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Description</p></th>
+<th class="head"><p>x64</p></th>
+<th class="head"><p>AArch64</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>ONEDNN_JIT_PROFILE</p></td>
+<td><p>0</p></td>
+<td><p>Disables any integrations</p></td>
+<td><p>x</p></td>
+<td><p>x</p></td>
+</tr>
+<tr class="row-odd"><td><p></p></td>
+<td><p>1</p></td>
+<td><p>Enables VTune Profiler integration</p></td>
+<td><p><strong>x</strong> (default)</p></td>
+<td><p>N/A</p></td>
+</tr>
+<tr class="row-even"><td><p></p></td>
+<td><p>2</p></td>
+<td><p>Enables basic Linux perf integration</p></td>
+<td><p>x</p></td>
+<td><p><strong>x</strong> (default)</p></td>
+</tr>
+<tr class="row-odd"><td><p></p></td>
+<td><p>6</p></td>
+<td><p>Enables Linux perf integration with JIT dump output</p></td>
+<td><p>x</p></td>
+<td><p>x</p></td>
+</tr>
+<tr class="row-even"><td><p></p></td>
+<td><p>14</p></td>
+<td><p>Enables Linux perf integration with JIT dump output and TSC timestamps</p></td>
+<td><p>x</p></td>
+<td><p>N/A</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Other valid values for <code class="docutils literal notranslate"><span class="pre">ONEDNN_JIT_PROFILE</span></code> include integer values representing a combination of flags accepted by the <a class="reference internal" href="group_dnnl_api_service.html#doxid-group-dnnl-api-service-1ga51ef634e4f201a12d32e573955943f48"><span class="std std-ref">dnnl_set_jit_profiling_flags</span></a> function.</p>
+<p>The default setting of the profiling flags is to enable integration with VTune Profiler; therefore it does not require any additional setup and works out of the box. Code integrating oneDNN may override this behavior.</p>
+<p>This feature can also be managed at run-time with the following functions:</p>
+<ul class="simple">
+<li><p><a class="reference internal" href="group_dnnl_api_service.html#doxid-group-dnnl-api-service-1ga51ef634e4f201a12d32e573955943f48"><span class="std std-ref">dnnl_set_jit_profiling_flags</span></a></p></li>
+<li><p><a class="reference internal" href="group_dnnl_api_service.html#doxid-group-dnnl-api-service-1gafb0fb0d37d72bc58386ba97bb858f8f7"><span class="std std-ref">dnnl_set_jit_profiling_jitdumpdir</span></a></p></li>
+</ul>
+<p>Function settings take precedence over environment variables.</p>
+<section id="features-for-vtune-profiler">
+<h3>Features for VTune Profiler<a class="headerlink" href="#features-for-vtune-profiler" title="Link to this heading">#</a></h3>
+<section id="itt-tagging-for-primitive-execution">
+<h4>ITT Tagging for Primitive Execution<a class="headerlink" href="#itt-tagging-for-primitive-execution" title="Link to this heading">#</a></h4>
+<p>oneDNN supports ITT tagging at primitive execution in order to provide performance information on the level of a oneDNN primitive. This feature is supported on both CPU and GPU.</p>
+<p>ITT tagging in oneDNN during primitive execution provides more information from VTune Profiler for the items below.</p>
+<ol class="arabic simple">
+<li><p>Get the primitives timeline chart from VTune Profiler, and identify potential performance issues.</p></li>
+<li><p>Get platform information such as an L1/L2 cache miss or level of FP vectorization on the primitive level.</p></li>
+<li><p>Map primitive with related computation kernels.</p></li>
+</ol>
+<section id="id1">
+<h5>Build-Time Controls<a class="headerlink" href="#id1" title="Link to this heading">#</a></h5>
+<p>At build-time, support for this feature is controlled by the CMake option <code class="docutils literal notranslate"><span class="pre">ONEDNN_ENABLE_ITT_TASKS</span></code>.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>CMake Option</p></th>
+<th class="head"><p>Supported Values</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>ONEDNN_ENABLE_ITT_TASKS</p></td>
+<td><p><strong>ON</strong> (default), OFF</p></td>
+<td><p>Enables ITT tagging for primitive execution</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id2">
+<h5>Run-Time Controls<a class="headerlink" href="#id2" title="Link to this heading">#</a></h5>
+<p>When the feature is enabled at build-time, the <code class="docutils literal notranslate"><span class="pre">ONEDNN_ITT_TASK_LEVEL</span></code> environment variable can be used to enable different level of ITT tagging.</p>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Environment Variable</p></th>
+<th class="head"><p>Value</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>ONEDNN_ITT_TASK_LEVEL</p></td>
+<td><p>0</p></td>
+<td><p>no ITT event will be triggered</p></td>
+</tr>
+<tr class="row-odd"><td><p></p></td>
+<td><p>1</p></td>
+<td><p>ITT events are only triggered in master thread</p></td>
+</tr>
+<tr class="row-even"><td><p></p></td>
+<td><p><strong>2</strong> (default)</p></td>
+<td><p>ITT events are triggered in all OMP/TBB threads</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+</section>
+</section>
+<section id="example-profiling-with-vtune-profiler">
+<h2>Example: Profiling with VTune Profiler<a class="headerlink" href="#example-profiling-with-vtune-profiler" title="Link to this heading">#</a></h2>
+<p>For this section, it is assumed that the performance profiling environment is already set up.</p>
+<section id="profiling-for-hotspots">
+<h3>Profiling for Hotspots<a class="headerlink" href="#profiling-for-hotspots" title="Link to this heading">#</a></h3>
+<p>Collect profiling data:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">collect</span> <span class="n">hotspots</span> <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">no</span><span class="o">-</span><span class="n">summary</span> <span class="o">-</span><span class="n">knob</span> <span class="n">sampling</span><span class="o">-</span><span class="n">mode</span><span class="o">=</span><span class="n">hw</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span> <span class="p">.</span><span class="o">/</span><span class="n">benchdnn</span> <span class="o">--</span><span class="n">mode</span><span class="o">=</span><span class="n">P</span> <span class="o">--</span><span class="n">conv</span> <span class="o">--</span><span class="n">batch</span><span class="o">=</span><span class="n">inputs</span><span class="o">/</span><span class="n">conv</span><span class="o">/</span><span class="n">shapes_alexnet</span>
+<span class="nl">amplxe</span><span class="p">:</span> <span class="nl">Warning</span><span class="p">:</span> <span class="n">To</span> <span class="n">enable</span> <span class="n">hardware</span> <span class="n">event</span><span class="o">-</span><span class="n">base</span> <span class="n">sampling</span><span class="p">,</span> <span class="n">VTune</span> <span class="n">Profiler</span> <span class="n">has</span> <span class="n">disabled</span> <span class="n">the</span> <span class="n">NMI</span> <span class="n">watchdog</span> <span class="n">timer</span><span class="p">.</span>
+<span class="n">The</span> <span class="n">watchdog</span> <span class="n">timer</span> <span class="n">will</span> <span class="n">be</span> <span class="n">re</span><span class="o">-</span><span class="n">enabled</span> <span class="n">after</span> <span class="n">collection</span> <span class="n">completes</span><span class="p">.</span>
+<span class="n">Output</span> <span class="k">template</span><span class="o">:</span> <span class="n">perf</span><span class="p">,</span><span class="o">%</span><span class="n">engine</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">impl</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">name</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">prb</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">Gops</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">Gfreq</span><span class="o">%</span><span class="p">,</span><span class="o">%-</span><span class="n">time</span><span class="o">%</span><span class="p">,</span><span class="o">%-</span><span class="n">Gflops</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="mi">0</span><span class="n">time</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="mi">0</span><span class="n">Gflops</span><span class="o">%</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv1"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g1mb256ic3ih227oc96oh55kh11sh4ph0n</span><span class="s">"alexnet:conv1"</span><span class="p">,</span><span class="mf">53.9726</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">17.4285</span><span class="p">,</span><span class="mf">3096.81</span><span class="p">,</span><span class="mf">22.5851</span><span class="p">,</span><span class="mf">2389.74</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv2"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g2mb256ic96ih27oc256oh27kh5ph2n</span><span class="s">"alexnet:conv2"</span><span class="p">,</span><span class="mf">104.696</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">20.2195</span><span class="p">,</span><span class="mf">5177.98</span><span class="p">,</span><span class="mf">21.9233</span><span class="p">,</span><span class="mf">4775.56</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv3"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">mb256ic256ih13oc384oh13kh3ph1n</span><span class="s">"alexnet:conv3"</span><span class="p">,</span><span class="mf">68.904</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">15.5134</span><span class="p">,</span><span class="mf">4441.57</span><span class="p">,</span><span class="mf">18.1391</span><span class="p">,</span><span class="mf">3798.64</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv4"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g2mb256ic384ih13oc384oh13kh3ph1n</span><span class="s">"alexnet:conv4"</span><span class="p">,</span><span class="mf">51.678</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">11.7397</span><span class="p">,</span><span class="mf">4401.97</span><span class="p">,</span><span class="mf">12.4623</span><span class="p">,</span><span class="mf">4146.76</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv5"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g2mb256ic384ih13oc256oh13kh3ph1n</span><span class="s">"alexnet:conv5"</span><span class="p">,</span><span class="mf">34.452</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">7.77148</span><span class="p">,</span><span class="mf">4433.13</span><span class="p">,</span><span class="mf">8.50435</span><span class="p">,</span><span class="mf">4051.11</span>
+<span class="nl">tests</span><span class="p">:</span><span class="mi">5</span> <span class="nl">passed</span><span class="p">:</span><span class="mi">5</span> <span class="nl">skipped</span><span class="p">:</span><span class="mi">0</span> <span class="nl">mistrusted</span><span class="p">:</span><span class="mi">0</span> <span class="nl">unimplemented</span><span class="p">:</span><span class="mi">0</span> <span class="nl">failed</span><span class="p">:</span><span class="mi">0</span> <span class="nl">listed</span><span class="p">:</span><span class="mi">0</span>
+<span class="n">total</span> <span class="nl">perf</span><span class="p">:</span> <span class="n">min</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span><span class="o">:</span><span class="mf">72.6726</span> <span class="n">avg</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span><span class="o">:</span><span class="mf">83.6142</span></pre>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Here, it is not necessary to set the <code class="docutils literal notranslate"><span class="pre">ONEDNN_JIT_PROFILE</span></code> environment variable.</p>
+</div>
+<p>Below are the top 10 function hotspots using the command-line interface:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">report</span> <span class="n">hotspots</span> <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span> <span class="o">-</span><span class="n">format</span> <span class="n">csv</span> <span class="o">-</span><span class="n">csv</span><span class="o">-</span><span class="n">delimiter</span> <span class="sc">';'</span> <span class="o">-</span><span class="n">group</span><span class="o">-</span><span class="n">by</span> <span class="n">process</span><span class="p">,</span><span class="n">module</span><span class="p">,</span><span class="n">function</span> <span class="o">-</span><span class="n">column</span> <span class="sc">'CPU Time:Self'</span> <span class="o">|</span> <span class="n">head</span> <span class="o">-</span><span class="n">n</span> <span class="mi">10</span> <span class="o">|</span> <span class="n">column</span> <span class="o">-</span><span class="n">t</span> <span class="o">-</span><span class="n">s</span><span class="sc">';'</span>
+<span class="n">Column</span> <span class="n">filter</span> <span class="n">is</span> <span class="n">ON</span><span class="p">.</span>
+<span class="n">Process</span>   <span class="n">Module</span>            <span class="n">Function</span>                               <span class="n">CPU</span> <span class="n">Time</span>
+<span class="n">benchdnn</span>  <span class="p">[</span><span class="n">Dynamic</span> <span class="n">code</span><span class="p">]</span>    <span class="n">_jit_avx512_common_conv_fwd_kernel</span>     <span class="mf">300.128503</span>
+<span class="n">benchdnn</span>  <span class="p">[</span><span class="n">Dynamic</span> <span class="n">code</span><span class="p">]</span>    <span class="n">_jit_avx512_common_conv_fwd_kernel</span>     <span class="mf">293.946143</span>
+<span class="n">benchdnn</span>  <span class="p">[</span><span class="n">Dynamic</span> <span class="n">code</span><span class="p">]</span>    <span class="n">_jit_avx512_common_conv_fwd_kernel</span>     <span class="mf">285.549830</span>
+<span class="n">benchdnn</span>  <span class="p">[</span><span class="n">Dynamic</span> <span class="n">code</span><span class="p">]</span>    <span class="n">_jit_avx512_common_conv_fwd_kernel</span>     <span class="mf">268.868599</span>
+<span class="n">benchdnn</span>  <span class="p">[</span><span class="n">Dynamic</span> <span class="n">code</span><span class="p">]</span>    <span class="n">_jit_avx512_common_conv_fwd_kernel</span>     <span class="mf">256.715527</span>
+<span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>  <span class="n">func</span><span class="err">@</span><span class="mh">0x194f0</span>                           <span class="mf">186.604226</span>
+<span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>  <span class="n">func</span><span class="err">@</span><span class="mh">0x19370</span>                           <span class="mf">82.609694</span>
+<span class="n">benchdnn</span>  <span class="n">libdnnl</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.8</span>    <span class="n">dnnl</span><span class="o">::</span><span class="n">impl</span><span class="o">::</span><span class="n">cpu</span><span class="o">::</span><span class="n">x64</span><span class="o">::</span><span class="n">jit_avx512_co</span><span class="p">..</span>  <span class="mf">35.682241</span>
+<span class="n">benchdnn</span>  <span class="n">vmlinux</span>           <span class="p">[</span><span class="n">vmlinux</span><span class="p">]</span>
+       <span class="mf">10.763433</span></pre>
+<p>The JIT-ed function <code class="docutils literal notranslate"><span class="pre">_jit_avx512_common_conv_fwd_kernel</span></code> is shown as belonging to the <code class="docutils literal notranslate"><span class="pre">[Dynamic</span> <span class="pre">code]</span></code> module.</p>
+<p>Below are the top 10 primitive type hotspots using the command-line interface:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">report</span> <span class="n">hotspots</span> <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span> <span class="o">-</span><span class="n">format</span> <span class="n">csv</span> <span class="o">-</span><span class="n">csv</span><span class="o">-</span><span class="n">delimiter</span> <span class="sc">';'</span> <span class="o">-</span><span class="n">group</span><span class="o">-</span><span class="n">by</span> <span class="n">task</span> <span class="o">-</span><span class="n">column</span> <span class="sc">'CPU Time:Self'</span> <span class="o">|</span> <span class="n">head</span> <span class="o">-</span><span class="n">n</span> <span class="mi">10</span> <span class="o">|</span> <span class="n">column</span> <span class="o">-</span><span class="n">t</span> <span class="o">-</span><span class="n">s</span><span class="sc">';'</span>
+<span class="n">Column</span> <span class="n">filter</span> <span class="n">is</span> <span class="n">ON</span><span class="p">.</span>
+<span class="n">Task</span> <span class="n">Type</span>           <span class="n">CPU</span> <span class="n">Time</span>
+<span class="n">convolution</span>         <span class="mf">1451.459338</span>
+<span class="p">[</span><span class="n">Outside</span> <span class="n">any</span> <span class="n">task</span><span class="p">]</span>  <span class="mf">280.489764</span>
+<span class="n">reorder</span>             <span class="mf">10.434821</span>
+       <span class="mf">10.763433</span></pre>
+</section>
+<section id="profiling-for-microarchitecture-information">
+<h3>Profiling for Microarchitecture Information<a class="headerlink" href="#profiling-for-microarchitecture-information" title="Link to this heading">#</a></h3>
+<p>Collect profiling data:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">collect</span> <span class="n">uarch</span><span class="o">-</span><span class="n">exploration</span> <span class="o">-</span><span class="n">knob</span> <span class="n">sampling</span><span class="o">-</span><span class="n">interval</span><span class="o">=</span><span class="mi">1</span> <span class="o">-</span><span class="n">data</span><span class="o">-</span><span class="n">limit</span><span class="o">=</span><span class="mi">2000</span>  <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">no</span><span class="o">-</span><span class="n">summary</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span><span class="o">-</span><span class="n">ue</span> <span class="p">.</span><span class="o">/</span><span class="n">benchdnn</span> <span class="o">--</span><span class="n">mode</span><span class="o">=</span><span class="n">P</span> <span class="o">--</span><span class="n">conv</span> <span class="o">--</span><span class="n">batch</span><span class="o">=</span><span class="n">inputs</span><span class="o">/</span><span class="n">conv</span><span class="o">/</span><span class="n">shapes_alexnet</span>
+<span class="nl">amplxe</span><span class="p">:</span> <span class="nl">Warning</span><span class="p">:</span> <span class="n">To</span> <span class="n">enable</span> <span class="n">hardware</span> <span class="n">event</span><span class="o">-</span><span class="n">base</span> <span class="n">sampling</span><span class="p">,</span> <span class="n">VTune</span> <span class="n">Profiler</span> <span class="n">has</span> <span class="n">disabled</span> <span class="n">the</span> <span class="n">NMI</span> <span class="n">watchdog</span> <span class="n">timer</span><span class="p">.</span> <span class="n">The</span> <span class="n">watchdog</span> <span class="n">timer</span> <span class="n">will</span> <span class="n">be</span> <span class="n">re</span><span class="o">-</span><span class="n">enabled</span> <span class="n">after</span> <span class="n">collection</span> <span class="n">completes</span><span class="p">.</span>
+<span class="n">Output</span> <span class="k">template</span><span class="o">:</span> <span class="n">perf</span><span class="p">,</span><span class="o">%</span><span class="n">engine</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">impl</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">name</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">prb</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">Gops</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">Gfreq</span><span class="o">%</span><span class="p">,</span><span class="o">%-</span><span class="n">time</span><span class="o">%</span><span class="p">,</span><span class="o">%-</span><span class="n">Gflops</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="mi">0</span><span class="n">time</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="mi">0</span><span class="n">Gflops</span><span class="o">%</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv1"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g1mb256ic3ih227oc96oh55kh11sh4ph0n</span><span class="s">"alexnet:conv1"</span><span class="p">,</span><span class="mf">53.9726</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">17.2344</span><span class="p">,</span><span class="mf">3131.68</span><span class="p">,</span><span class="mf">24.1246</span><span class="p">,</span><span class="mf">2237.24</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv2"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g2mb256ic96ih27oc256oh27kh5ph2n</span><span class="s">"alexnet:conv2"</span><span class="p">,</span><span class="mf">104.696</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">20.2988</span><span class="p">,</span><span class="mf">5157.74</span><span class="p">,</span><span class="mf">22.6731</span><span class="p">,</span><span class="mf">4617.63</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv3"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">mb256ic256ih13oc384oh13kh3ph1n</span><span class="s">"alexnet:conv3"</span><span class="p">,</span><span class="mf">68.904</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">15.5369</span><span class="p">,</span><span class="mf">4434.87</span><span class="p">,</span><span class="mf">17.1371</span><span class="p">,</span><span class="mf">4020.75</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv4"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g2mb256ic384ih13oc384oh13kh3ph1n</span><span class="s">"alexnet:conv4"</span><span class="p">,</span><span class="mf">51.678</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">11.428</span><span class="p">,</span><span class="mf">4522.06</span><span class="p">,</span><span class="mf">12.7986</span><span class="p">,</span><span class="mf">4037.79</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">jit</span><span class="p">:</span><span class="n">avx512_common</span><span class="p">,</span><span class="s">"alexnet:conv5"</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="n">g2mb256ic384ih13oc256oh13kh3ph1n</span><span class="s">"alexnet:conv5"</span><span class="p">,</span><span class="mf">34.452</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">7.64233</span><span class="p">,</span><span class="mf">4508.05</span><span class="p">,</span><span class="mf">8.99841</span><span class="p">,</span><span class="mf">3828.68</span>
+<span class="nl">tests</span><span class="p">:</span><span class="mi">5</span> <span class="nl">passed</span><span class="p">:</span><span class="mi">5</span> <span class="nl">skipped</span><span class="p">:</span><span class="mi">0</span> <span class="nl">mistrusted</span><span class="p">:</span><span class="mi">0</span> <span class="nl">unimplemented</span><span class="p">:</span><span class="mi">0</span> <span class="nl">failed</span><span class="p">:</span><span class="mi">0</span> <span class="nl">listed</span><span class="p">:</span><span class="mi">0</span>
+<span class="n">total</span> <span class="nl">perf</span><span class="p">:</span> <span class="n">min</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span><span class="o">:</span><span class="mf">72.1404</span> <span class="n">avg</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span><span class="o">:</span><span class="mf">85.7318</span></pre>
+<p>Below are L1 Data Cache issues among primitive types using the command-line interface:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">report</span> <span class="n">hotspots</span> <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span><span class="o">-</span><span class="n">ue</span> <span class="o">-</span><span class="n">format</span> <span class="n">csv</span> <span class="o">-</span><span class="n">csv</span><span class="o">-</span><span class="n">delimiter</span> <span class="sc">';'</span> <span class="o">-</span><span class="n">group</span><span class="o">-</span><span class="n">by</span> <span class="n">task</span> <span class="o">-</span><span class="n">column</span> <span class="sc">'L1 Bound'</span> <span class="o">|</span> <span class="n">head</span> <span class="o">-</span><span class="n">n</span> <span class="mi">10</span> <span class="o">|</span> <span class="n">column</span> <span class="o">-</span><span class="n">t</span> <span class="o">-</span><span class="n">s</span><span class="sc">';'</span>
+<span class="n">Column</span> <span class="n">filter</span> <span class="n">is</span> <span class="n">ON</span><span class="p">.</span>
+<span class="n">Task</span> <span class="n">Type</span>           <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="n">Bound</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>  <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">DTLB</span> <span class="n">Overhead</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>  <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Loads</span> <span class="n">Blocked</span> <span class="n">by</span> <span class="n">Store</span> <span class="n">Forwarding</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>  <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Lock</span> <span class="n">Latency</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>  <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Split</span> <span class="n">Loads</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>  <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="nl">Bound</span><span class="p">:</span><span class="mi">4</span><span class="n">K</span> <span class="n">Aliasing</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>  <span class="n">Back</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Memory</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">L1</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">FB</span> <span class="n">Full</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>
+<span class="n">convolution</span>         <span class="mf">8.2</span>                                      <span class="mf">0.0</span>                                                    <span class="mf">0.0</span>                                                                        <span class="mf">0.0</span>                                                   <span class="mf">0.0</span>                                                  <span class="mf">0.2</span>                                                  <span class="mf">26.6</span>
+<span class="p">[</span><span class="n">Outside</span> <span class="n">any</span> <span class="n">task</span><span class="p">]</span>  <span class="mf">4.4</span>                                      <span class="mf">0.0</span>                                                    <span class="mf">0.0</span>                                                                        <span class="mf">0.0</span>                                                   <span class="mf">0.0</span>                                                  <span class="mf">0.0</span>                                                  <span class="mf">2.6</span>
+<span class="n">reorder</span>             <span class="mf">16.0</span>                                     <span class="mf">0.0</span>                                                    <span class="mf">0.0</span>                                                                        <span class="mf">0.0</span>                                                   <span class="mf">0.0</span>                                                  <span class="mf">0.1</span></pre>
+<p>Below are issues with Instruction Cache misses among primitive types using the command-line interface:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">report</span> <span class="n">hotspots</span> <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span><span class="o">-</span><span class="n">ue</span> <span class="o">-</span><span class="n">format</span> <span class="n">csv</span> <span class="o">-</span><span class="n">csv</span><span class="o">-</span><span class="n">delimiter</span> <span class="sc">';'</span> <span class="o">-</span><span class="n">group</span><span class="o">-</span><span class="n">by</span> <span class="n">task</span> <span class="o">-</span><span class="n">column</span> <span class="sc">'ICache Misses'</span> <span class="o">|</span> <span class="n">head</span> <span class="o">-</span><span class="n">n</span> <span class="mi">10</span> <span class="o">|</span> <span class="n">column</span> <span class="o">-</span><span class="n">t</span> <span class="o">-</span><span class="n">s</span><span class="sc">';'</span>
+<span class="n">Column</span> <span class="n">filter</span> <span class="n">is</span> <span class="n">ON</span><span class="p">.</span>
+<span class="n">Task</span> <span class="n">Type</span>           <span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Latency</span><span class="p">:</span><span class="n">ICache</span> <span class="n">Misses</span><span class="p">(</span><span class="o">%</span><span class="p">)</span>
+<span class="n">convolution</span>         <span class="mf">0.2</span>
+<span class="p">[</span><span class="n">Outside</span> <span class="n">any</span> <span class="n">task</span><span class="p">]</span>  <span class="mf">0.1</span>
+<span class="n">reorder</span>             <span class="mf">0.3</span></pre>
+<p>Here are some column names within micro-architecture profiling results. You could replace ‘ICache Misses’ with another column name.</p>
+<p>*”ICache Misses”,”ITLB Overhead”,”Bad Speculation”,”L1 Bound”,”L2 Bound”,”L3 Bound”,”DRAM Bound”,”Average CPU Frequency”,”Task Time”,”Task Count”, etc*</p>
+<p>For getting all column names within your profiling results, you could use the command below to get more detailed information.</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">amplxe</span><span class="o">-</span><span class="n">cl</span> <span class="o">-</span><span class="n">report</span> <span class="n">hotspots</span> <span class="o">-</span><span class="n">q</span> <span class="o">-</span><span class="n">r</span> <span class="n">dnnl</span><span class="o">-</span><span class="n">vtune</span><span class="o">-</span><span class="n">ue</span> <span class="o">-</span><span class="n">format</span> <span class="n">csv</span> <span class="o">-</span><span class="n">csv</span><span class="o">-</span><span class="n">delimiter</span> <span class="sc">';'</span> <span class="o">-</span><span class="n">group</span><span class="o">-</span><span class="n">by</span> <span class="n">task</span> <span class="o">-</span><span class="n">column</span><span class="o">=?</span>
+<span class="n">Available</span> <span class="n">values</span> <span class="k">for</span> <span class="sc">'-column'</span> <span class="n">option</span> <span class="nl">are</span><span class="p">:</span>
+<span class="n">CPU</span> <span class="nl">Time</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Clockticks</span><span class="p">:</span><span class="n">Self</span>
+<span class="n">Instructions</span> <span class="nl">Retired</span><span class="p">:</span><span class="n">Self</span>
+<span class="n">CPI</span> <span class="nl">Rate</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">General</span> <span class="nl">Retirement</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">General</span> <span class="nl">Retirement</span><span class="p">:</span><span class="n">FP</span> <span class="nl">Arithmetic</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">General</span> <span class="nl">Retirement</span><span class="p">:</span><span class="n">FP</span> <span class="nl">Arithmetic</span><span class="p">:</span><span class="n">FP</span> <span class="nl">x87</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">General</span> <span class="nl">Retirement</span><span class="p">:</span><span class="n">FP</span> <span class="nl">Arithmetic</span><span class="p">:</span><span class="n">FP</span> <span class="nl">Scalar</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">General</span> <span class="nl">Retirement</span><span class="p">:</span><span class="n">FP</span> <span class="nl">Arithmetic</span><span class="p">:</span><span class="n">FP</span> <span class="nl">Vector</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">General</span> <span class="nl">Retirement</span><span class="p">:</span><span class="nl">Other</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">Microcode</span> <span class="nl">Sequencer</span><span class="p">:</span><span class="n">Self</span>
+<span class="nl">Retiring</span><span class="p">:</span><span class="n">Microcode</span> <span class="nl">Sequencer</span><span class="p">:</span><span class="nl">Assists</span><span class="p">:</span><span class="n">Self</span>
+<span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Self</span>
+<span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Latency</span><span class="p">:</span><span class="n">Self</span>
+<span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Bound</span><span class="p">:</span><span class="n">Front</span><span class="o">-</span><span class="n">End</span> <span class="nl">Latency</span><span class="p">:</span><span class="n">ICache</span> <span class="nl">Misses</span><span class="p">:</span><span class="n">Self</span></pre>
+<p>See more examples in the <a class="reference external" href="https://www.intel.com/content/www/us/en/docs/vtune-profiler/user-guide/current/tutorials-and-samples.html">VTune Profiler User Guide</a></p>
+</section>
+</section>
+<section id="example-profiling-with-linux-perf">
+<h2>Example: Profiling with Linux Perf<a class="headerlink" href="#example-profiling-with-linux-perf" title="Link to this heading">#</a></h2>
+<p>The following command instructs oneDNN to enable both jitdump and perfmap profiling modes and write jitdump files into the <code class="docutils literal notranslate"><span class="pre">.debug</span></code> directory in the current directory by setting environment variable <code class="docutils literal notranslate"><span class="pre">JITDUMPDIR</span></code> to point to the current directory.</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">JITDUMPDIR</span><span class="o">=</span><span class="p">.</span> <span class="n">ONEDNN_JIT_PROFILE</span><span class="o">=</span><span class="mi">6</span> <span class="n">perf</span> <span class="n">record</span> <span class="o">-</span><span class="n">k1</span> <span class="p">.</span><span class="o">/</span><span class="n">tests</span><span class="o">/</span><span class="n">benchdnn</span><span class="o">/</span><span class="n">benchdnn</span> <span class="o">--</span><span class="n">conv</span> <span class="o">--</span><span class="n">mode</span><span class="o">=</span><span class="n">P</span> <span class="n">mb1ic32ih14oc32oh14kh3ph1n</span><span class="s">"resnet_50:res4a_branch2b*6"</span>
+<span class="n">Output</span> <span class="k">template</span><span class="o">:</span> <span class="n">perf</span><span class="p">,</span><span class="o">%</span><span class="n">engine</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">name</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">desc</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">Gops</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="n">Gfreq</span><span class="o">%</span><span class="p">,</span><span class="o">%-</span><span class="n">time</span><span class="o">%</span><span class="p">,</span><span class="o">%-</span><span class="n">Gflops</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="mi">0</span><span class="n">time</span><span class="o">%</span><span class="p">,</span><span class="o">%</span><span class="mi">0</span><span class="n">Gflops</span><span class="o">%</span>
+<span class="n">perf</span><span class="p">,</span><span class="n">cpu</span><span class="p">,</span><span class="nl">resnet_50</span><span class="p">:</span><span class="n">res4a_branch2b</span><span class="o">*</span><span class="mi">6</span><span class="p">,</span><span class="o">--</span><span class="n">conv</span> <span class="nl">mb1ic32ih14oc32oh14kh3ph1nresnet_50</span><span class="p">:</span><span class="n">res4a_branch2b</span><span class="o">*</span><span class="mi">6</span><span class="p">,</span><span class="mf">0.0032768</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mf">0.0131836</span><span class="p">,</span><span class="mf">248.551</span><span class="p">,</span><span class="mf">0.0262988</span><span class="p">,</span><span class="mf">124.599</span>
+<span class="nl">tests</span><span class="p">:</span><span class="mi">1</span> <span class="nl">passed</span><span class="p">:</span><span class="mi">0</span> <span class="nl">skipped</span><span class="p">:</span><span class="mi">0</span> <span class="nl">mistrusted</span><span class="p">:</span><span class="mi">0</span> <span class="nl">unimplemented</span><span class="p">:</span><span class="mi">0</span> <span class="nl">failed</span><span class="p">:</span><span class="mi">0</span> <span class="nl">listed</span><span class="p">:</span><span class="mi">0</span>
+<span class="n">total</span> <span class="nl">perf</span><span class="p">:</span> <span class="n">min</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span><span class="o">:</span><span class="mf">0.0131836</span> <span class="n">avg</span><span class="p">(</span><span class="n">ms</span><span class="p">)</span><span class="o">:</span><span class="mf">0.0262988</span>
+<span class="p">[</span> <span class="n">perf</span> <span class="nl">record</span><span class="p">:</span> <span class="n">Woken</span> <span class="n">up</span> <span class="mi">1</span> <span class="n">times</span> <span class="n">to</span> <span class="n">write</span> <span class="n">data</span> <span class="p">]</span>
+<span class="p">[</span> <span class="n">perf</span> <span class="nl">record</span><span class="p">:</span> <span class="n">Captured</span> <span class="n">and</span> <span class="n">wrote</span> <span class="mf">0.884</span> <span class="n">MB</span> <span class="n">perf</span><span class="p">.</span><span class="n">data</span> <span class="p">(</span><span class="mi">23102</span> <span class="n">samples</span><span class="p">)</span> <span class="p">]</span></pre>
+<p>The following command injects the information from the jitdump files into the performance data:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">perf</span> <span class="n">inject</span> <span class="o">-</span><span class="n">j</span> <span class="o">-</span><span class="n">i</span> <span class="n">perf</span><span class="p">.</span><span class="n">data</span> <span class="o">-</span><span class="n">o</span> <span class="n">perf</span><span class="p">.</span><span class="n">data</span><span class="p">.</span><span class="n">j</span></pre>
+<p>The following command displays the top hotspots:</p>
+<pre class="highlight literal-block"><span></span><span class="err">$</span> <span class="n">perf</span> <span class="n">report</span> <span class="o">-</span><span class="n">i</span> <span class="n">perf</span><span class="p">.</span><span class="n">data</span><span class="p">.</span><span class="n">j</span> <span class="o">--</span><span class="n">stdio</span> <span class="o">|</span> <span class="n">head</span> <span class="o">-</span><span class="n">n20</span>
+<span class="cp"># To display the perf.data header info, please use --header/--header-only options.</span>
+<span class="cp">#</span>
+<span class="cp">#</span>
+<span class="cp"># Total Lost Samples: 0</span>
+<span class="cp">#</span>
+<span class="cp"># Samples: 23K of event 'cpu-clock:uhH'</span>
+<span class="cp"># Event count (approx.): 5775500000</span>
+<span class="cp">#</span>
+<span class="cp"># Overhead  Command   Shared Object        Symbol</span>
+<span class="cp">#</span>
+    <span class="mf">39.33</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d8ba</span>
+    <span class="mf">29.41</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">jitted</span><span class="o">-</span><span class="mi">31475</span><span class="o">-</span><span class="mf">0.</span><span class="n">so</span>    <span class="p">[.]</span> <span class="n">jit_avx2_conv_fwd_kernel_f32</span>
+    <span class="mf">20.49</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d712</span>
+     <span class="mf">3.47</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libdnnl</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.1</span>       <span class="p">[.]</span> <span class="n">dnnl</span><span class="o">::</span><span class="n">impl</span><span class="o">::</span><span class="n">cpu</span><span class="o">::</span><span class="n">jit_avx2_convolution_fwd_t</span><span class="o">::</span><span class="n">execute_forward</span><span class="p">(</span><span class="n">dnnl</span><span class="o">::</span><span class="n">impl</span><span class="o">::</span><span class="n">exec_ctx_t</span> <span class="k">const</span><span class="o">&amp;</span><span class="p">)</span> <span class="k">const</span><span class="o">::</span><span class="p">{</span><span class="n">lambda</span><span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="kt">int</span><span class="p">)</span><span class="err">#</span><span class="mi">1</span><span class="p">}</span><span class="o">::</span><span class="k">operator</span><span class="p">()</span>
+     <span class="mf">1.52</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d8be</span>
+     <span class="mf">0.93</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d716</span>
+     <span class="mf">0.75</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d8c5</span>
+     <span class="mf">0.55</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d8c3</span>
+     <span class="mf">0.46</span><span class="o">%</span>  <span class="n">benchdnn</span>  <span class="n">libgomp</span><span class="p">.</span><span class="n">so</span><span class="mf">.1.0.0</span>     <span class="p">[.]</span> <span class="mh">0x000000000001d71d</span></pre>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Not every kernel/distribution supports displaying detailed profiling information. Symbol resolution (usually) works as long as the perfmap mode is enabled, but annotating a JIT-ed functions disassembly, which requires jitdump, seems to often fail on kernels before 5.x.</p>
+</div>
+<p>See more on <a class="reference external" href="http://www.brendangregg.com/perf.html">Brendan Gregg’s excellent perf examples page</a></p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="dev_guide_benchdnn.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Benchmarking Performance</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="dev_guide_inspecting_jit.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Inspecting JIT Code</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#build-time-controls">Build-Time Controls</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#run-time-controls">Run-Time Controls</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#features-for-vtune-profiler">Features for VTune Profiler</a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#itt-tagging-for-primitive-execution">ITT Tagging for Primitive Execution</a><ul class="nav section-nav flex-column">
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">Build-Time Controls</a></li>
+<li class="toc-h5 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">Run-Time Controls</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-profiling-with-vtune-profiler">Example: Profiling with VTune Profiler</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#profiling-for-hotspots">Profiling for Hotspots</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#profiling-for-microarchitecture-information">Profiling for Microarchitecture Information</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#example-profiling-with-linux-perf">Example: Profiling with Linux Perf</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2016-2024 Intel Corporation.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

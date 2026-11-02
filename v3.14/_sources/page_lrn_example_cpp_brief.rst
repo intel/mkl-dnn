@@ -1,0 +1,12 @@
+:orphan:
+
+.. index:: pair: page; <Untitled>
+.. _doxid-lrn_example_cpp_brief:
+
+<Untitled>
+==========
+
+This C++ API demonstrates how to create and execute a :ref:`Local response normalization <doxid-dev_guide_lrn>` primitive in forward training propagation mode.
+
+This C++ API demonstrates how to create and execute a :ref:`Local response normalization <doxid-dev_guide_lrn>` primitive in forward training propagation mode.
+
