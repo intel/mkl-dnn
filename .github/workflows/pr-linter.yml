@@ -261,6 +261,15 @@ jobs:
     name: All Linters Clean
     runs-on: ubuntu-24.04
     needs: [ pr-commits, pr-header-guards, pr-clang-format, pr-format-tags, pr-check-license-header, pr-python-linter, pr-clang-tidy ]
+    # Runs when some checks fail, as a skipped job does not block merging.
+    if: ${{ !cancelled() }}
     steps:
-      - name: Print success
-        run: echo "Success"
+      - name: Check results
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          if [[ "$FAILED" == "true" ]]; then
+            echo "Some checks failed"
+            exit 1
+          fi
+          echo "Success"
