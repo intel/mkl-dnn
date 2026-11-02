@@ -22,13 +22,13 @@
 
 #include "oneapi/dnnl/dnnl_threadpool.h"
 
-#include "c_types_map.hpp"
-#include "common/stream_impl.hpp"
-#include "engine.hpp"
-#include "primitive.hpp"
-#include "primitive_exec_types.hpp"
-#include "stream.hpp"
-#include "utils.hpp"
+#include "common/c_types_map.hpp"
+#include "common/engine.hpp"
+#include "common/primitive.hpp"
+#include "common/primitive_exec_types.hpp"
+#include "common/utils.hpp"
+#include "cpu/cpu_stream.hpp"
+#include "cpu/cpu_stream_impl.hpp"
 
 using namespace dnnl::impl;
 using namespace dnnl::impl::status;
@@ -42,8 +42,8 @@ dnnl_status_t dnnl_threadpool_interop_stream_create(
     auto tp = static_cast<dnnl::threadpool_interop::threadpool_iface *>(
             threadpool);
 
-    std::unique_ptr<dnnl::impl::stream_impl_t> stream_impl(
-            new dnnl::impl::stream_impl_t(tp));
+    std::unique_ptr<dnnl::impl::cpu::stream_impl_t> stream_impl(
+            new dnnl::impl::cpu::stream_impl_t(tp));
     if (!stream_impl) return status::out_of_memory;
 
     CHECK(engine->create_stream(stream, stream_impl.get()));
@@ -54,8 +54,12 @@ dnnl_status_t dnnl_threadpool_interop_stream_create(
 dnnl_status_t dnnl_threadpool_interop_stream_get_threadpool(
         dnnl_stream_t stream, void **threadpool) {
     if (utils::any_null(stream, threadpool)) return status::invalid_arguments;
+    if (stream->engine()->kind() != engine_kind::cpu)
+        return status::invalid_arguments;
+
+    auto *cpu_stream = utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(stream);
     dnnl::threadpool_interop::threadpool_iface *tp;
-    auto status = stream->get_threadpool(&tp);
+    auto status = cpu_stream->get_threadpool(&tp);
     if (status == status::success) *threadpool = static_cast<void *>(tp);
     return status;
 }

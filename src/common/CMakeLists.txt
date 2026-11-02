@@ -43,12 +43,8 @@ if(DNNL_ENABLE_JIT_PROFILING OR DNNL_ENABLE_ITT_TASKS)
     endif()
 endif()
 
-if(NOT DNNL_CPU_RUNTIME STREQUAL "THREADPOOL")
-    # avoid building and linking empty objects
-    list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/stream_threadpool.cpp")
-endif()
-
 if(NOT DNNL_EXPERIMENTAL_LOGGING)
+    # avoid building and linking empty objects
     list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/logging.cpp")
 endif()
 

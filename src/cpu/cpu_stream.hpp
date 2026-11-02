@@ -28,6 +28,7 @@
 #include "common/c_types_map.hpp"
 #include "common/dnnl_thread.hpp"
 #include "common/stream.hpp"
+#include "cpu/cpu_stream_impl.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -40,10 +41,9 @@ struct cpu_stream_t : public stream_t {
         // Initialize the verbose profiler based on threadpool capabilities.
         // init_verbose_profiler() enables verbose profiling on the
         // stream_impl_t if all required conditions are met.
-        // (Streams created via dnnl_threadpool_interop_stream_create() take
-        // this path rather than the dedicated threadpool constructor, so
-        // init_verbose_profiler() must be called here too.)
-        impl()->init_verbose_profiler(engine->kind());
+        auto status = impl()->init_verbose_profiler(engine->kind());
+        if (status != status::success)
+            VERROR(common, runtime, "failed to initialize verbose profiling");
 #endif
     }
     ~cpu_stream_t() override = default;
@@ -63,15 +63,6 @@ struct cpu_stream_t : public stream_t {
     }
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    cpu_stream_t(engine_t *engine,
-            dnnl::threadpool_interop::threadpool_iface *threadpool)
-        : stream_t(engine, new impl::stream_impl_t(threadpool)) {
-        // Initialize the verbose profiler based on threadpool capabilities.
-        // init_verbose_profiler() enables verbose profiling on the
-        // stream_impl_t if all required conditions are met.
-        impl()->init_verbose_profiler(engine->kind());
-    }
-
     // Returns a pointer to the active per-thread verbose profiler,
     // or nullptr if the profiler has not been initialized for this thread.
     cpu::verbose_profiler_t *verbose_profiler() const {
@@ -129,7 +120,18 @@ struct cpu_stream_t : public stream_t {
         return status::success;
     }
 
+    status_t get_threadpool(
+            dnnl::threadpool_interop::threadpool_iface **threadpool) const {
+        if (engine_->kind() != engine_kind::cpu)
+            return status::invalid_arguments;
+        return impl()->get_threadpool(threadpool);
+    }
+
 private:
+    cpu::stream_impl_t *impl() const {
+        return (cpu::stream_impl_t *)impl::stream_t::impl_.get();
+    }
+
     // Per-thread verbose profiler instance.
     // Thread-local storage ensures each submission thread maintains its
     // own independent profiling_data_ list and event tracking state.

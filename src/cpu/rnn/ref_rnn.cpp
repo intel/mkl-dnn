@@ -34,8 +34,8 @@
 #include "common/matmul_pd.hpp"
 #include "common/primitive.hpp"
 #include "common/primitive_desc_iterator.hpp"
-#include "common/stream.hpp"
 
+#include "cpu/cpu_stream.hpp"
 #include "cpu/simple_q10n.hpp"
 
 #include "cpu/gemm/gemm.hpp"
@@ -2035,8 +2035,14 @@ status_t ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::execute(
     // object before any primitive creation but this is considered as a high
     // obligation put on users to workaorund the implementation complexity.
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    VCONDCHECK(primitive, create, dispatch, rnn,
+            ctx.stream()->engine()->kind() == engine_kind::cpu,
+            status::unimplemented, "%s," VERBOSE_UNSUPPORTED_ISA,
+            pd()->info(ctx.stream()->engine()));
     dnnl::threadpool_interop::threadpool_iface *tp;
-    auto status = ctx.stream()->get_threadpool(&tp);
+    auto *cpu_stream
+            = utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(ctx.stream());
+    auto status = cpu_stream->get_threadpool(&tp);
     bool ok = status == status::success && tp
             && !(tp->get_flags()
                     & dnnl::threadpool_interop::threadpool_iface::ASYNCHRONOUS);
