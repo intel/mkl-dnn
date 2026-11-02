@@ -382,8 +382,8 @@ int batch(const char *fname, bench_f bench) {
         if (continued_line) {
             if (opts.empty()) SAFE_V(FAIL);
             if (opts.back().size() + str.size() >= str.max_size()) SAFE_V(FAIL);
-            // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-            str = opts.back() + str; // update current line with previous
+            // update current line with previous
+            str = parser::utils::str_join(opts.back(), str);
             opts.pop_back(); // take previous line out
         }
 

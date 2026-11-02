@@ -41,6 +41,7 @@
 
 #include "common.hpp"
 #include "utils/engine.hpp"
+#include "utils/parser.hpp"
 #include "utils/summary.hpp"
 #include "utils/system.hpp"
 
@@ -271,16 +272,19 @@ static std::vector<gpu_gt_t> find_gpu_gts_xe(const std::string &card) {
     const std::string device = card + "/device";
     for (const auto &tile : list_dir(device)) {
         if (tile.rfind("tile", 0) != 0) continue;
-        const std::string tile_path = device + "/" + tile;
+        const std::string tile_path
+                = parser::utils::str_join(device, tile, '/');
         for (const auto &gt : list_dir(tile_path)) {
-            const std::string freq = tile_path + "/" + gt + "/freq0";
+            const std::string gt_path
+                    = parser::utils::str_join(tile_path, gt, '/');
+            const std::string freq = gt_path + "/freq0";
             if (!path_exists(freq + "/min_freq")) continue;
-            const std::string eng = tile_path + "/" + gt + "/engines";
+            const std::string eng = gt_path + "/engines";
             if (path_exists(eng) && !path_exists(eng + "/rcs")
                     && !path_exists(eng + "/ccs"))
                 continue;
-            gts.push_back(
-                    {tile + "/" + gt, freq + "/min_freq", freq + "/max_freq"});
+            gts.push_back({parser::utils::str_join(tile, gt, '/'),
+                    freq + "/min_freq", freq + "/max_freq"});
         }
     }
     return gts;
@@ -292,9 +296,10 @@ static std::vector<gpu_gt_t> find_gpu_gts_i915(const std::string &card) {
     std::vector<gpu_gt_t> gts;
     const std::string gt_root = card + "/gt";
     for (const auto &gt : list_dir(gt_root)) {
-        const std::string min = gt_root + "/" + gt + "/rps_min_freq_mhz";
+        const std::string gt_path = parser::utils::str_join(gt_root, gt, '/');
+        const std::string min = gt_path + "/rps_min_freq_mhz";
         if (path_exists(min))
-            gts.push_back({gt, min, gt_root + "/" + gt + "/rps_max_freq_mhz"});
+            gts.push_back({gt, min, gt_path + "/rps_max_freq_mhz"});
     }
     if (gts.empty() && path_exists(card + "/gt_min_freq_mhz"))
         gts.push_back(
@@ -371,7 +376,8 @@ static bool report_gpu_perf_hints_impl() {
         // A `-` marks a connector node (e.g. `card0-HDMI-A-1`), not a device.
         if (card.rfind("card", 0) != 0 || card.find('-') != std::string::npos)
             continue;
-        const std::string card_path = drm_root + "/" + card;
+        const std::string card_path
+                = parser::utils::str_join(drm_root, card, '/');
         // Only Intel GPUs expose the frequency controls inspected below.
         if (read_sysfs_str(card_path + "/device/vendor") != "0x8086") continue;
 
