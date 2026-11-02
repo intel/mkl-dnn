@@ -30,9 +30,10 @@ using namespace Xbyak;
 #define GET_OFF(x) offsetof(ctx_t, x)
 
 jit_brgemm_conv_fp8_cvt_kernel_t::jit_brgemm_conv_fp8_cvt_kernel_t(
-        const cfg_t &ajcp)
-    : jit_generator_t(jit_name(), ajcp.isa), wjcp(ajcp) {
+        const cfg_t &ajcp, const char *name)
+    : jit_generator_t(name, ajcp.isa), wjcp(ajcp) {
     assert(utils::one_of(wjcp.src_dt, data_type::f8_e5m2, data_type::f8_e4m3));
+    assert(wjcp.dst_dt == data_type::f16);
     if (wjcp.src_dt == data_type::f8_e5m2)
         fp8_cvt_ = utils::make_unique<fp8_conversion_e5m2_t>(
                 this, xmm_aux1, xmm_aux2, xmm_aux3, kmask_aux, reg64_cvt_aux);
@@ -43,64 +44,38 @@ jit_brgemm_conv_fp8_cvt_kernel_t::jit_brgemm_conv_fp8_cvt_kernel_t(
 
 jit_brgemm_conv_fp8_cvt_kernel_t::~jit_brgemm_conv_fp8_cvt_kernel_t() = default;
 
-void jit_brgemm_conv_fp8_cvt_kernel_t::load2cvt(const bool is_last_ocb) {
-
-    //    const auto oc_block = is_last_ocb ? wjcp.last_oc_block : wjcp.oc_block;
-    const auto oc_chunks = wjcp.oc_block / 16;
-    const auto last_oc_chunks = wjcp.last_oc_block / 16;
-    const auto cur_oc_chunks = is_last_ocb ? last_oc_chunks : oc_chunks;
-    for_(int rd = 0; rd < wjcp.rd; rd += vnni_block)
-    for (int occ = 0; occ < cur_oc_chunks; occ++) {
-        const auto stride
-                = static_cast<dim_t>(vec_elems) * (occ + rd * oc_chunks);
-        fp8_cvt_->vcvt_f8_to_f16(
-                zmm_result, ptr[reg_aux_src + stride * src_dsz]);
-        vmovdqu16(ptr[reg_aux_dst + stride * dst_dsz], zmm_result);
-    }
-}
-
-void jit_brgemm_conv_fp8_cvt_kernel_t::kernel_loop(const bool is_last_ocb) {
-    Label label_kernel_loop, label_kernel_end;
-    mov(reg_kernel_size, wjcp.kernel_size);
-    mov(reg_aux_src, reg_src);
-    mov(reg_aux_dst, reg_dst);
-
-    L_aligned(label_kernel_loop);
-    {
-        cmp(reg_kernel_size, 0);
-        je(label_kernel_end, T_NEAR);
-
-        load2cvt(is_last_ocb);
-
-        add(reg_aux_src, wjcp.kernel_size_offs * src_dsz);
-        add(reg_aux_dst, wjcp.kernel_size_offs * dst_dsz);
-
-        dec(reg_kernel_size);
-        jmp(label_kernel_loop, T_NEAR);
-    }
-    L_aligned(label_kernel_end);
-}
-
 void jit_brgemm_conv_fp8_cvt_kernel_t::generate() {
     preamble();
 
     mov(reg_src, ptr[param1 + GET_OFF(src)]);
     mov(reg_dst, ptr[param1 + GET_OFF(dst)]);
-    mov(reg_last_ocb, ptr[param1 + GET_OFF(last_ocb)]);
+    mov(reg_cnt, ptr[param1 + GET_OFF(nelems)]);
 
-    Label full_ocb_label, finish_label;
-    if (wjcp.last_oc_block > 0) {
-        mov(reg_tmp, ptr[param1 + GET_OFF(last_ocb)]);
-        cmp(reg_tmp, 0);
-        je(full_ocb_label, T_NEAR);
-        kernel_loop(true);
-        jmp(finish_label, T_NEAR);
-    }
+    Label loop, tail, finish;
+    L(loop);
+    cmp(reg_cnt, vec_elems);
+    jb(tail, T_NEAR);
+    fp8_cvt_->vcvt_f8_to_f16(zmm_result, ptr[reg_src]);
+    vmovdqu16(ptr[reg_dst], zmm_result);
+    add(reg_src, vec_elems * src_dsz);
+    add(reg_dst, vec_elems * dst_dsz);
+    sub(reg_cnt, vec_elems);
+    jmp(loop, T_NEAR);
 
-    L(full_ocb_label);
-    kernel_loop(false);
+    L(tail);
+    test(reg_cnt, reg_cnt);
+    jz(finish, T_NEAR);
+    mov(reg_tmp, 1);
+    mov(rcx, reg_cnt);
+    shl(reg_tmp, cl);
+    dec(reg_tmp);
+    kmovd(ktail_mask, reg_tmp.cvt32());
+    const Ymm ymm_result(zmm_result.getIdx());
+    vmovdqu8(ymm_result | ktail_mask | T_z, ptr[reg_src]);
+    fp8_cvt_->vcvt_f8_to_f16(zmm_result, ymm_result);
+    vmovdqu16(ptr[reg_dst] | ktail_mask, zmm_result);
 
-    L(finish_label);
+    L(finish);
 
     postamble();
 

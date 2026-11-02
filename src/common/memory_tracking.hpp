@@ -171,6 +171,8 @@ enum {
     key_brgemm_primitive_per_mn_comp,
     key_brgemm_primitive_buffer_reduce,
     key_brgemm_primitive_fp8_convert_wsp,
+    key_conv_fp8_src,
+    key_conv_fp8_weights,
     key_concat_iptrs,
     key_concat_istrides,
     key_concat_nelems,

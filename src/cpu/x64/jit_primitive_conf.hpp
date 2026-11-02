@@ -898,6 +898,7 @@ struct jit_brgemm_conv_conf_t {
     bool is_bf32 {false};
     bool is_fp8 {false};
     bool is_fp8_convert {false};
+    bool preconvert_fp8 {false};
     bool is_f32_f16 {false};
     bool is_f32_bf16 {false};
     bool comp_with_vpads;

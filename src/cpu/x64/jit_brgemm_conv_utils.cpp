@@ -2049,6 +2049,21 @@ void adjust_nthr(jit_brgemm_conv_conf_t &jcp, const memory_desc_wrapper &src_d,
     }
 }
 
+static void init_fp8_conversion_conf(jit_brgemm_conv_conf_t &jcp) {
+    jcp.preconvert_fp8 = jcp.is_fp8_convert;
+    if (!jcp.preconvert_fp8) return;
+
+    // Keep public FP8 descriptors; blocking and addressing use FP16 buffers.
+    jcp.src_dt = jcp.wei_dt = f16;
+    jcp.src_dsz = jcp.wei_dsz = types::data_type_size(f16);
+    jcp.simd_w = static_cast<int>(isa_max_vlen(jcp.isa) / jcp.src_dsz);
+    jcp.vnni_block = data_type_vnni_granularity(f16);
+    jcp.amx_w = static_cast<int>(64 / jcp.src_dsz);
+    jcp.req_fp8_convert_wsp = false;
+    jcp.is_rd_padded_to_block
+            = !jcp.is_1x1 && jcp.ic > jcp.simd_w && is_amx(jcp.isa);
+}
+
 status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         const convolution_desc_t &cd, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
@@ -2060,6 +2075,8 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
     CHECK(init_jcp(
             jcp, isa, cd, src_md, weights_md, dst_md, bias_md, attr, nthreads));
+
+    init_fp8_conversion_conf(jcp);
 
     const bool is_int8_convolution = everyone_is(true,
             (jcp.src_dt == u8 || jcp.src_dt == s8), jcp.wei_dt == s8,
@@ -2553,6 +2570,8 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     CHECK(init_jcp(
             jcp, isa, cd, src_md, weights_md, dst_md, bias_md, attr, nthreads));
 
+    init_fp8_conversion_conf(jcp);
+
     const memory_desc_wrapper src_d(&src_md);
     const memory_desc_wrapper weights_d(&weights_md);
     const memory_desc_wrapper dst_d(&dst_md);
@@ -2794,6 +2813,13 @@ status_t init_scratchpad(memory_tracking::registrar_t &scratchpad,
     const memory_desc_wrapper src_d(&src_md);
     const memory_desc_wrapper weights_d(&weights_md);
     const memory_desc_wrapper dst_d(&dst_md);
+
+    if (jcp.preconvert_fp8) {
+        scratchpad.book(key_conv_fp8_src, src_d.nelems(true),
+                types::data_type_size(f16), 0, P4K);
+        scratchpad.book(key_conv_fp8_weights, weights_d.nelems(true),
+                types::data_type_size(f16), 0, P4K);
+    }
 
     if (uses_batch_elements(jcp.brg_type, jcp.exec_type)) {
         scratchpad.book(key_brgemm_primitive_batch,

@@ -31,34 +31,27 @@ namespace x64 {
 // header does not need to pull in the fp8 conversion injectors.
 struct fp8_conversion_base_t;
 
-// Up-converts a contiguous fp8 (e5m2/e4m3) weights buffer into f16, in
-// place of dtype (no relayout). Input shape mirrors
-// jit_brgemm_relo_copy_to_wbuffer_t: a compile-time cfg_t plus a small
-// runtime ctx_t (src/dst pointers only).
+// Converts contiguous fp8 (e5m2/e4m3) weights to f16 without changing layout.
 struct jit_brgemm_conv_fp8_cvt_kernel_t : public jit_generator_t {
     struct cfg_t {
         cpu_isa_t isa {isa_undef};
         data_type_t src_dt {
                 data_type_t::dnnl_data_type_undef}; // f8_e5m2/f8_e4m3
         data_type_t dst_dt {data_type_t::dnnl_data_type_undef}; // f16
-        dim_t rd {0}; // number of contiguous elements to convert per call
-        dim_t oc_block {0}; // number of contiguous output channels per block
-        dim_t kernel_size {0}; // size of the convolution kernel (kd * kh * kw)
-        dim_t kernel_size_offs {0}; // offset for the kernel size
-        dim_t last_oc_block {0}; // size of the last output channel block
     };
 
     struct ctx_t {
         const char *src {nullptr};
         char *dst {nullptr};
-        size_t last_ocb {0};
+        size_t nelems {0};
     };
 
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_conv_fp8_cvt_kernel_t)
 
     using reg64_t = Xbyak::Reg64;
 
-    jit_brgemm_conv_fp8_cvt_kernel_t(const cfg_t &ajcp);
+    jit_brgemm_conv_fp8_cvt_kernel_t(
+            const cfg_t &ajcp, const char *name = jit_name());
     ~jit_brgemm_conv_fp8_cvt_kernel_t() override;
 
 private:
@@ -69,15 +62,11 @@ private:
     const dim_t src_dsz = types::data_type_size(wjcp.src_dt);
     const dim_t dst_dsz = types::data_type_size(wjcp.dst_dt);
     const dim_t vec_elems = 32;
-    const dim_t vnni_block = data_type_vnni_granularity(wjcp.dst_dt);
     const reg64_t reg_src = rax;
     const reg64_t reg_dst = rbx;
     const reg64_t reg_cnt = r10;
-    const reg64_t reg_aux_src = r8;
-    const reg64_t reg_aux_dst = r9;
     const reg64_t reg_tmp = rdx;
 
-    const reg64_t reg_last_ocb = r12;
     // dedicated scratch register required by the fp8 conversion injectors
     const reg64_t reg64_cvt_aux = r11;
 
@@ -91,9 +80,16 @@ private:
     const Xbyak::Xmm xmm_aux5 = Xbyak::Xmm(20);
     const Xbyak::Zmm zmm_result = Xbyak::Zmm(2);
 
-    void load2cvt(const bool is_last_ocb);
-    void kernel_loop(const bool is_last_ocb);
     void generate() override;
+};
+
+// Source and weights both retain their original element order.
+struct jit_brgemm_conv_src_copy_kernel_t
+    : public jit_brgemm_conv_fp8_cvt_kernel_t {
+    DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_conv_src_copy_kernel_t)
+
+    jit_brgemm_conv_src_copy_kernel_t(const cfg_t &ajcp)
+        : jit_brgemm_conv_fp8_cvt_kernel_t(ajcp, jit_name()) {}
 };
 
 } // namespace x64

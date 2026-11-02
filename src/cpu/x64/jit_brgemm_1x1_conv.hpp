@@ -33,6 +33,7 @@
 #include "cpu/x64/brgemm/brgemm_containers.hpp"
 #include "cpu/x64/cpu_barrier.hpp"
 #include "cpu/x64/cpu_reducer.hpp"
+#include "cpu/x64/jit_brgemm_conv_fp8_cvt_kernel.hpp"
 #include "cpu/x64/jit_brgemm_conv_trans_kernel.hpp"
 #include "cpu/x64/jit_brgemm_conv_utils.hpp"
 #include "cpu/x64/jit_brgemm_post_ops.hpp"
@@ -107,8 +108,8 @@ private:
                       pd->attr()->post_ops_, ctx))
             , wsp_tile(ctx.get_scratchpad_grantor().template get<char>(
                       memory_tracking::names::key_conv_amx_tile_buffer)) {}
-        const char *const __restrict src;
-        const char *const __restrict weights;
+        const char *__restrict src;
+        const char *__restrict weights;
         const char *const __restrict bias;
         char *const __restrict dst;
         const std::vector<const void *> post_ops_binary_rhs_arg_vec;
@@ -186,6 +187,9 @@ private:
 
     brgemm_containers::brgemm_kernel_container_t brg_kernels_ {64};
     brgemm_containers::brgemm_palette_container_t brgemm_palettes_ {64};
+
+    std::unique_ptr<jit_brgemm_conv_src_copy_kernel_t> fp8_src_copy_;
+    std::unique_ptr<jit_brgemm_conv_fp8_cvt_kernel_t> fp8_weights_cvt_;
 
     std::unique_ptr<jit_avx512_core_brgemm_conv_trans_kernel::
                     jit_avx512_core_brgemm_conv_rtus_kernel_t>
