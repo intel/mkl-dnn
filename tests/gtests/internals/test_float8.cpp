@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include <cmath>
+#include <vector>
 
 #include "dnnl_test_common.hpp"
 #include "gtest/gtest.h"
@@ -25,6 +26,7 @@
 
 #if DNNL_X64
 #include "src/cpu/x64/jit_avx512_core_fp8cvt.hpp"
+#include "src/cpu/x64/jit_brgemm_conv_fp8_cvt_kernel.hpp"
 #endif
 
 using dnnl::impl::utils::bit_cast;
@@ -179,6 +181,55 @@ TEST(test_ref_float8_conversions, f32_to_f8_e4m3) {
 }
 
 #if DNNL_X64
+template <typename kernel_t>
+void test_conv_fp8_to_f16() {
+    using namespace impl;
+    using namespace impl::cpu::x64;
+    SKIP_IF(!impl::cpu::x64::mayiuse(avx512_core_fp16),
+            "Engine does not support this ISA.");
+
+    for (auto dt : {data_type::f8_e5m2, data_type::f8_e4m3}) {
+        typename kernel_t::cfg_t cfg;
+        cfg.isa = avx512_core_fp16;
+        cfg.src_dt = dt;
+        cfg.dst_dt = data_type::f16;
+        kernel_t kernel(cfg);
+        ASSERT_EQ(status::success, kernel.create_kernel());
+
+        for (size_t count = 0; count <= 257; ++count) {
+            std::vector<char> src(count);
+            constexpr uint16_t sentinel = 0x1234;
+            std::vector<uint16_t> dst(count + 2, sentinel);
+            for (size_t i = 0; i < count; ++i)
+                src[i] = static_cast<char>((i + count) % 256);
+            typename kernel_t::ctx_t p;
+            p.src = src.data();
+            p.dst = reinterpret_cast<char *>(dst.data() + 1);
+            p.nelems = count;
+            kernel(&p);
+            EXPECT_EQ(sentinel, dst.front());
+            EXPECT_EQ(sentinel, dst.back());
+            for (size_t i = 0; i < count; ++i) {
+                const auto bits = static_cast<uint8_t>(src[i]);
+                const float expected_f32 = dt == data_type::f8_e5m2
+                        ? static_cast<float>(float8_e5m2_t(bits, true))
+                        : static_cast<float>(float8_e4m3_t(bits, true));
+                const float16_t expected(expected_f32);
+                EXPECT_EQ(expected.raw, dst[i + 1])
+                        << "count=" << count << " index=" << i;
+            }
+        }
+    }
+}
+
+TEST(test_jit_float8_conversions, conv_weights_to_f16) {
+    test_conv_fp8_to_f16<impl::cpu::x64::jit_brgemm_conv_fp8_cvt_kernel_t>();
+}
+
+TEST(test_jit_float8_conversions, conv_src_to_f16) {
+    test_conv_fp8_to_f16<impl::cpu::x64::jit_brgemm_conv_src_copy_kernel_t>();
+}
+
 TEST(test_jit_float8_conversions, f8_e5m2_to_f32) {
     SKIP_IF(!impl::cpu::platform::has_data_type_support(
                     impl::data_type::f8_e5m2),

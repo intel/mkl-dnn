@@ -71,6 +71,11 @@ list(REMOVE_ITEM TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/test_sdpa.cpp)
 
 # Register separate-executable X64-only tests
 if(DNNL_TARGET_ARCH STREQUAL "X64" AND NOT DNNL_CPU_RUNTIME STREQUAL "NONE")
+    # Test private JIT implementations without exporting their symbols.
+    list(APPEND TEST_SOURCES
+        ${PROJECT_SOURCE_DIR}/src/cpu/x64/jit_avx512_core_fp8cvt.cpp
+        ${PROJECT_SOURCE_DIR}/src/cpu/x64/jit_brgemm_conv_fp8_cvt_kernel.cpp)
+
     register_exe(${TEST_EXE}_cpu_ir
             "${MAIN_SRC_GTEST};${CMAKE_CURRENT_SOURCE_DIR}/test_cpu_ir.cpp"
             "test" "dnnl_gtest")

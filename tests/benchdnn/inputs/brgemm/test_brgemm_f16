@@ -56,3 +56,12 @@
 --dt=f16
 --brgemm-attr=b_is_vnni:1
 --batch=option_set_bf16
+
+# FP8 convolution preconverts inputs to f16 but retains FP8 outputs and bias.
+--reset
+--dt=f16:f16:f8_e5m2,f16:f16:f8_e4m3,f16:f16:bf16
+--bia_dt=undef,f32,f8_e5m2,f8_e4m3
+--beta=0,1
+--attr-post-ops=,sum:2,relu
+--brgemm-attr=b_is_vnni:0,b_is_vnni:1
+13x34:34x19
