@@ -376,16 +376,15 @@ struct jit_softmax_dense_kernel_t : jit_softmax_kernel_base_t,
         Vmm src_vmm = vmm;
 
         if (tail && axis_has_padding_) {
-            if (is_superset(isa, avx512_core)
-                    && utils::one_of(dt, f32, bf16, f16)) {
-                src_vmm = vzero | tail_opmask;
-                uni_vxorps(vzero, vzero, vzero);
+            if (is_superset(isa, avx512_core)) {
+                src_vmm = vcvt_vmm | tail_opmask;
+                uni_vxorps(vcvt_vmm, vcvt_vmm, vcvt_vmm);
                 uni_vmovups(src_vmm, vmm);
-                src_vmm = vzero;
+                src_vmm = vcvt_vmm;
             } else {
-                uni_vpxor(vzero, vzero, vzero);
-                uni_vblendvps(vzero, vzero, src_vmm, tail_vmask);
-                src_vmm = vzero;
+                uni_vpxor(vcvt_vmm, vcvt_vmm, vcvt_vmm);
+                uni_vblendvps(vcvt_vmm, vcvt_vmm, src_vmm, tail_vmask);
+                src_vmm = vcvt_vmm;
             }
         } else if (need_restore) {
             uni_vmovups(vcvt_vmm, vmm);
