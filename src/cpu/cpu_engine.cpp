@@ -17,12 +17,12 @@
 #include <assert.h>
 
 #include "common/memory.hpp"
-#include "common/stream_impl.hpp"
 #include "common/type_helpers.hpp"
 
 #include "cpu/cpu_engine.hpp"
 #include "cpu/cpu_memory_storage.hpp"
 #include "cpu/cpu_stream.hpp"
+#include "cpu/cpu_stream_impl.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -46,7 +46,9 @@ status_t cpu_engine_t::create_memory_storage(
 
 status_t cpu_engine_t::create_stream(
         stream_t **stream, impl::stream_impl_t *stream_impl) {
-    return safe_ptr_assign(*stream, new cpu_stream_t(this, stream_impl));
+    return safe_ptr_assign(*stream,
+            new cpu_stream_t(
+                    this, utils::downcast<cpu::stream_impl_t *>(stream_impl)));
 }
 
 engine_t *get_service_engine() {

@@ -26,6 +26,7 @@
 #include "common/engine.hpp"
 #include "common/engine_id.hpp"
 #include "common/impl_list_item.hpp"
+#include "cpu/cpu_engine_impl.hpp"
 
 #include "cpu/platform.hpp"
 
@@ -158,7 +159,8 @@ public:
     size_t count() const override { return 1; }
     status_t engine_create(engine_t **engine, size_t index) const override {
         assert(index == 0);
-        *engine = new cpu_engine_t(new impl::engine_impl_t(
+        // Use engine_impl_t to ensure CPU-specific stream creation.
+        *engine = new cpu_engine_t(new cpu::engine_impl_t(
                 engine_kind::cpu, get_cpu_native_runtime(), 0));
 
 #if DNNL_AARCH64 && defined(DNNL_AARCH64_USE_ACL)

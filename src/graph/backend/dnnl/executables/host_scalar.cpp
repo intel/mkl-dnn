@@ -17,7 +17,7 @@
 #include "graph/backend/dnnl/executables/host_scalar.hpp"
 
 #include "common/dnnl_thread.hpp"
-#include "common/stream.hpp"
+#include "cpu/cpu_stream.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -63,12 +63,16 @@ void host_scalar_executable_t::execute(const stream &stream,
                 dnnl::impl::component_t::graph)) {
         bool block_on_wait = true;
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-        dnnl::threadpool_interop::threadpool_iface *tp = nullptr;
-        auto st = stream.get()->get_threadpool(&tp);
-        block_on_wait = st == dnnl::impl::status::success && tp
-                && !(tp->get_flags()
-                        & dnnl::threadpool_interop::threadpool_iface::
-                                ASYNCHRONOUS);
+        if (stream.get()->engine()->kind() == engine_kind::cpu) {
+            dnnl::threadpool_interop::threadpool_iface *tp = nullptr;
+            auto *cpu_stream = dnnl::impl::utils::downcast<
+                    dnnl::impl::cpu::cpu_stream_t *>(stream.get());
+            auto st = cpu_stream->get_threadpool(&tp);
+            block_on_wait = st == dnnl::impl::status::success && tp
+                    && !(tp->get_flags()
+                            & dnnl::threadpool_interop::threadpool_iface::
+                                    ASYNCHRONOUS);
+        }
 #endif
         if (block_on_wait) stream.get()->wait();
         double start_ms = dnnl::impl::get_msec();

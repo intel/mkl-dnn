@@ -30,6 +30,9 @@
 #include "common/cache_hit_types.hpp"
 #include "common/stream.hpp"
 #include "common/verbose.hpp"
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "cpu/cpu_stream.hpp"
+#endif
 
 #include "graph/interface/allocator.hpp"
 #include "graph/interface/backend.hpp"
@@ -330,12 +333,16 @@ status_t dnnl_graph_compiled_partition_execute_v2(
                 dnnl::impl::component_t::graph)) {
         bool block_on_wait = true;
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-        dnnl::threadpool_interop::threadpool_iface *tp;
-        auto status = stream->get_threadpool(&tp);
-        block_on_wait = status == status::success && tp
-                && !(tp->get_flags()
-                        & dnnl::threadpool_interop::threadpool_iface::
-                                ASYNCHRONOUS);
+        if (stream->engine()->kind() == engine_kind::cpu) {
+            dnnl::threadpool_interop::threadpool_iface *tp = nullptr;
+            auto *cpu_stream
+                    = utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(stream);
+            auto status = cpu_stream->get_threadpool(&tp);
+            block_on_wait = status == status::success && tp
+                    && !(tp->get_flags()
+                            & dnnl::threadpool_interop::threadpool_iface::
+                                    ASYNCHRONOUS);
+        }
 #endif
         if (block_on_wait) stream->wait();
         double start_ms = dnnl::impl::get_msec();

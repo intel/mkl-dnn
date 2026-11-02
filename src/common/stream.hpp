@@ -87,16 +87,6 @@ struct dnnl_stream {
 
     dnnl::impl::stream_impl_t *impl() const { return impl_.get(); }
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    dnnl::impl::status_t get_threadpool(
-            dnnl::threadpool_interop::threadpool_iface **threadpool) const {
-        using namespace dnnl::impl;
-        if (engine_->kind() != engine_kind::cpu)
-            return status::invalid_arguments;
-        return impl_->get_threadpool(threadpool);
-    }
-#endif
-
 protected:
     dnnl::impl::engine_t *engine_;
     std::unique_ptr<dnnl::impl::stream_impl_t> impl_;

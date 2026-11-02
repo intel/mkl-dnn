@@ -153,6 +153,11 @@ if(DNNL_WITH_SYCL)
         PROPERTIES COMPILE_FLAGS "-O0")
 endif()
 
+if(NOT DNNL_CPU_RUNTIME STREQUAL "THREADPOOL")
+    # avoid building and linking empty objects
+    list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cpu_stream_threadpool.cpp")
+endif()
+
 set(OBJ_LIB ${LIB_PACKAGE_NAME}_cpu)
 add_library(${OBJ_LIB} OBJECT ${SOURCES})
 if (DNNL_X64_USE_ZEN)
