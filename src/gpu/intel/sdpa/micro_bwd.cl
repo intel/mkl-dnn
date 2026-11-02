@@ -105,7 +105,11 @@ inline void apply_dropout_s_tile(s_tile_type *tile, int tile_offset_r,
         int k_stride, int use_dropout_offset, long seed, long offset,
         uint threshold, float inv_q) {
 
+#if DROPOUT_VOLATILE_SCALE_WORKAROUND
     volatile s_tile_type scale_tile;
+#else
+    s_tile_type scale_tile;
+#endif
 #if DROPOUT_GROUPED_SHAPE_OK(ugemm_kq_c_type_block0, ugemm_kq_c_type_block1, \
         ugemm_kq_c_type_nblock0, ugemm_kq_c_type_nblock1)
     if (DROPOUT_GROUPED_RT_OK) {
@@ -133,7 +137,11 @@ inline void apply_dropout_dP_tile(p_tile_type *tile, int tile_offset_r,
         int k_stride, int use_dropout_offset, long seed, long offset,
         uint threshold, float inv_q) {
 
+#if DROPOUT_VOLATILE_SCALE_WORKAROUND
     volatile p_tile_type scale_p_tile;
+#else
+    p_tile_type scale_p_tile;
+#endif
 #if DROPOUT_GROUPED_SHAPE_OK(ugemm_vtdA_c_type_block0, \
         ugemm_vtdA_c_type_block1, ugemm_vtdA_c_type_nblock0, \
         ugemm_vtdA_c_type_nblock1)
