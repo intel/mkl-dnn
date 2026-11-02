@@ -2515,12 +2515,18 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             = dims_adjacent(src_d, bgmmc.ndims - 2, bgmmc.ndims - 1);
 
     // Per-M source quantization (scales or zero-points) is indexed by the
-    // original M dimension and broadcast across batch. Merging batch into M
-    // would make the kernel address those per-M quant buffers with the fused
-    // (batch * M) row index, reading past the buffer for the extra rows.
-    // TODO: Enable fused indexing for fused batches.
-    const bool src_quant_per_m
-            = bgmmc.is_src_scale_per_m || bgmmc.is_src_zp_per_m;
+    // original M dimension. Merging batch into M is only valid when those
+    // buffers carry every batch dimension too, so that they are contiguous
+    // over (batch, M) and the fused row index addresses them directly.
+    const int src_batch_mask = (1 << bgmmc.batch_ndims) - 1;
+    auto src_quant_batch_contig = [&](bool per_m, int mask) {
+        return !per_m || (mask & src_batch_mask) == src_batch_mask;
+    };
+    const bool src_quant_per_m_blocks_merge
+            = !src_quant_batch_contig(
+                      bgmmc.is_src_scale_per_m, src_scales.get_mask())
+            || !src_quant_batch_contig(
+                    bgmmc.is_src_zp_per_m, src_zp.get_mask());
 
     // We cannot change M at this point as all gemv related parameters have
     // already been set up.
@@ -2532,7 +2538,7 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             && plain_A_layout && helper.is_src_dst_layout_batch_fusable()
             && post_ops_ok(
                     bgmmc, attr, dst_d, true /* limit_bcast_strategies_set */)
-            && m_and_k_adjacent && !src_quant_per_m;
+            && m_and_k_adjacent && !src_quant_per_m_blocks_merge;
     if (merge_batch_dims_into_M) {
         bgmmc.M *= bgmmc.batch;
         bgmmc.batch = 1;
