@@ -65,6 +65,8 @@ struct EvaluateAuxOutput {
 DerivedEvaluateParams getDerivedParams(const kcatalog::Entry &e, const EvaluateParams &p);
 double evaluate(const kcatalog::Entry &e, const EvaluateParams &p, EvaluateAuxOutput &aux);
 double evaluate(const kcatalog::Entry &e, const DerivedEvaluateParams &p, EvaluateAuxOutput &aux);
+// Model-free dispatch: k0 and wgK from fixed rules.
+EvaluateAuxOutput evaluateFixed(const kcatalog::Entry &e, const DerivedEvaluateParams &p);
 
 void modifyStrategy(GEMMStrategy &strategy, const EvaluateAuxOutput &aux);
 

@@ -36,6 +36,8 @@ const char *parsePrecision(const char *s, Type &precision);
 const char *parsePrecisions(const char *s, Type &precision1, Type &precision2);
 
 std::string unparseStrategy(ngen::HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy);
+// `str`, parsed as `from` (not preflighted), with the k-parallel settings of `to`.
+std::string rewriteKParallel(const std::string &str, const GEMMStrategy &from, const GEMMStrategy &to);
 
 GEMMSTONE_NAMESPACE_END
 

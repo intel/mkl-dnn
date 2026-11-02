@@ -446,10 +446,15 @@ struct gen_t : public primitive_t {
                             gpu_info() << "[" << lpad(g, 4) << "] use "
                                        << entry_idx << "/" << entries.size()
                                        << (index >= 0 ? " pin" : "") << " "
-                                       << kernel_desc_.str();
+                                       << kernel_desc_.resolved_str();
                         else
-                            gpu_info()
-                                    << "[override] use " << kernel_desc_.str();
+                            gpu_info() << "[override] use "
+                                       << kernel_desc_.resolved_str();
+                        gpu_debug()
+                                << "final " << kernel_desc_.str()
+                                << ", launch k0="
+                                << kernel_desc_.aux_params()->k0
+                                << " wgK=" << kernel_desc_.aux_params()->wgK;
                         break;
                     }
                     skip("Kernel generation failed.");

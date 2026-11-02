@@ -19,6 +19,7 @@
 #include "internal/utils.hpp"
 #include "pieces/layout_utils.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <sstream>
 #include <string>
@@ -833,7 +834,53 @@ static std::string unparseFuseBeta(const GEMMStrategy &s)       { return !s.fuse
 static std::string unparseFusePostOps(const GEMMStrategy &s)    { return s.fusePostOps ? " fp" : ""; }
 static std::string unparseKParallelLocal(const GEMMStrategy &s) { return !s.kParallelLocal ? "" : s.shrinkWGK ? " akr" : s.kInterleave ? " ikr" : " kr"; }
 
-std::string unparseStrategy(HW hw,const GEMMProblem &problem, const GEMMStrategy &strategy)
+static const struct {
+    std::vector<std::string> words;
+    std::string (*unparse)(const GEMMStrategy &);
+} kParallelFamilies[] = {
+    {{"kb", "kv"},         unparseKParallel},
+    {{"fb", "afb"},        unparseFuseBeta},
+    {{"fp"},               unparseFusePostOps},
+    {{"kr", "akr", "ikr"}, unparseKParallelLocal},
+};
+
+std::string rewriteKParallel(const std::string &str, const GEMMStrategy &from, const GEMMStrategy &to)
+{
+    std::vector<std::string> words;
+    std::stringstream ss(str);
+    for (std::string w; ss >> w;)
+        words.push_back(w);
+    auto t = words;
+
+    for (auto &f: kParallelFamilies) {
+        auto want = f.unparse(to);
+        if (f.unparse(from) == want) continue;
+        auto owned = [&](const std::string &w) {
+            return std::find(f.words.begin(), f.words.end(), w) != f.words.end();
+        };
+        auto i = std::find_if(t.begin(), t.end(), owned) - t.begin();
+        t.erase(std::remove_if(t.begin() + i, t.end(), owned), t.end());
+        std::stringstream ws(want);
+        for (std::string w; ws >> w;)
+            t.insert(t.begin() + i++, w);
+    }
+
+    int wgK = std::max(1, to.wg[LoopK]);
+    if (std::max(1, from.wg[LoopK]) != wgK) {
+        auto wg = std::find(t.begin(), t.end(), "wg");
+        assert(wg != t.end() && wg + 1 != t.end());
+        auto &v = *(wg + 1);
+        v = v.substr(0, v.find('x', v.find('x') + 1)) + (wgK > 1 ? "x" + std::to_string(wgK) : "");
+    }
+
+    if (t == words) return str;
+    std::string result;
+    for (auto &w: t)
+        result += (result.empty() ? "" : " ") + w;
+    return result;
+}
+
+std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy)
 {
     std::stringstream s;
     s.imbue(std::locale::classic());
