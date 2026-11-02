@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <algorithm> // for std::find, std::any_of
 #include <climits> // for PATH_MAX
 #include <cstdio> // for snprintf
 #include <cstdlib> // for realpath
@@ -311,36 +312,130 @@ static std::vector<gpu_gt_t> find_gpu_gts_i915(const std::string &card) {
     return gts;
 }
 
+// Parses the kernel's cpulist format, e.g. "0-3,8,10-11".
+static std::vector<int> parse_cpulist(const std::string &list) {
+    std::vector<int> cpus;
+    size_t pos = list.empty() ? std::string::npos : 0;
+    while (pos != std::string::npos) {
+        const std::string range = parser::get_substr(list, pos, ',');
+        size_t range_pos = 0;
+        const int first = std::stoi(parser::get_substr(range, range_pos, '-'));
+        const int last = range_pos == std::string::npos
+                ? first
+                : std::stoi(parser::get_substr(range, range_pos, '-'));
+        for (int cpu = first; cpu <= last; cpu++)
+            cpus.push_back(cpu);
+    }
+    return cpus;
+}
+
+static std::string get_cpu_sysfs_path(int cpu) {
+    return "/sys/devices/system/cpu/cpu" + std::to_string(cpu);
+}
+
+struct cpu_group_t {
+    std::string name;
+    int cpu;
+};
+
+// Hybrid CPUs have core types with distinct frequency and idle-state settings,
+// so each type must be verified, but cores of the same type are configured
+// alike and a single representative per type keeps the check cheap.
+//
+// Hybrid systems expose a PMU per core type listing its CPUs. Atom cores
+// without L3 are LP E-cores, which reside on a separate low-power island with
+// own frequency limits, so the L3 presence tells them from regular E-cores.
+// Non-hybrid systems expose no such PMUs and form a single unnamed group.
+static std::vector<cpu_group_t> get_cpu_groups() {
+    std::vector<cpu_group_t> groups;
+    const auto p_cpus
+            = parse_cpulist(read_sysfs_str("/sys/devices/cpu_core/cpus"));
+    const auto e_cpus
+            = parse_cpulist(read_sysfs_str("/sys/devices/cpu_atom/cpus"));
+    const auto has = [](const std::vector<int> &cpus, int cpu) {
+        return std::find(cpus.begin(), cpus.end(), cpu) != cpus.end();
+    };
+
+    for (int cpu :
+            parse_cpulist(read_sysfs_str("/sys/devices/system/cpu/online"))) {
+        std::string name;
+        if (has(p_cpus, cpu))
+            name = "P-core";
+        else if (has(e_cpus, cpu))
+            name = path_exists(get_cpu_sysfs_path(cpu) + "/cache/index3")
+                    ? "E-core"
+                    : "LP E-core";
+        const bool seen = std::any_of(groups.begin(), groups.end(),
+                [&](const cpu_group_t &g) { return g.name == name; });
+        if (!seen) groups.push_back({name, cpu});
+    }
+    return groups;
+}
+
 static bool report_cpu_perf_hints_impl() {
     bool any_hint = false;
 
-    constexpr const char *min_freq_path
-            = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq";
-    constexpr const char *max_freq_path
-            = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq";
-    constexpr const char *no_turbo_path
-            = "/sys/devices/system/cpu/intel_pstate/no_turbo";
-    constexpr const char *max_cstate_path
-            = "/sys/module/intel_idle/parameters/max_cstate";
+    for (const auto &group : get_cpu_groups()) {
+        const std::string cpu_path = get_cpu_sysfs_path(group.cpu);
+        const std::string cpu_name = "cpu" + std::to_string(group.cpu);
+        const std::string label = group.name.empty()
+                ? "CPU (" + cpu_name + ")"
+                : "CPU " + group.name + " (" + cpu_name + ")";
 
-    // The effective (scaling) min and max frequency are expected to coincide.
-    // When they don't, the frequency may float during the run and skew
-    // performance measurements. Note: `cpuinfo_*_freq` report the hardware
-    // limits and always differ, so `scaling_*_freq` (the governor's allowed
-    // range) is inspected instead as it reflects whether the frequency is
-    // pinned.
-    int64_t min_freq = 0, max_freq = 0;
-    if (read_sysfs_int(min_freq_path, min_freq) == OK
-            && read_sysfs_int(max_freq_path, max_freq) == OK) {
-        if (min_freq != max_freq) {
+        // The effective (scaling) min and max frequency are expected to
+        // coincide. When they don't, the frequency may float during the run
+        // and skew performance measurements. Note: `cpuinfo_*_freq` report
+        // the hardware limits and always differ, so `scaling_*_freq` (the
+        // governor's allowed range) is inspected instead as it reflects
+        // whether the frequency is pinned.
+        int64_t min_freq = 0, max_freq = 0;
+        if (read_sysfs_int(cpu_path + "/cpufreq/scaling_min_freq", min_freq)
+                        == OK
+                && read_sysfs_int(
+                           cpu_path + "/cpufreq/scaling_max_freq", max_freq)
+                        == OK) {
+            if (min_freq != max_freq) {
+                BENCHDNN_PRINT(0,
+                        "[PERF_HINTS] Info: %s min (%ld kHz) and max (%ld "
+                        "kHz) frequencies differ. Pin the frequency for "
+                        "stable performance measurements.\n",
+                        label.c_str(), (long)min_freq, (long)max_freq);
+                any_hint = true;
+            }
+        }
+
+        // Enabled cpuidle states are inspected rather than the
+        // `intel_idle.max_cstate` boot parameter because states can also be
+        // disabled at runtime and the check must not depend on the idle
+        // driver. State 0 is polling and state 1 is C1, both wake up fast.
+        const std::string idle_path = cpu_path + "/cpuidle";
+        int deepest_idx = 1;
+        std::string deepest_name;
+        for (const auto &state : list_dir(idle_path)) {
+            if (state.rfind("state", 0) != 0) continue;
+            const int idx = std::stoi(state.substr(5));
+            if (idx <= deepest_idx) continue;
+            const std::string state_path
+                    = parser::utils::str_join(idle_path, state, '/');
+            int64_t disabled = 0;
+            if (read_sysfs_int(state_path + "/disable", disabled) != OK
+                    || disabled)
+                continue;
+            deepest_idx = idx;
+            deepest_name = read_sysfs_str(state_path + "/name");
+        }
+        if (!deepest_name.empty()) {
             BENCHDNN_PRINT(0,
-                    "[PERF_HINTS] Info: CPU min (%ld kHz) and max (%ld kHz) "
-                    "frequencies differ. Pin the frequency for stable "
-                    "performance measurements.\n",
-                    (long)min_freq, (long)max_freq);
+                    "[PERF_HINTS] Info: %s idle states up to %s are enabled. "
+                    "Disable states deeper than C1 for stable performance "
+                    "measurements.\n",
+                    label.c_str(), deepest_name.c_str());
             any_hint = true;
         }
     }
+
+    constexpr const char *no_turbo_path
+            = "/sys/devices/system/cpu/intel_pstate/no_turbo";
 
     // Turbo mode is supposed to be disabled (`no_turbo` equals to `1`).
     int64_t no_turbo = 0;
@@ -349,19 +444,6 @@ static bool report_cpu_perf_hints_impl() {
             BENCHDNN_PRINT(0, "%s",
                     "[PERF_HINTS] Info: CPU Turbo mode is enabled. Disable "
                     "it for stable performance measurements.\n");
-            any_hint = true;
-        }
-    }
-
-    // C-states are supposed to be no more than `1`.
-    int64_t max_cstate = 0;
-    if (read_sysfs_int(max_cstate_path, max_cstate) == OK) {
-        if (max_cstate > 1) {
-            BENCHDNN_PRINT(0,
-                    "[PERF_HINTS] Info: CPU max C-state is set to %ld. Set "
-                    "it to no more than 1 for stable performance "
-                    "measurements.\n",
-                    (long)max_cstate);
             any_hint = true;
         }
     }
