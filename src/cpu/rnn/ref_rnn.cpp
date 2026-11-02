@@ -224,7 +224,7 @@ status_t dnnl::impl::cpu::ref_rnn_common_t<aprop, src_type, weights_type,
             const bool ok = mpd->weights_md()->extra.flags == 0;
             if (ok) return status::success;
         }
-        return status::unimplemented;
+        return it.no_impl_status();
     };
 
     if (rnn_.use_matmul) {

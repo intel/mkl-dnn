@@ -114,6 +114,7 @@ struct ref_deconvolution_fwd_t : public primitive_t {
             primitive_attr_t conv_attr;
 
             convolution_desc_t cd;
+            status_t no_impl_status = status::unimplemented;
             // When no attributes were requested, try to find a bwd_d conv impl
             // which supports bias update in-place, if requested, in requested
             // dst_dt. If appropriate conv impl was not found, enforce f32
@@ -137,6 +138,7 @@ struct ref_deconvolution_fwd_t : public primitive_t {
                     bool ok = conv_pd_->weights_md()->extra.flags == 0;
                     if (ok) return status::success;
                 }
+                no_impl_status = it.no_impl_status();
             }
 
             // Intermediate f32 buffer is supported only for given condition.
@@ -154,8 +156,9 @@ struct ref_deconvolution_fwd_t : public primitive_t {
                     bool ok = conv_pd_->weights_md()->extra.flags == 0;
                     if (ok) return status::success;
                 }
+                no_impl_status = it.no_impl_status();
             }
-            return status::unimplemented;
+            return no_impl_status;
         }
 
         status_t init(const engine_t *engine) {
@@ -354,7 +357,7 @@ struct ref_deconvolution_bwd_data_t : public primitive_t {
                     return status::success;
             }
 
-            return status::unimplemented;
+            return it.no_impl_status();
         }
 
         status_t init(const engine_t *engine) {
@@ -473,7 +476,7 @@ struct ref_deconvolution_bwd_weights_t : public primitive_t {
                     return status::success;
                 }
             }
-            return status::unimplemented;
+            return it.no_impl_status();
         }
 
         status_t init(const engine_t *engine) {

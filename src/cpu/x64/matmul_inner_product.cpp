@@ -45,7 +45,7 @@ status_t create_matmul_pd(std::shared_ptr<primitive_desc_t> &matmul_pd,
 
     while (it != it.end()) {
         matmul_pd = *(++it);
-        if (!matmul_pd) return status::unimplemented;
+        if (!matmul_pd) return it.no_impl_status();
         if (is_desired_mm_impl(matmul_pd)) break;
     }
 
