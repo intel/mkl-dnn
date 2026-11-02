@@ -288,7 +288,8 @@ void perform_matmul_with_f8_quantization(engine::kind engine_kind,
         reorder::primitive_desc(
                 eng, weights_md, eng, weights_f8_md, weights_attr);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No f8 reorder implementation is available for this "
                     "platform.\n"
@@ -351,7 +352,8 @@ void perform_matmul_with_f8_quantization(engine::kind engine_kind,
         matmul::primitive_desc(
                 eng, src_f8_md, weights_f8_md, dst_md, matmul_attr);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No f8 matmul implementation is available for this "
                     "platform.\n"

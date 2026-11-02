@@ -118,7 +118,8 @@ matmul::primitive_desc matmul_pd_create(
     try {
         return matmul::primitive_desc(eng, a_md, b_md, c_md, attr);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No mxfp8 matmul implementation is available for this "
                     "platform.\n"

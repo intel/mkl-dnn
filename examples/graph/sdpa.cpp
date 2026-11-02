@@ -443,7 +443,8 @@ void bench(api_kind api, engine::kind ekind, dnnl_data_type_t dt,
         }
     } catch (dnnl::error &e) {
         // Catch and report unimplemented cases.
-        if (e.status == dnnl_unimplemented) {
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type) {
             std::cout << "unsupported sdpa" << std::endl;
         } else
             throw;

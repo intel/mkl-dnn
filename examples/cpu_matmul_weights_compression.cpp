@@ -109,7 +109,8 @@ void matmul_example(dnnl::engine::kind engine_kind) {
         matmul_pd = matmul::primitive_desc(
                 engine, matmul_src_md, matmul_weights_md, matmul_dst_md);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No matmul implementation with packed encoding support is "
                     "available for this platform.\nPlease refer to the "

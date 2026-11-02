@@ -254,7 +254,8 @@ void run(engine::kind engine_kind, memory::data_type type, gemm_dims_t dims,
         }
     } catch (dnnl::error &e) {
         // Catch and report unimplemented cases.
-        if (e.status == dnnl_unimplemented) {
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type) {
             print_test_case(type, dims);
             std::cout << "unsupported" << std::endl;
         } else

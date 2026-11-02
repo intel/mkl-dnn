@@ -168,7 +168,8 @@ void grouped_matmul_example(engine::kind engine_kind) {
                 eng, src_md, weights_md, dst_md, matmul_attr);
         matmul_prim = matmul(matmul_pd);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No f8 implementation is available for this platform.\n"
                     "Please refer to the developer guide for details."};

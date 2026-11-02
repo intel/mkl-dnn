@@ -116,7 +116,8 @@ void simple_net(engine::kind engine_kind) {
                 conv_bias_md, conv_dst_md, conv_strides, conv_padding,
                 conv_padding);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No bf16 convolution implementation is available for this "
                     "platform.\n"

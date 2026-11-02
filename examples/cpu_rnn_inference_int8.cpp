@@ -345,7 +345,8 @@ void simple_net() {
                 enc_bidir_wei_iter_md, user_enc_bidir_bias_md,
                 enc_bidir_dst_layer_md, memory::desc(), memory::desc(), attr);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No int8 LSTM implementation is available for this "
                     "platform.\n"

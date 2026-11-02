@@ -162,7 +162,8 @@ void simple_net_int8(engine::kind engine_kind) {
                 conv_bias_md, conv_dst_md, conv_strides, conv_padding,
                 conv_padding, conv_attr);
     } catch (error &e) {
-        if (e.status == dnnl_unimplemented)
+        if (e.status == dnnl_unimplemented
+                || e.status == dnnl_unsupported_data_type)
             throw example_allows_unimplemented {
                     "No int8 convolution implementation is available for this "
                     "platform.\n"
