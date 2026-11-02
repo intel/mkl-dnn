@@ -1,6 +1,6 @@
 # *******************************************************************************
 # Copyright 2024-2026 Arm Limited and affiliates.
-# Copyright 2024-2026 Intel Corporation
+# Copyright 2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   pr-commits:
-    name: Commit messages
+    name: Commit Messages
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -44,7 +44,7 @@ jobs:
         run: python3 ./.github/automation/commit-msg-check.py "${{ github.event.pull_request.head.sha }}" "${{ github.event.pull_request.base.sha }}"
 
   pr-header-guards:
-    name: Header guards
+    name: Header Guards
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -70,7 +70,7 @@ jobs:
         run: .github/automation/clang-format.sh ${{ github.event.pull_request.base.sha }}
 
   pr-format-tags:
-    name: Format tags consistency
+    name: Format Tags Consistency
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout oneDNN
@@ -118,8 +118,8 @@ jobs:
           config: ".github/.licenserc.yml"
           mode: "check"
 
-  other-lint:
-    name: Other linters
+  pr-python-linter:
+    name: Python Linter
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout Code
@@ -258,7 +258,7 @@ jobs:
           grep -q -i -E "warning:|error:" clang-tidy.log && exit 1 || true
 
   pr-status:
-    name: Formatting
+    name: All Linters Clean
     runs-on: ubuntu-24.04
     needs: [ pr-commits, pr-clang-format, pr-format-tags, pr-check-license-header ]
     steps:
