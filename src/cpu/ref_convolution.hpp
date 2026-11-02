@@ -75,7 +75,7 @@ struct ref_convolution_fwd_t : public primitive_t {
             VDISPATCH_CONV(attr()->post_ops_.check_sum_consistency(
                                    dst_type, /* is_int8 */ false),
                     VERBOSE_UNSUPPORTED_POSTOP);
-            VDISPATCH_CONV(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_CONV_SC(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_CONV(
                     attr_.set_default_formats(dst_md(0)) == status::success,
                     VERBOSE_UNSUPPORTED_POSTOP);
@@ -93,8 +93,8 @@ struct ref_convolution_fwd_t : public primitive_t {
             return set_default_formats_common(dat_tag, wei_tag, dat_tag);
         }
 
-        bool post_ops_ok() const {
-            return ref_post_ops_t::post_ops_ok(attr()->post_ops_);
+        status_t post_ops_ok() const {
+            return ref_post_ops_t::post_ops_status(attr()->post_ops_);
         }
     };
 

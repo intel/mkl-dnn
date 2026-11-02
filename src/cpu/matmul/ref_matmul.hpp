@@ -116,7 +116,8 @@ struct ref_matmul_t : public primitive_t {
                     attr_.post_ops_.check_sum_consistency(dst_type,
                             /* is_int8 */ types::is_integral_dt(dst_type)),
                     VERBOSE_UNSUPPORTED_POSTOP);
-            VDISPATCH_MATMUL(ref_post_ops_t::post_ops_ok(attr()->post_ops_),
+            VDISPATCH_MATMUL_SC(
+                    ref_post_ops_t::post_ops_status(attr()->post_ops_),
                     VERBOSE_UNSUPPORTED_POSTOP);
             CHECK(attr_scales_ok(engine,
                     {DNNL_ARG_SRC, DNNL_ARG_WEIGHTS, DNNL_ARG_DST},

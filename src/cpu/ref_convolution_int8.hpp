@@ -70,7 +70,7 @@ struct ref_convolution_int8_fwd_t : public primitive_t {
             CHECK(attr_scales_ok());
             CHECK(attr_zero_points_ok(
                     {{DNNL_ARG_SRC, {0, 2}}, {DNNL_ARG_DST, {0, 2}}}));
-            VDISPATCH_CONV(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_CONV_SC(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_CONV(
                     attr_.set_default_formats(dst_md(0)) == status::success,
                     VERBOSE_UNSUPPORTED_POSTOP);
@@ -87,8 +87,8 @@ struct ref_convolution_int8_fwd_t : public primitive_t {
             return set_default_formats_common(dat_tag, wei_tag, dat_tag);
         }
 
-        bool post_ops_ok() const {
-            return ref_post_ops_t::post_ops_ok(attr()->post_ops_);
+        status_t post_ops_ok() const {
+            return ref_post_ops_t::post_ops_status(attr()->post_ops_);
         }
     };
 

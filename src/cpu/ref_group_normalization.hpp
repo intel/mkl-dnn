@@ -56,7 +56,7 @@ struct ref_group_normalization_fwd_t : public primitive_t {
                                     | skip_mask_t::post_ops),
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_GNORM(attr_scales_ok(), VERBOSE_UNSUPPORTED_SCALES_CFG);
-            VDISPATCH_GNORM(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_GNORM_SC(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
 
             VDISPATCH_GNORM(
                     set_default_formats_common(), VERBOSE_UNSUPPORTED_TAG);
@@ -68,8 +68,8 @@ struct ref_group_normalization_fwd_t : public primitive_t {
         }
 
     private:
-        bool post_ops_ok() const {
-            return ref_post_ops_t::post_ops_ok(attr()->post_ops_);
+        status_t post_ops_ok() const {
+            return ref_post_ops_t::post_ops_status(attr()->post_ops_);
         }
     };
 

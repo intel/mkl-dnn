@@ -65,7 +65,8 @@ struct ref_binary_t : public primitive_t {
             VDISPATCH_BINARY(IMPLICATION(!attr()->scales_.has_default_values(),
                                      check_scales_mask()),
                     VERBOSE_UNSUPPORTED_SCALES_CFG);
-            VDISPATCH_BINARY(ref_post_ops_t::post_ops_ok(attr()->post_ops_),
+            VDISPATCH_BINARY_SC(
+                    ref_post_ops_t::post_ops_status(attr()->post_ops_),
                     VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_BINARY(
                     attr_.set_default_formats(dst_md(0)) == status::success,

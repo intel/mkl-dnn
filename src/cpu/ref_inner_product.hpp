@@ -82,8 +82,8 @@ struct ref_inner_product_fwd_t : public primitive_t {
                     attr()->post_ops_.check_sum_consistency(dst_type,
                             /* is_int8 */ false),
                     VERBOSE_UNSUPPORTED_POSTOP);
-            VDISPATCH_INNER_PRODUCT(
-                    ref_post_ops_t::post_ops_ok(attr()->post_ops_),
+            VDISPATCH_INNER_PRODUCT_SC(
+                    ref_post_ops_t::post_ops_status(attr()->post_ops_),
                     VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_INNER_PRODUCT(
                     attr_.set_default_formats(dst_md(0)) == status::success,

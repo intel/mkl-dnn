@@ -188,7 +188,8 @@ struct ref_deconvolution_fwd_t : public primitive_t {
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_DECONVOLUTION(
                     attr_scales_ok(), VERBOSE_UNSUPPORTED_SCALES_CFG);
-            VDISPATCH_DECONVOLUTION(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_DECONVOLUTION_SC(
+                    post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_DECONVOLUTION(
                     zero_points_ok(), VERBOSE_UNSUPPORTED_ZP_CFG);
 
@@ -256,12 +257,13 @@ struct ref_deconvolution_fwd_t : public primitive_t {
             }
         }
 
-        bool post_ops_ok() const {
+        status_t post_ops_ok() const {
             using namespace data_type;
             const bool is_int8 = utils::one_of(src_md()->data_type, s8, u8);
-            return attr()->post_ops_.check_sum_consistency(
-                           dst_md()->data_type, is_int8)
-                    && ref_post_ops_t::post_ops_ok(attr()->post_ops_);
+            if (!attr()->post_ops_.check_sum_consistency(
+                        dst_md()->data_type, is_int8))
+                return status::unimplemented;
+            return ref_post_ops_t::post_ops_status(attr()->post_ops_);
         }
 
         bool zero_points_ok() const {

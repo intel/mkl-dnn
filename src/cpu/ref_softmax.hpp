@@ -62,7 +62,7 @@ struct ref_softmax_fwd_t : public primitive_t {
                             | skip_mask_t::post_ops | skip_mask_t::dropout),
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_SOFTMAX(attr_scales_ok(), VERBOSE_UNSUPPORTED_SCALES_CFG);
-            VDISPATCH_SOFTMAX(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_SOFTMAX_SC(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
 
             VDISPATCH_SOFTMAX(set_default_formats() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);
@@ -115,8 +115,8 @@ struct ref_softmax_fwd_t : public primitive_t {
             }
         }
 
-        bool post_ops_ok() const {
-            return ref_post_ops_t::post_ops_ok(attr()->post_ops_);
+        status_t post_ops_ok() const {
+            return ref_post_ops_t::post_ops_status(attr()->post_ops_);
         }
 
         status_t dropout_ok() const {

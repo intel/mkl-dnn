@@ -57,7 +57,7 @@ status_t simple_layer_normalization_fwd_t::pd_t::init(const engine_t *engine) {
                             skip_mask_t::scales | skip_mask_t::post_ops),
             VERBOSE_UNSUPPORTED_ATTR);
     VDISPATCH_LNORM(attr_scales_ok(), VERBOSE_UNSUPPORTED_SCALES_CFG);
-    VDISPATCH_LNORM(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
+    VDISPATCH_LNORM_SC(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
     VDISPATCH_LNORM(set_default_formats_common(), VERBOSE_UNSUPPORTED_TAG);
     VDISPATCH_LNORM(src_d.is_blocking_desc(), VERBOSE_BLOCKING_FAIL,
             "blocking descriptor fail");

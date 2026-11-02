@@ -152,17 +152,14 @@ float ref_binary_scalar_t::compute_scalar(
     return compute_binary_scalar(alg_, src0, src1, src2);
 }
 
-bool ref_binary_scalar_t::data_type_ok(const post_ops_t::entry_t &entry) {
+status_t ref_binary_scalar_t::data_type_ok(const post_ops_t::entry_t &entry) {
     const auto &binary = entry.binary;
-    bool src1_ok = platform::has_data_type_support(binary.src1_desc.data_type);
+    CHECK(platform::data_type_support_status(binary.src1_desc.data_type));
 
-    if (entry.is_binary_with_ternary_op()) {
-        bool src2_ok
-                = platform::has_data_type_support(binary.src2_desc.data_type);
-        return src1_ok && src2_ok;
-    }
+    if (entry.is_binary_with_ternary_op())
+        CHECK(platform::data_type_support_status(binary.src2_desc.data_type));
 
-    return src1_ok;
+    return status::success;
 }
 
 ref_eltwise_scalar_fwd_t::ref_eltwise_scalar_fwd_t(
@@ -198,10 +195,10 @@ void ref_sum_scalar_t::execute(
     res += scale * (dst_val - static_cast<float>(zero_point));
 }
 
-bool ref_sum_scalar_t::data_type_ok(const post_ops_t::entry_t &entry) {
+status_t ref_sum_scalar_t::data_type_ok(const post_ops_t::entry_t &entry) {
     const auto &sum = entry.sum;
-    return sum.dt == data_type::undef
-            || platform::has_data_type_support(sum.dt);
+    if (sum.dt == data_type::undef) return status::success;
+    return platform::data_type_support_status(sum.dt);
 }
 
 ref_post_ops_t::ref_post_ops_t(const post_ops_t &po, bool skip_sum)
@@ -401,24 +398,24 @@ void ref_post_ops_t::execute(float &res, const args_t &args) const {
     }
 }
 
-bool ref_post_ops_t::post_ops_ok(const post_ops_t &po) {
+status_t ref_post_ops_t::post_ops_status(const post_ops_t &po) {
 
-    if (!primitive_kind_ok(po)) return false;
+    if (!primitive_kind_ok(po)) return status::unimplemented;
 
     for (const auto &e : po.entry_) {
         switch (e.kind) {
             case primitive_kind::sum:
-                if (!ref_sum_scalar_t::data_type_ok(e)) return false;
+                CHECK(ref_sum_scalar_t::data_type_ok(e));
                 break;
             case primitive_kind::binary:
-                if (!ref_binary_scalar_t::data_type_ok(e)) return false;
+                CHECK(ref_binary_scalar_t::data_type_ok(e));
                 break;
             case primitive_kind::eltwise:
             case primitive_kind::prelu: break;
-            default: return false;
+            default: return status::unimplemented;
         }
     }
-    return true;
+    return status::success;
 }
 
 } // namespace cpu

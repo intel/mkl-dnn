@@ -65,8 +65,8 @@ struct simple_layer_normalization_fwd_t : public primitive_t {
                 scratchpad.book(key_nested, reorder_pd_->scratchpad_registry());
             }
         }
-        bool post_ops_ok() const {
-            return ref_post_ops_t::post_ops_ok(attr()->post_ops_);
+        status_t post_ops_ok() const {
+            return ref_post_ops_t::post_ops_status(attr()->post_ops_);
         }
     };
 
