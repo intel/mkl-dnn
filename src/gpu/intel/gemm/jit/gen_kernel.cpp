@@ -66,6 +66,14 @@ SelectionObserver make_entry_observer(int eu_count, int freq_mhz) {
                     << entry->str();
     };
 }
+
+std::string kernel_str(const GEMMProblem &problem, int unroll_m, int unroll_n,
+        const std::string &strategy) {
+    auto astr = problem.scalarsToString();
+    if (!astr.empty()) astr += ' ';
+    return problem.toString() + ' ' + std::to_string(unroll_m) + ' '
+            + std::to_string(unroll_n) + ' ' + astr + strategy;
+}
 } // anonymous namespace
 
 bool enable_generator_dsl() {
@@ -104,117 +112,93 @@ compute::scalar_type_t gen_desc_t::scalar_type() const {
     }
 }
 
-#ifdef DNNL_DEV_MODE
 static gemmstone::Scalar stringToScalar(const std::string &val) {
     using namespace gemmstone;
     return val[0] == '-' ? Scalar(Scalar::Variable) : Scalar(std::stoi(val));
 }
 
-status_t gen_desc_t::apply_kernel_override(
-        const std::string &ovr_strategy, const char *tags) {
-    try {
-        // Overrides problem data types; incompatible precisions lose accuracy.
-        entry_ = nullptr;
-        const GEMMProblem pd = problem_;
-        const Scalar pd_alpha = problem_.alpha, pd_beta = problem_.beta;
-        stringstream_t ss(ovr_strategy);
-        std::string val;
-        // Skip tokens before `gemm`; the pd sets them.
-        while (ss >> val && val != "gemm") {}
-        if (val != "gemm") throw std::runtime_error("expected 'gemm' prefix");
-        ss >> val;
-        const char *pstr = val.c_str();
-        // Cannot modify external data types; f32 data may be read as tf32.
-        auto ext_ok = [](Type &t, Type ovr) {
-            bool f32 = utils::one_of(t, Type::f32, Type::tf32)
-                    && utils::one_of(ovr, Type::f32, Type::tf32);
-            if (t != ovr && !f32) return false;
-            t = ovr;
-            return true;
-        };
-        Type ext_dt;
-        pstr = parsePrecisions(pstr, ext_dt, problem_.Ta);
-        if (!ext_ok(problem_.Ta_ext, ext_dt))
-            throw std::runtime_error("invalid external A data type");
-        pstr = parsePrecisions(pstr, ext_dt, problem_.Tb);
-        if (!ext_ok(problem_.Tb_ext, ext_dt))
-            throw std::runtime_error("invalid external B data type");
-        if (*pstr == '[') {
-            pstr = parsePrecisions(pstr, problem_.Tc, ext_dt);
-            if (ext_dt != problem_.Tc_ext)
-                throw std::runtime_error("invalid external C data type");
-        } else {
-            pstr = parsePrecision(pstr, problem_.Tc);
-        }
-        ss >> val;
-        pstr = val.c_str();
-        pstr = parseLayout(pstr, problem_.A);
-        pstr = parseLayout(pstr, problem_.B);
-        pstr = parseLayout(pstr, problem_.C);
-        if (problem_.A.layout != pd.A.layout || problem_.B.layout != pd.B.layout
-                || problem_.C.layout != pd.C.layout)
-            throw std::runtime_error("layout mismatch");
-
-        if (problem_.A.alignment == 0)
-            problem_.A.setAlignment(
-                    problem_.A.defaultAlignment(problem_.Ta_ext));
-        if (problem_.B.alignment == 0)
-            problem_.B.setAlignment(
-                    problem_.B.defaultAlignment(problem_.Tb_ext));
-        if (problem_.C.alignment == 0)
-            problem_.C.setAlignment(
-                    problem_.C.defaultAlignment(problem_.Tc_ext));
-
-        if (pd.A.alignment % problem_.A.alignment
-                || pd.B.alignment % problem_.B.alignment
-                || pd.C.alignment % problem_.C.alignment)
-            throw std::runtime_error("alignment too strong");
-
-        strategy_ = GEMMStrategy(hw_, stepping_);
-        ss >> strategy_.unroll[LoopM];
-        ss >> strategy_.unroll[LoopN];
-
-        ss >> val;
-        problem_.alpha = stringToScalar(val);
-        ss >> val;
-        problem_.beta = stringToScalar(val);
-        auto scalar_ok = [](const Scalar &want, const Scalar &ovr) {
-            return !ovr.fixed() || want == int(ovr);
-        };
-        if (!scalar_ok(pd_alpha, problem_.alpha)
-                || !scalar_ok(pd_beta, problem_.beta))
-            throw std::runtime_error("alpha/beta mismatch");
-
-        if (!ss) throw std::runtime_error("truncated kernel string");
-        std::string rest = ss.str().substr(ss.tellg());
-        parseStrategy(rest, problem_, strategy_);
-
-        // Later k-chunks accumulate (catalog parity).
-        auto block_k = strategy_.blocking[LoopK];
-        if (block_k <= 0) block_k = strategy_.defaultBlockK(hw_, problem_);
-        if (k_ > block_k && !problem_.beta1()) problem_.beta = Scalar();
-
-        if (strategy_.kParallel)
-            throw std::runtime_error("unknown k0 for global k-parallel");
-        aux_params_ = EvaluateAuxOutput();
-        aux_params_.kParallelVariable = strategy_.kParallelVariable;
-        if (strategy_.kParallelLocal) {
-            if (strategy_.wg[LoopK] < 1 || strategy_.unroll[LoopK] < 1)
-                throw std::runtime_error("invalid k-parallel-local geometry");
-            aux_params_.k0
-                    = utils::rnd_up(utils::div_up(k_, strategy_.wg[LoopK]),
-                            strategy_.unroll[LoopK]);
-            aux_params_.wgK = std::max(1,
-                    std::min(strategy_.wg[LoopK],
-                            int(utils::div_up(k_, aux_params_.k0))));
-        }
-    } catch (const std::exception &e) {
-        reject_reason_ = e.what();
-        return status::unimplemented;
+void gen_desc_t::apply_strategy(std::string str) {
+    // Overrides problem data types; incompatible precisions lose accuracy.
+    const GEMMProblem pd = problem_;
+    const Scalar pd_alpha = problem_.alpha, pd_beta = problem_.beta;
+    stringstream_t ss(str);
+    std::string val;
+    // Skip tokens before `gemm`; the pd sets them.
+    while (ss >> val && val != "gemm") {}
+    if (val != "gemm") throw std::runtime_error("expected 'gemm' prefix");
+    ss >> val;
+    const char *pstr = val.c_str();
+    // Cannot modify external data types; f32 data may be read as tf32.
+    auto ext_ok = [](Type &t, Type ovr) {
+        bool f32 = utils::one_of(t, Type::f32, Type::tf32)
+                && utils::one_of(ovr, Type::f32, Type::tf32);
+        if (t != ovr && !f32) return false;
+        t = ovr;
+        return true;
+    };
+    Type ext_dt;
+    pstr = parsePrecisions(pstr, ext_dt, problem_.Ta);
+    if (!ext_ok(problem_.Ta_ext, ext_dt))
+        throw std::runtime_error("invalid external A data type");
+    pstr = parsePrecisions(pstr, ext_dt, problem_.Tb);
+    if (!ext_ok(problem_.Tb_ext, ext_dt))
+        throw std::runtime_error("invalid external B data type");
+    if (*pstr == '[') {
+        pstr = parsePrecisions(pstr, problem_.Tc, ext_dt);
+        if (ext_dt != problem_.Tc_ext)
+            throw std::runtime_error("invalid external C data type");
+    } else {
+        pstr = parsePrecision(pstr, problem_.Tc);
     }
-    return status::success;
+    ss >> val;
+    pstr = val.c_str();
+    pstr = parseLayout(pstr, problem_.A);
+    pstr = parseLayout(pstr, problem_.B);
+    pstr = parseLayout(pstr, problem_.C);
+    if (problem_.A.layout != pd.A.layout || problem_.B.layout != pd.B.layout
+            || problem_.C.layout != pd.C.layout)
+        throw std::runtime_error("layout mismatch");
+
+    if (problem_.A.alignment == 0)
+        problem_.A.setAlignment(problem_.A.defaultAlignment(problem_.Ta_ext));
+    if (problem_.B.alignment == 0)
+        problem_.B.setAlignment(problem_.B.defaultAlignment(problem_.Tb_ext));
+    if (problem_.C.alignment == 0)
+        problem_.C.setAlignment(problem_.C.defaultAlignment(problem_.Tc_ext));
+
+    if (pd.A.alignment % problem_.A.alignment
+            || pd.B.alignment % problem_.B.alignment
+            || pd.C.alignment % problem_.C.alignment)
+        throw std::runtime_error("alignment too strong");
+
+    strategy_ = GEMMStrategy(hw_, stepping_);
+    ss >> strategy_.unroll[LoopM];
+    ss >> strategy_.unroll[LoopN];
+
+    ss >> val;
+    problem_.alpha = stringToScalar(val);
+    ss >> val;
+    problem_.beta = stringToScalar(val);
+    auto scalar_ok = [](const Scalar &want, const Scalar &ovr) {
+        return !ovr.fixed() || want == int(ovr);
+    };
+    if (!scalar_ok(pd_alpha, problem_.alpha)
+            || !scalar_ok(pd_beta, problem_.beta))
+        throw std::runtime_error("alpha/beta mismatch");
+
+    if (!ss) throw std::runtime_error("truncated kernel string");
+    str = ss.str().substr(ss.tellg());
+
+    parseStrategy(str, problem_, strategy_);
 }
-#endif
+
+void gen_desc_t::prepare(
+        GEMMStrategy &st, GEMMProblem &problem, const char *tags) const {
+    st.relaxedAccumulation |= relaxed_acc_;
+    st.systolicAvailable &= !disable_systolic_;
+    problem.autoTypeConversions(st.systolicAvailable);
+    adjustStrategy(hw_, problem, st, tags);
+}
 
 status_t gen_desc_t::finalize(const char *tags) {
     reject_reason_.clear();
@@ -224,43 +208,65 @@ status_t gen_desc_t::finalize(const char *tags) {
     };
     problem_.CO.setAlignment(problem_.Tco.paddedSize());
 
-#ifdef DNNL_DEV_MODE
-    if (!kernel_override_.empty()) {
-        CHECK(apply_kernel_override(kernel_override_, tags));
-    } else {
-#endif
-        // Update problem alignments to match catalog entry.
-        // Do not raise an alignment above the actual buffer alignment: catalog
-        // entries may accept lower alignments than driverInfo.alignment via
-        // unaligned access fallbacks, and overstating the alignment can cause
-        // illegal accesses (e.g. 2D block loads on a sub-DWord pitch).
-        if (!isPacked(problem_.A.layout)
-                && problem_.Ta_ext.paddedSize() >= problem_.Ta.paddedSize()) {
-            problem_.A.setAlignment(std::max(problem_.Ta_ext.paddedSize(),
-                    std::min(entry_->driverInfo.alignment[0],
-                            int(problem_.A.alignment))));
-        }
+    std::string str = kernel_override_;
+    try {
+        if (str.empty()) {
+            // Update problem alignments to match catalog entry.
+            // Do not raise an alignment above the actual buffer alignment:
+            // catalog entries may accept lower alignments than
+            // driverInfo.alignment via unaligned access fallbacks, and
+            // overstating the alignment can cause illegal accesses (e.g. 2D
+            // block loads on a sub-DWord pitch).
+            if (!isPacked(problem_.A.layout)
+                    && problem_.Ta_ext.paddedSize()
+                            >= problem_.Ta.paddedSize()) {
+                problem_.A.setAlignment(std::max(problem_.Ta_ext.paddedSize(),
+                        std::min(entry_->driverInfo.alignment[0],
+                                int(problem_.A.alignment))));
+            }
 
-        if (!isPacked(problem_.B.layout)
-                && problem_.Tb_ext.paddedSize() >= problem_.Tb.paddedSize()) {
-            problem_.B.setAlignment(std::max(problem_.Tb_ext.paddedSize(),
-                    std::min(entry_->driverInfo.alignment[1],
-                            int(problem_.B.alignment))));
-        }
+            if (!isPacked(problem_.B.layout)
+                    && problem_.Tb_ext.paddedSize()
+                            >= problem_.Tb.paddedSize()) {
+                problem_.B.setAlignment(std::max(problem_.Tb_ext.paddedSize(),
+                        std::min(entry_->driverInfo.alignment[1],
+                                int(problem_.B.alignment))));
+            }
 
-        if (!isPacked(problem_.C.layout)) {
-            problem_.C.setAlignment(std::max(problem_.Tc_ext.paddedSize(),
-                    entry_->restrictions.alignment[2]));
-        }
+            if (!isPacked(problem_.C.layout)) {
+                problem_.C.setAlignment(std::max(problem_.Tc_ext.paddedSize(),
+                        entry_->restrictions.alignment[2]));
+            }
 
-        // Parse strategy string.
-        strategy_ = GEMMStrategy(hw_, stepping_);
-        strategy_.unroll[LoopM] = entry_->driverInfo.unroll[LoopM];
-        strategy_.unroll[LoopN] = entry_->driverInfo.unroll[LoopN];
-        parseStrategy(entry_->strategy, problem_, strategy_);
-#ifdef DNNL_DEV_MODE
-    }
-#endif
+            str = kernel_str(problem_, entry_->driverInfo.unroll[LoopM],
+                    entry_->driverInfo.unroll[LoopN], entry_->strategy);
+        } else {
+            entry_ = nullptr;
+        }
+        apply_strategy(str);
+        if (!entry_) {
+            // Later k-chunks accumulate (catalog parity).
+            auto block_k = strategy_.blocking[LoopK];
+            if (block_k <= 0) block_k = strategy_.defaultBlockK(hw_, problem_);
+            if (k_ > block_k && !problem_.beta1()) problem_.beta = Scalar();
+
+            if (strategy_.kParallel)
+                throw std::runtime_error("unknown k0 for global k-parallel");
+            aux_params_ = EvaluateAuxOutput();
+            aux_params_.kParallelVariable = strategy_.kParallelVariable;
+            if (strategy_.kParallelLocal) {
+                if (strategy_.wg[LoopK] < 1 || strategy_.unroll[LoopK] < 1)
+                    throw std::runtime_error(
+                            "invalid k-parallel-local geometry");
+                aux_params_.k0
+                        = utils::rnd_up(utils::div_up(k_, strategy_.wg[LoopK]),
+                                strategy_.unroll[LoopK]);
+                aux_params_.wgK = std::max(1,
+                        std::min(strategy_.wg[LoopK],
+                                int(utils::div_up(k_, aux_params_.k0))));
+            }
+        }
+    } catch (const std::exception &e) { return reject(e.what()); }
     modifyStrategy(strategy_, aux_params_);
     if (l1_flush_wa_)
         strategy_.C.cachingW = makeL1Uncacheable(strategy_.C.cachingW);
@@ -373,10 +379,7 @@ status_t gen_desc_t::finalize(const char *tags) {
         }
     }
 
-    strategy_.relaxedAccumulation |= relaxed_acc_;
-    strategy_.systolicAvailable &= !disable_systolic_;
-    problem_.autoTypeConversions(strategy_.systolicAvailable);
-    adjustStrategy(hw_, problem_, strategy_, tags);
+    prepare(strategy_, problem_, tags);
     try {
         strategy_.preflight(hw_, problem_);
     } catch (const std::exception &e) { return reject(e.what()); } catch (...) {
@@ -435,17 +438,17 @@ status_t gen_desc_t::finalize(const char *tags) {
     if (strategy_.kInterleave) aux_params_.wgK = strategy_.wg[LoopK];
     if (aux_params_.wgK > strategy_.wg[LoopK])
         aux_params_.wgK = strategy_.wg[LoopK];
-    update_driver_info();
+    driver_info_ = driver_info_of(strategy_);
 
     return status::success;
 }
 
-void gen_desc_t::update_driver_info() {
+gemmstone::CommonDriverInfo gen_desc_t::driver_info_of(
+        const gemmstone::GEMMStrategy &strategy) const {
 #define ARCH_DISPATCH(arch) \
     case ngen::HW::arch: \
-        driver_info_ = gemm_kernel_generator_t<ngen::HW::arch>::driverInfo( \
-                problem_, strategy_); \
-        break;
+        return gemm_kernel_generator_t<ngen::HW::arch>::driverInfo( \
+                problem_, strategy);
 
     switch (hw_) {
         REG_XEHPG_ISA(ARCH_DISPATCH(XeHPG))
@@ -455,8 +458,7 @@ void gen_desc_t::update_driver_info() {
         REG_XE3P_ISA(ARCH_DISPATCH(Xe3p))
         default:
             assert(!"Unsupported architecture");
-            driver_info_ = entry_->driverInfo;
-            break;
+            return entry_ ? entry_->driverInfo : driver_info_;
     }
 #undef ARCH_DISPATCH
 }
@@ -1084,12 +1086,8 @@ dsl::kernel_t get_dsl_kernel(const GEMMProblem &problem,
 
 std::string dump_kernel(ngen::HW hw, const gemmstone::GEMMProblem &problem,
         const gemmstone::GEMMStrategy &strategy) {
-    auto pstr = problem.toString();
-    auto astr = problem.scalarsToString();
-    auto sstr = unparseStrategy(hw, problem, strategy);
-    if (!astr.empty()) astr += ' ';
-    return pstr + ' ' + std::to_string(strategy.unroll[LoopM]) + ' '
-            + std::to_string(strategy.unroll[LoopN]) + ' ' + astr + sstr;
+    return kernel_str(problem, strategy.unroll[LoopM], strategy.unroll[LoopN],
+            unparseStrategy(hw, problem, strategy));
 }
 
 status_t gen_kernel_t::get_kernel(
