@@ -149,6 +149,7 @@ if(DNNL_TARGET_ARCH STREQUAL "X64" AND NOT DNNL_CPU_RUNTIME STREQUAL "NONE")
         test_isa_mask.cpp
         test_isa_hints.cpp
         test_isa_iface.cpp
+        test_isa_unsupported_dt.cpp
         )
     foreach(TEST_FILE ${X64_PRIM_TEST_CASES_SRC})
         list(APPEND PRIM_TEST_CASES_SRC "${TEST_FILE}")
