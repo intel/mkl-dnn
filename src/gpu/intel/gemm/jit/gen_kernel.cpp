@@ -387,6 +387,9 @@ status_t gen_desc_t::finalize(const char *tags) {
     if (!entry_ && k_ > strategy_.blocking[LoopK] && problem_.beta.fixed()
             && !problem_.beta1())
         return reject("fixed beta over k-chunks");
+    if ((strategy_.kParallel || strategy_.kParallelVariable)
+            && !strategy_.C.atomic)
+        return reject("k-parallel without C atomics");
 
     // Check for legal 2D quantization group size.
     if (problem_.aOffset2D() || problem_.aScale2D())
