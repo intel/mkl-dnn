@@ -63,6 +63,12 @@ inline bool option_matched(const std::string &option_str, const char *str) {
 
 std::string lowercase(const std::string &s);
 
+// Joins `a` and `b`, inserting `sep` between them unless `sep` is '\0'.
+// Building the result with `+=` avoids the temporary strings a chained
+// `a + sep + b` would allocate.
+std::string str_join(
+        const std::string &a, const std::string &b, char sep = '\0');
+
 } // namespace utils
 
 namespace parsers {

@@ -91,6 +91,13 @@ std::string lowercase(const std::string &s) {
     return s_low;
 }
 
+std::string str_join(const std::string &a, const std::string &b, char sep) {
+    std::string res = a;
+    if (sep != '\0') res += sep;
+    res += b;
+    return res;
+}
+
 // Covers all integer parsing routines: `atoi`, `atol, `atoll`, `stoi`, `stol`.
 int64_t stoll_safe(const std::string &s) {
     int64_t value = 0;
