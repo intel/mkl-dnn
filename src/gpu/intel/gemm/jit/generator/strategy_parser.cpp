@@ -828,7 +828,12 @@ const char *parsePrecisions(const char *s, Type &precision1, Type &precision2)
     return s;
 }
 
-std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrategy &strategy)
+static std::string unparseKParallel(const GEMMStrategy &s)      { return std::string(s.kParallel ? " kb" : "") + (s.kParallelVariable ? " kv" : ""); }
+static std::string unparseFuseBeta(const GEMMStrategy &s)       { return !s.fuseBeta ? "" : s.altFusedBeta ? " afb" : " fb"; }
+static std::string unparseFusePostOps(const GEMMStrategy &s)    { return s.fusePostOps ? " fp" : ""; }
+static std::string unparseKParallelLocal(const GEMMStrategy &s) { return !s.kParallelLocal ? "" : s.shrinkWGK ? " akr" : s.kInterleave ? " ikr" : " kr"; }
+
+std::string unparseStrategy(HW hw,const GEMMProblem &problem, const GEMMStrategy &strategy)
 {
     std::stringstream s;
     s.imbue(std::locale::classic());
@@ -934,9 +939,7 @@ std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrateg
     if (strategy.forceFixedWGK)             s << " ffk";
 
 
-    if (strategy.kParallelLocal)    s << (strategy.shrinkWGK   ? " akr" :
-                                          strategy.kInterleave ? " ikr" :
-                                                                 " kr");
+    s << unparseKParallelLocal(strategy);
     if (strategy.fillGoal)          s << " fg " << strategy.fillGoal * (1. / 16);
     if (strategy.kInterleave)       s << " ki" << strategy.kInterleaveChunk;
 
@@ -1024,10 +1027,7 @@ std::string unparseStrategy(HW hw, const GEMMProblem &problem, const GEMMStrateg
     if (strategy.mSplitThresh)          s << " ms" << strategy.mSplitThresh;
     if (strategy.nSplitThresh)          s << " ns" << strategy.nSplitThresh;
     if (strategy.cInterleave)           s << " cti";
-    if (strategy.kParallel)             s << " kb";
-    if (strategy.kParallelVariable)     s << " kv";
-    if (strategy.fuseBeta)              s << (strategy.altFusedBeta ? " afb" : " fb");
-    if (strategy.fusePostOps)           s << " fp";
+    s << unparseKParallel(strategy) << unparseFuseBeta(strategy) << unparseFusePostOps(strategy);
     if (strategy.zeroTempC)             s << " zt";
     if (strategy.relaxedAccumulation)   s << " rx";
     if (strategy.kPadding)              s << " pk" << strategy.kPadding;
