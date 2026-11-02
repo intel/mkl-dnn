@@ -64,8 +64,11 @@ For the CPU engine the following settings are verified:
   coincide; otherwise the frequency may float during the run.
 * Turbo mode. It is expected to be disabled; otherwise the frequency may
   increase during the run.
-* C-states. The max C-state is expected to be no more than 1; otherwise it will
-  take more time to wake cores up affecting initial results.
+* C-states. Idle states deeper than C1 are expected to be disabled, either with
+  the boot parameter or at runtime through cpuidle `disable` controls; otherwise
+  it will take more time to wake cores up affecting initial results.
+
+Frequency and C-states are verified on one online CPU per core type.
 
 For the GPU engine the following settings are verified:
 * Min and max frequency of each Intel GPU render/compute tile. The range is
