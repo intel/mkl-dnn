@@ -323,7 +323,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t mm_wei_k_blk = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
 
     const dim_t vt_k_pad = need_copy_v ? mm_wei_k_blk : dim_t(1);
-    conf.vt_k_pad = vt_k_pad;
 
     const dim_t l2_budget_bytes
             = static_cast<dim_t>(3 * platform::get_per_core_cache_size(2) / 4);
@@ -379,7 +378,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             = mm1_transpose_k || conf.mm1_needs_vnni_b || pack_k_for_aliasing;
     conf.pack_k_for_aliasing = pack_k_for_aliasing;
     const dim_t kt_k_pad = need_copy_k ? mm_wei_k_blk : dim_t(1);
-    conf.kt_k_pad = kt_k_pad;
 
     if (need_copy_k) kv_block = nstl::min<dim_t>(kv_block, 64);
     conf.kv_block = kv_block;
@@ -567,10 +565,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t num_head_kv = p_.num_head_q / p_.group_head;
     size_t copy_offset = 0;
     if (need_copy_k) {
-        const size_t head_stride
-                = static_cast<size_t>(utils::rnd_up(p_.hs_qk, kt_k_pad))
-                * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv) * mm_dt_sz;
         tensor_copy_desc_t copy_desc;
+        copy_desc.padded_k = utils::rnd_up(p_.hs_qk, kt_k_pad);
+        const size_t head_stride = static_cast<size_t>(copy_desc.padded_k)
+                * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv) * mm_dt_sz;
         copy_desc.scratch_offset = copy_offset;
         copy_desc.head_stride = head_stride;
         copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
@@ -578,10 +576,10 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
     }
     if (need_copy_v) {
-        const size_t head_stride
-                = static_cast<size_t>(utils::rnd_up(p_.seq_kv, vt_k_pad))
-                * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v) * mm_dt_sz;
         tensor_copy_desc_t copy_desc;
+        copy_desc.padded_k = utils::rnd_up(p_.seq_kv, vt_k_pad);
+        const size_t head_stride = static_cast<size_t>(copy_desc.padded_k)
+                * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v) * mm_dt_sz;
         copy_desc.scratch_offset = copy_offset;
         copy_desc.head_stride = head_stride;
         copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
@@ -839,8 +837,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             ? 0
             : align64(static_cast<size_t>(q_block) * seq_kv * mm_dt_sz);
 
-    const dim_t hs_qk_padded = utils::rnd_up(p_.hs_qk, conf.kt_k_pad);
-    const dim_t seq_kv_padded = utils::rnd_up(seq_kv, conf.vt_k_pad);
     const dim_t mm_dt_vnni_granularity = data_type_vnni_granularity(p_.mm_dt);
 
     // Element strides to walk the K tensor's seq_kv / hs_qk axes when
@@ -998,7 +994,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             brgemm_batch_element_t be;
             be.ptr.A = q_tile_buffer_ptr;
             const size_t b_offset = conf.k_copy_desc
-                    ? static_cast<size_t>(kv0 / 64) * hs_qk_padded * conf.ldk
+                    ? static_cast<size_t>(kv0 / 64) * conf.k_copy_desc->padded_k
+                                    * conf.ldk
                             + (kv0 % 64) * mm1_bcol
                     : static_cast<size_t>(kv0) * mm1_bcol;
             be.ptr.B = static_cast<const char *>(k_tile_buffer_ptr)
@@ -1090,7 +1087,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             be.ptr.A = static_cast<const char *>(prob)
                     + static_cast<size_t>(kv0) * mm_dt_sz;
             const size_t b_offset = conf.v_copy_desc
-                    ? static_cast<size_t>(v0 / 64) * seq_kv_padded * conf.ldv
+                    ? static_cast<size_t>(v0 / 64) * conf.v_copy_desc->padded_k
+                                    * conf.ldv
                             + (kv0 / v_copy_vnni_blk) * conf.ldv
                                     * v_copy_vnni_blk
                     : static_cast<size_t>(kv0) * v_row + v0;

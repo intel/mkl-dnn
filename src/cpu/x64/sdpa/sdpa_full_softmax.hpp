@@ -142,6 +142,7 @@ struct tensor_copy_desc_t {
     size_t scratch_offset = 0;
     size_t batch_stride = 0;
     size_t head_stride = 0;
+    dim_t padded_k = 0;
 };
 
 // Derived compute configuration: the JIT-free arithmetic (query/KV blocking,
@@ -160,8 +161,6 @@ struct sdpa_full_softmax_conf_t {
     bool mm2_direct = false;
     bool mm1_needs_vnni_b = false;
     bool mm2_needs_vnni_b = false;
-    // Physical reduction extents required by the K and V copy kernels.
-    dim_t kt_k_pad = 1, vt_k_pad = 1;
     // Materialized B operands use independent 64-column panels.
     dim_t ldk = 0, ldv = 0;
     dim_t v_block = 0, v_tail = 0;
