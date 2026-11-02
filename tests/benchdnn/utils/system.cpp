@@ -14,6 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <climits> // for PATH_MAX
+#include <cstdio> // for snprintf
+#include <cstdlib> // for realpath
 #include <fstream> // for std::ifstream
 #include <string>
 #include <utility> // for std::move
@@ -29,6 +32,7 @@
 #include "oneapi/dnnl/dnnl.hpp"
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 #include "oneapi/dnnl/dnnl_ocl.hpp"
+#include <CL/cl_ext.h>
 #endif
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP
 #include "oneapi/dnnl/dnnl_sycl.hpp"
@@ -365,12 +369,43 @@ static bool report_cpu_perf_hints_impl() {
     return any_hint;
 }
 
+// Returns "dddd:bb:dd.f" of the test engine's GPU, or "" if unknown.
+static std::string get_gpu_pci_bdf() {
+    char bdf[16] = {};
+#if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
+    auto eng = dnnl::engine(get_test_engine(), true);
+    cl_device_pci_bus_info_khr p {};
+    if (clGetDeviceInfo(dnnl::ocl_interop::get_device(eng),
+                CL_DEVICE_PCI_BUS_INFO_KHR, sizeof(p), &p, nullptr)
+            != CL_SUCCESS)
+        return {};
+    snprintf(bdf, sizeof(bdf), "%04x:%02x:%02x.%x", p.pci_domain, p.pci_bus,
+            p.pci_device, p.pci_function);
+#elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_ZE
+    auto eng = dnnl::engine(get_test_engine(), true);
+    ze_pci_ext_properties_t p {};
+    p.stype = ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES;
+    if (zeDevicePciGetPropertiesExt(dnnl::ze_interop::get_device(eng), &p)
+            != ZE_RESULT_SUCCESS)
+        return {};
+    snprintf(bdf, sizeof(bdf), "%04x:%02x:%02x.%x", p.address.domain,
+            p.address.bus, p.address.device, p.address.function);
+#elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_DPCPP
+    auto eng = dnnl::engine(get_test_engine(), true);
+    auto dev = dnnl::sycl_interop::get_device(eng);
+    if (!dev.has(::sycl::aspect::ext_intel_pci_address)) return {};
+    return dev.get_info<::sycl::ext::intel::info::device::pci_address>();
+#endif
+    return bdf;
+}
+
 // An unpinned GPU frequency (min != max) may float during the run and skew
 // performance measurements. The sysfs layout is probed (xe, then i915) because
 // the driver name alone doesn't determine which frequency-control files exist.
 static bool report_gpu_perf_hints_impl() {
     bool any_hint = false;
 
+    const std::string bdf = get_gpu_pci_bdf();
     const std::string drm_root = "/sys/class/drm";
     for (const auto &card : list_dir(drm_root)) {
         // A `-` marks a connector node (e.g. `card0-HDMI-A-1`), not a device.
@@ -380,6 +415,13 @@ static bool report_gpu_perf_hints_impl() {
                 = parser::utils::str_join(drm_root, card, '/');
         // Only Intel GPUs expose the frequency controls inspected below.
         if (read_sysfs_str(card_path + "/device/vendor") != "0x8086") continue;
+        // Skip cards other than the test engine's one; `device` links to the
+        // PCI node named by its BDF.
+        char real[PATH_MAX];
+        if (!bdf.empty() && realpath((card_path + "/device").c_str(), real)) {
+            const std::string node = real;
+            if (node.substr(node.rfind('/') + 1) != bdf) continue;
+        }
 
         auto gts = find_gpu_gts_xe(card_path);
         if (gts.empty()) gts = find_gpu_gts_i915(card_path);
