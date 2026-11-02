@@ -123,9 +123,9 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         kbq_loadLate = std::min(kbq_loadLate, kInterleaveChunk);
     }
 
-    // 2D quantization remainders are loaded one group at a time
-    int kaq_loadRem = std::min(kaq_load, aqGroupK);
-    int kbq_loadRem = std::min(kbq_load, bqGroupK);
+    // 2D quantization remainders are loaded one group at a time (early: kaqRemGroups groups per step)
+    int kaq_loadRem = std::min(kaq_load, aqGroupK * state.kaqRemGroups);
+    int kbq_loadRem = std::min(kbq_load, bqGroupK * state.kbqRemGroups);
     int kaq_loadLateRem = std::min(kaq_loadLate, aqGroupK);
     int kbq_loadLateRem = std::min(kbq_loadLate, bqGroupK);
     int durationAq = (kaq_loadRem < kaq_load) ? kaq_load : 1;
@@ -765,9 +765,9 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         auto &scaleLayout  = rem ? state.A_scaleLayoutRem  : state.A_scaleLayout;
         auto &gLayout      = rem ? state.Ag_layoutRem      : state.Ag_layout;
 
-        // Remainder loads cover a single group.
+        // Early remainder loads cover kaqRemGroups groups; late ones a single group.
         int kaqInc = late ? state.kaqLate : state.kaqStride;
-        if (rem) kaqInc = 1;
+        if (rem) kaqInc = late ? 1 : state.kaqRemGroups;
 
         auto kaInc = kInc(h, kaqInc, problem.aqGroupK);
         if (doOffset) incAddrK(offsetAddrs, true, kaInc, state.ldao,     state.ldaoIncrements, offsetLayout, strategy, state);
@@ -1084,11 +1084,12 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         auto Ar_scaleLayout  = state.Ar_scaleLayout;
         auto Agr_layout      = state.Agr_layout;
         if (rem && kq_loadRem < kq_load) {
-            // Slice the repacked layout, taking a single k-group
+            // Slice the repacked layout, taking a single k-group (early: kaqRemGroups k-groups)
             int hq = late ? (h % kq_load) / aqGroupK : 0;
+            int nq = late ? 1 : state.kaqRemGroups;
             for (auto *layout: {&Ar_offsetLayout, &Ar_scaleLayout, &Agr_layout}) {
                 if (layout->empty()) continue;
-                *layout = layout->slice(true, hq, hq + 1, false);
+                *layout = layout->slice(true, hq, hq + nq, false);
                 for (auto &block: *layout) block.offsetC -= hq;
             }
         }
@@ -1117,9 +1118,10 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         auto Bgr_layout      = state.Bgr_layout;
         if (rem && kq_loadRem < kq_load) {
             int hq = late ? (h % kq_load) / bqGroupK : 0;
+            int nq = late ? 1 : state.kbqRemGroups;
             for (auto *layout: {&Br_offsetLayout, &Br_scaleLayout, &Bgr_layout}) {
                 if (layout->empty()) continue;
-                *layout = layout->slice(false, hq, hq + 1, false);
+                *layout = layout->slice(false, hq, hq + nq, false);
                 for (auto &block: *layout) block.offsetR -= hq;
             }
         }
