@@ -102,3 +102,9 @@ API. Unfortunately, the library does not currently provide any hints about what
 exactly is going wrong in this case. The corresponding section of the
 documentation simply documents the primitives' capabilities.
 
+If the configuration is not supported only because the processor lacks
+support for a data type used by the attributes, for example the data type of a
+binary post-op argument, the library will return #dnnl_unsupported_data_type
+instead. Refer to [Hardware Limitations](@ref data_types_hardware_limitations)
+for details.
+
