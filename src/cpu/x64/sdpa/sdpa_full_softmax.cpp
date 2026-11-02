@@ -94,6 +94,56 @@ inline void convert_from_f32(
     }
 }
 
+template <typename buffer_t>
+struct tensor_binding_t {
+    const tensor_desc_t *tensor_desc = nullptr;
+    const memory_desc_t *arg_md = nullptr;
+    buffer_t *arg_buffer_ptr = nullptr;
+    char *scratch_ptr = nullptr;
+};
+
+template <typename buffer_t>
+tensor_binding_t<buffer_t> bind_tensor(const tensor_desc_t &tensor_desc,
+        const memory_desc_t *arg_md, buffer_t *arg_buffer_ptr,
+        char *scratch_ptr, size_t copy_area_offset) {
+    tensor_binding_t<buffer_t> binding;
+    binding.tensor_desc = &tensor_desc;
+    binding.arg_md = arg_md;
+    binding.arg_buffer_ptr = arg_buffer_ptr;
+    if (tensor_desc.copy_desc)
+        binding.scratch_ptr = scratch_ptr + copy_area_offset
+                + tensor_desc.copy_desc->scratch_offset;
+    return binding;
+}
+
+template <typename buffer_t>
+buffer_t *get_arg_ptr(const tensor_binding_t<buffer_t> &binding,
+        dim_t batch_idx, dim_t head_idx) {
+    const memory_desc_wrapper mdw(binding.arg_md);
+    dim_t offset = 0;
+    if (mdw.dims()[0] != 1) offset += batch_idx * mdw.strides()[0];
+    if (mdw.dims()[1] != 1) offset += head_idx * mdw.strides()[1];
+    return binding.arg_buffer_ptr
+            + offset * types::data_type_size(mdw.data_type());
+}
+
+template <typename buffer_t>
+char *get_copy_ptr(const tensor_binding_t<buffer_t> &binding, dim_t batch_idx,
+        dim_t head_idx) {
+    const tensor_copy_desc_t &copy_desc = *binding.tensor_desc->copy_desc;
+    return binding.scratch_ptr + batch_idx * copy_desc.batch_stride
+            + head_idx * copy_desc.head_stride;
+}
+
+template <typename buffer_t>
+buffer_t *get_tile_ptr(const tensor_binding_t<buffer_t> &binding,
+        dim_t batch_idx, dim_t head_idx) {
+    if (binding.tensor_desc->copy_desc)
+        return static_cast<buffer_t *>(
+                get_copy_ptr(binding, batch_idx, head_idx));
+    return get_arg_ptr(binding, batch_idx, head_idx);
+}
+
 // Build a BRGEMM descriptor. Fills `brg` and, when the AMX out-params
 // are supplied, the tile palette + tile-store wsp size read from the
 // finalized descriptor.
@@ -140,8 +190,6 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
                     CHECK(memory_desc_init_by_tag(
                             rhs_md, 2, rhs_dims, pop.rhs_dt, format_tag::ab));
                 } else {
-                    // Per-tile slice of the user rhs: keep broadcast axes at 1
-                    // and carry the real row/column strides.
                     const int rn = static_cast<int>(pop.rhs_dims.size());
                     const dim_t rows = pop.rhs_dims[rn - 2] == 1 ? 1 : M;
                     const dim_t cols
@@ -266,8 +314,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     CHECK(is_vnni_b_required(p_.mm_dt, mm1_transpose_k, conf.mm1_needs_vnni_b));
     CHECK(is_vnni_b_required(p_.mm_dt, transpose_v, conf.mm2_needs_vnni_b));
 
-    const bool need_copy_v = conf.need_copy_v
-            = conf.mm2_needs_vnni_b || transpose_v;
+    const bool need_copy_v = conf.mm2_needs_vnni_b || transpose_v;
 
     const dim_t mm_wei_k_blk = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
 
@@ -324,7 +371,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             && !mm1_transpose_k
             && ((k_reuse_rows >= 256 && k_l2_set_load > 0.5f)
                     || (k_reuse_rows >= 128 && k_l2_set_load >= 1.0f));
-    const bool need_copy_k = conf.need_copy_k
+    const bool need_copy_k
             = mm1_transpose_k || conf.mm1_needs_vnni_b || pack_k_for_aliasing;
     conf.pack_k_for_aliasing = pack_k_for_aliasing;
     const dim_t kt_k_pad = need_copy_k ? mm_wei_k_blk : dim_t(1);
@@ -365,8 +412,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // [hs_qk, seq_kv] transpose is materialised once (see execute); a K that is
     // logically pre-transposed but physically stored with hs_qk contiguous
     // therefore still gets transposed here.
-    conf.k_seq_stride = k_seq_stride;
-    conf.k_hs_stride = k_hs_stride;
     // mm1 materialises a dense (and, for bf16/f16, VNNI-packed) [hs_qk, seq_kv]
     // B tile whenever it must transpose K or pack it; its ldb is then the dense
     // seq_kv. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in place.
@@ -413,14 +458,16 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // are dense [m x seq_kv]. The injector indexes the condition through the
     // destination offsets, so the row/column strides must be [seq_kv, 1].
     // A broadcast query or key axis has effective stride 0 and uses the pre-pass.
-    const bool broadcast_mask = p_.has_select
-            && ((p_.seq_q > 1 && p_.cond_dims[sdpa_pd_t::mask_q_index] == 1)
-                    || (p_.seq_kv > 1
-                            && p_.cond_dims[sdpa_pd_t::mask_k_index] == 1));
-    const bool try_select_postop = p_.has_select && !p_.invert_select
-            && !broadcast_mask
-            && (p_.cond_strides[sdpa_pd_t::mask_q_index] == p_.seq_kv
-                    && p_.cond_strides[sdpa_pd_t::mask_k_index] == 1);
+    bool try_select_postop = false;
+    if (p_.has_select) {
+        const bool broadcast_mask
+                = (p_.seq_q > 1 && p_.cond_dims[sdpa_pd_t::mask_q_index] == 1)
+                || (p_.seq_kv > 1
+                        && p_.cond_dims[sdpa_pd_t::mask_k_index] == 1);
+        try_select_postop = !p_.invert_select && !broadcast_mask
+                && (p_.cond_strides[sdpa_pd_t::mask_q_index] == p_.seq_kv
+                        && p_.cond_strides[sdpa_pd_t::mask_k_index] == 1);
+    }
 
     conf.mm1_select_postop = try_select_postop;
 
@@ -512,25 +559,32 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     conf.nthr = dnnl_get_max_threads();
 
-    // transpose_b QK^T: mm1 needs a dense [hs_qk, seq_kv] B tile per head, but
-    // the brgemm ukernel has no transposed-B mode. Transpose the whole K tensor
-    // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
-    // buffer that follows the per-thread blocks; k_copy_bytes sizes it. For
-    // bf16/f16 the tile is VNNI-packed over hs_qk (K padded to k_pack), so the
-    // buffer uses rnd_up(hs_qk, kt_k_pad) rows.
+    // Packed K and V are placed consecutively after the per-thread scratch.
     const dim_t num_head_kv = p_.num_head_q / p_.group_head;
-    if (need_copy_k)
-        conf.k_copy_bytes = static_cast<size_t>(p_.batch) * num_head_kv
-                * utils::rnd_up(p_.hs_qk, kt_k_pad)
+    size_t copy_offset = 0;
+    if (need_copy_k) {
+        const size_t head_stride
+                = static_cast<size_t>(utils::rnd_up(p_.hs_qk, kt_k_pad))
                 * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv) * mm_dt_sz;
-
-    // mm2's V is packed once per (batch, kv_head) into a shared
-    // [batch x num_head_kv x rnd_up(seq_kv, vt_k_pad) x hs_v] buffer following the
-    // transposed-K buffer.
-    if (need_copy_v)
-        conf.v_copy_bytes = static_cast<size_t>(p_.batch) * num_head_kv
-                * utils::rnd_up(p_.seq_kv, vt_k_pad)
+        tensor_copy_desc_t copy_desc;
+        copy_desc.scratch_offset = copy_offset;
+        copy_desc.head_stride = head_stride;
+        copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
+        conf.params.k.copy_desc = copy_desc;
+        copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
+    }
+    if (need_copy_v) {
+        const size_t head_stride
+                = static_cast<size_t>(utils::rnd_up(p_.seq_kv, vt_k_pad))
                 * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v) * mm_dt_sz;
+        tensor_copy_desc_t copy_desc;
+        copy_desc.scratch_offset = copy_offset;
+        copy_desc.head_stride = head_stride;
+        copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
+        conf.params.v.copy_desc = copy_desc;
+        copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
+    }
+    conf.copy_buffer_bytes = copy_offset;
 
     return status::success;
 }
@@ -556,12 +610,14 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
     constexpr int ndims = sdpa_pd_t::ndims;
     constexpr int row_dim = ndims - 2;
 
-    if (conf.need_copy_k) {
+    if (p_.k.copy_desc) {
+        const dim_t k_row = p_.k_strides[row_dim];
+        const dim_t k_col = p_.k_strides[ndims - 1];
         kernels.k_packer.reset(new sdpa_brgemm_copy::b_packer_t());
-        CHECK(kernels.k_packer->init(p_.hs_qk, seq_kv, conf.k_hs_stride,
-                conf.k_seq_stride, conf.ldk, p_.mm_dt, true));
+        CHECK(kernels.k_packer->init(
+                p_.hs_qk, seq_kv, k_row, k_col, conf.ldk, p_.mm_dt, true));
     }
-    if (conf.need_copy_v) {
+    if (p_.v.copy_desc) {
         const dim_t v_row = p_.v_strides[row_dim];
         const dim_t v_col = p_.v_strides[ndims - 1];
         kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
@@ -732,41 +788,6 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
     return status::success;
 }
 
-namespace {
-dim_t tensor_base_offset(
-        const std::vector<dim_t> &strides, dim_t batch_idx, dim_t head_idx) {
-    return batch_idx * strides[0] + head_idx * strides[1];
-}
-
-const char *get_k_arg_ptr(const sdpa_full_softmax_conf_t &conf,
-        const sdpa_full_softmax_run_args_t &args, dim_t batch_idx,
-        dim_t head_idx, dim_t mm_dt_sz) {
-    return static_cast<const char *>(args.k)
-            + tensor_base_offset(conf.params.k_strides, batch_idx, head_idx)
-            * mm_dt_sz;
-}
-
-char *get_k_copy_ptr(const sdpa_full_softmax_conf_t &conf,
-        const sdpa_full_softmax_run_args_t &args, dim_t batch_idx,
-        dim_t num_head_kv, dim_t kv_head_idx, dim_t kt_head_elems,
-        dim_t mm_dt_sz) {
-    return static_cast<char *>(args.scratch)
-            + conf.nthr * conf.scratch_per_thread
-            + (batch_idx * num_head_kv + kv_head_idx) * kt_head_elems
-            * mm_dt_sz;
-}
-
-const char *get_k_tile_ptr(const sdpa_full_softmax_conf_t &conf,
-        const sdpa_full_softmax_run_args_t &args, dim_t batch_idx,
-        dim_t num_head_kv, dim_t kv_head_idx, dim_t kt_head_elems,
-        dim_t mm_dt_sz) {
-    return conf.need_copy_k
-            ? get_k_copy_ptr(conf, args, batch_idx, num_head_kv, kv_head_idx,
-                      kt_head_elems, mm_dt_sz)
-            : get_k_arg_ptr(conf, args, batch_idx, kv_head_idx, mm_dt_sz);
-}
-} // namespace
-
 status_t execute(const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_kernels_t &kernels,
         const sdpa_full_softmax_run_args_t &args, int nthr) {
@@ -775,7 +796,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const dim_t q_block = conf.q_block;
     const dim_t kv_block_ = conf.kv_block;
     const bool mm2_direct_ = conf.mm2_direct;
-    const dim_t k_seq_stride_ = conf.k_seq_stride;
     const size_t amx_wsp_bytes_ = conf.amx_wsp_bytes;
     const auto &mm1_amx_ = conf.mm1_amx;
     const auto &mm2_amx_ = conf.mm2_amx;
@@ -794,29 +814,22 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const bool has_mm1_postops = !p_.mm1_post_ops.empty() || select_in_mm1;
     const float fill = args.fill;
 
-    auto *q_base = static_cast<const char *>(args.q);
-    auto *v_orig_buffer_ptr = static_cast<const char *>(args.v);
-    auto *o_base = static_cast<char *>(args.out);
-    auto *cond_base = static_cast<const char *>(args.cond);
-
-    const dim_t o_row_stride = p_.o_strides[row_dim];
-    const dim_t o_col_stride = p_.o_strides[ndims - 1];
-    // Broadcast-aware select-condition strides: an axis with extent 1 is a
-    // broadcast axis whose stride is meaningless (set to the collapsed extent),
-    // so it must contribute 0. Without this the per-head base offset and the
-    // per-row (cond_row) advance both overrun the seq_kv-element buffer.
-    std::vector<dim_t> eff_cond_strides;
+    const memory_desc_wrapper q_mdw(args.q.md);
+    const memory_desc_wrapper k_mdw(args.k.md);
+    const memory_desc_wrapper v_mdw(args.v.md);
+    const memory_desc_wrapper o_mdw(args.out.md);
+    const dim_t o_row_stride = o_mdw.strides()[row_dim];
+    const dim_t o_col_stride = o_mdw.strides()[ndims - 1];
+    dim_t cond_row = 0;
     if (has_select) {
-        eff_cond_strides = p_.cond_strides;
-        for (int d = 0; d < ndims; ++d)
-            if (p_.cond_dims[d] == 1) eff_cond_strides[d] = 0;
+        const memory_desc_wrapper cond_mdw(args.cond.md);
+        if (cond_mdw.dims()[sdpa_pd_t::mask_q_index] != 1)
+            cond_row = cond_mdw.strides()[sdpa_pd_t::mask_q_index];
     }
-    const dim_t cond_row
-            = has_select ? eff_cond_strides[sdpa_pd_t::mask_q_index] : 0;
 
     const data_type_t mm_dt = p_.mm_dt;
     const size_t mm_dt_sz = types::data_type_size(mm_dt);
-    const size_t o_dt_sz = types::data_type_size(p_.out_dt);
+    const size_t o_dt_sz = types::data_type_size(o_mdw.data_type());
 
     const size_t block_size = conf.scratch_per_thread;
 
@@ -845,39 +858,42 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // dense [seq_kv, hs_v] copy of V, VNNI-packed over seq_kv. Doing it once
     // avoids the redundant per-query-tile pack.
     const dim_t num_head_kv = p_.num_head_q / p_.group_head;
-    const dim_t kt_head_elems
-            = hs_qk_padded * sdpa_brgemm_copy::b_packer_t::packed_ld(seq_kv);
-    const dim_t v_copy_tile_stride
-            = seq_kv_padded * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v);
-    char *v_copy_buffer_ptr = conf.need_copy_v
-            ? static_cast<char *>(args.scratch) + nthr * block_size
-                    + conf.k_copy_bytes
-            : nullptr;
-    if (conf.need_copy_k) {
+    char *scratch_ptr = static_cast<char *>(args.scratch);
+    const size_t copy_area_offset = conf.scratch_per_thread * nthr;
+    const auto q_binding = bind_tensor(p_.q, args.q.md,
+            static_cast<const char *>(args.q.buffer), scratch_ptr,
+            copy_area_offset);
+    const auto k_binding = bind_tensor(p_.k, args.k.md,
+            static_cast<const char *>(args.k.buffer), scratch_ptr,
+            copy_area_offset);
+    const auto v_binding = bind_tensor(p_.v, args.v.md,
+            static_cast<const char *>(args.v.buffer), scratch_ptr,
+            copy_area_offset);
+    const auto o_binding = bind_tensor(p_.o, args.out.md,
+            static_cast<char *>(args.out.buffer), scratch_ptr,
+            copy_area_offset);
+    const auto cond_binding = bind_tensor(p_.cond, args.cond.md,
+            static_cast<const char *>(args.cond.buffer), scratch_ptr,
+            copy_area_offset);
+    if (p_.k.copy_desc) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
-            const char *k_src = get_k_arg_ptr(
-                    conf, args, batch_idx, kv_head_idx, mm_dt_sz);
-            char *k_dst = get_k_copy_ptr(conf, args, batch_idx, num_head_kv,
-                    kv_head_idx, kt_head_elems, mm_dt_sz);
+            const char *k_src = get_arg_ptr(k_binding, batch_idx, kv_head_idx);
+            char *k_dst = get_copy_ptr(k_binding, batch_idx, kv_head_idx);
             kernels.k_packer->execute(k_src, k_dst);
         });
     }
-    if (conf.need_copy_v) {
+    if (p_.v.copy_desc) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
-            const char *v_src = v_orig_buffer_ptr
-                    + tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
-                            * mm_dt_sz;
-            char *v_dst = v_copy_buffer_ptr
-                    + (batch_idx * num_head_kv + kv_head_idx)
-                            * v_copy_tile_stride * mm_dt_sz;
+            const char *v_src = get_arg_ptr(v_binding, batch_idx, kv_head_idx);
+            char *v_dst = get_copy_ptr(v_binding, batch_idx, kv_head_idx);
             kernels.v_packer->execute(v_src, v_dst);
         });
     }
 
     const dim_t n_qblk = utils::div_up(p_.seq_q, q_block);
-    const dim_t q_row = p_.q_strides[row_dim];
+    const dim_t q_row = q_mdw.strides()[row_dim];
     // Each work item computes one query block across the full seq_kv axis,
     // then writes its [m, hs_v] output block.
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
@@ -889,35 +905,26 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         const dim_t m = nstl::min(q_block, p_.seq_q - q0);
         const bool is_tail = m != q_block;
 
-        const char *q_tile_buffer_ptr = q_base
-                + (tensor_base_offset(p_.q_strides, batch_idx, query_head_idx)
-                          + q0 * q_row)
-                        * mm_dt_sz;
+        const char *q_tile_buffer_ptr
+                = get_arg_ptr(q_binding, batch_idx, query_head_idx)
+                + q0 * q_row * mm_dt_sz;
 
-        const char *k_tile_buffer_ptr = get_k_tile_ptr(conf, args, batch_idx,
-                num_head_kv, kv_head_idx, kt_head_elems, mm_dt_sz);
+        const char *k_tile_buffer_ptr
+                = get_tile_ptr(k_binding, batch_idx, kv_head_idx);
 
-        const char *v_tile_buffer_ptr = conf.need_copy_v ? v_copy_buffer_ptr
-                        + (batch_idx * num_head_kv + kv_head_idx)
-                                * v_copy_tile_stride * mm_dt_sz
-                                                         : v_orig_buffer_ptr
-                        + tensor_base_offset(
-                                  p_.v_strides, batch_idx, kv_head_idx)
-                                * mm_dt_sz;
+        const char *v_tile_buffer_ptr
+                = get_tile_ptr(v_binding, batch_idx, kv_head_idx);
 
-        char *o_tile_buffer_ptr = o_base
-                + (tensor_base_offset(p_.o_strides, batch_idx, query_head_idx)
-                          + q0 * o_row_stride)
-                        * o_dt_sz;
+        char *o_tile_buffer_ptr
+                = get_arg_ptr(o_binding, batch_idx, query_head_idx)
+                + q0 * o_row_stride * o_dt_sz;
         const uint8_t *c_ptr = has_select
-                ? reinterpret_cast<const uint8_t *>(cond_base
-                          + (tensor_base_offset(eff_cond_strides, batch_idx,
-                                     query_head_idx)
-                                    + q0 * cond_row)
-                                  * sizeof(uint8_t))
+                ? reinterpret_cast<const uint8_t *>(
+                          get_arg_ptr(cond_binding, batch_idx, query_head_idx)
+                          + q0 * cond_row)
                 : nullptr;
 
-        char *my_scratch = static_cast<char *>(args.scratch) + tid * block_size;
+        char *my_scratch = scratch_ptr + tid * block_size;
         float *scores = reinterpret_cast<float *>(my_scratch);
         float *pv = reinterpret_cast<float *>(my_scratch + scores_bytes);
         // P (mm2's A operand) is the softmax output in the compute type. For
@@ -943,10 +950,10 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // Element stride to advance one seq_kv column of mm1's B: VNNI pack
         // factor for a packed tile, 1 for a dense transpose, else the K
         // tensor's seq_kv physical stride (== 1 for in-place, non-transposed).
-        const dim_t mm1_bcol = conf.need_copy_k
+        const dim_t mm1_bcol = p_.k.copy_desc
                 ? (conf.mm1_needs_vnni_b ? mm_dt_vnni_granularity : 1)
-                : k_seq_stride_;
-        const dim_t v_row = p_.v_strides[row_dim];
+                : k_mdw.strides()[ndims - 1];
+        const dim_t v_row = v_mdw.strides()[row_dim];
 
         // Build the binary post-op rhs table ONCE in chain order (it does not
         // depend on the kv-block): one entry per binary in mm1_post_ops (a
@@ -1000,7 +1007,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = q_tile_buffer_ptr;
-            const size_t b_offset = conf.need_copy_k
+            const size_t b_offset = p_.k.copy_desc
                     ? static_cast<size_t>(kv0 / 64) * hs_qk_padded * conf.ldk
                             + (kv0 % 64) * mm1_bcol
                     : static_cast<size_t>(kv0) * mm1_bcol;
@@ -1092,7 +1099,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
                     + static_cast<size_t>(kv0) * mm_dt_sz;
-            const size_t b_offset = conf.need_copy_v
+            const size_t b_offset = p_.v.copy_desc
                     ? static_cast<size_t>(v0 / 64) * seq_kv_padded * conf.ldv
                             + (kv0 / v_copy_vnni_blk) * conf.ldv
                                     * v_copy_vnni_blk
