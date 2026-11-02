@@ -20,6 +20,9 @@
 #define DT_UNDEF 1
 #include "gpu/intel/include/types.h"
 
+/* 7-round Philox-4x32 (not the standard 10 rounds);
+   keep in sync with philox4x32() in src/common/math_utils.hpp. */
+
 /* Key schedule depends only on seed: compute once, then use *_w_keys(). */
 typedef struct {
     uint16 key0;
@@ -59,9 +62,6 @@ uint4 philox_4x32_vec4_ctr_w_keys(uint4 ctr, uint16 key0, uint4 key1) {
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s89);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.sAB);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.sCD);
-    ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.sEF);
-    ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key1.s01);
-    ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key1.s23);
     return ctr;
 }
 
@@ -83,9 +83,6 @@ uint8 philox_4x32_vec4x2_ctr_w_keys(
     PHILOX_4UINT_ROUND_X2(key0.s89);
     PHILOX_4UINT_ROUND_X2(key0.sAB);
     PHILOX_4UINT_ROUND_X2(key0.sCD);
-    PHILOX_4UINT_ROUND_X2(key0.sEF);
-    PHILOX_4UINT_ROUND_X2(key1.s01);
-    PHILOX_4UINT_ROUND_X2(key1.s23);
 #undef PHILOX_4UINT_ROUND_X2
     return (uint8)(ctrA, ctrB);
 }
