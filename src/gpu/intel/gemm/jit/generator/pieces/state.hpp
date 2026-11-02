@@ -369,6 +369,7 @@ struct GEMMState : public CommonState {
     ngen::Subregister kSLMA, kSLMB, kSLMStorage;            // w/w/ud
     bool kSLMCountUp = false;
     int kaq = 0, kbq = 0, kaqStride, kbqStride, kaqLate = 0, kbqLate = 0;
+    int kaqRemGroups = 1, kbqRemGroups = 1; // Quantization groups per early remainder step.
     bool lateScale2DA = false, lateScale2DB = false;
     RegisterLayout A_layout, B_layout, C_layout;
     RegisterLayout A_layoutRem, B_layoutRem;

@@ -412,11 +412,30 @@ bool Generator<hw>::kLoopSetup(const GEMMProblem &problem, const GEMMStrategy &s
     // 2D quantization parameter remainder layouts cover a single group (K is assumed to be a multiple of the
     //  group size), sharing address registers with the main layouts. Early parameters for A/B in SLM are
     //  applied while copying to SLM, and need no remainder layouts.
+    // Early parameters: number of groups spanned by one remainder step (at least 1).
+    {
+        int stepA = repackA || repackARem ? std::min(ka_loadRem, ka_repackRem) : ka_loadRem;
+        int stepB = repackB || repackBRem ? std::min(kb_loadRem, kb_repackRem) : kb_loadRem;
+        state.kaqRemGroups = std::max(1, stepA / std::max(1, problem.aqGroupK));
+        state.kbqRemGroups = std::max(1, stepB / std::max(1, problem.bqGroupK));
+        if (state.kaq > 0) state.kaqRemGroups = std::min(state.kaqRemGroups, state.kaq);
+        if (state.kbq > 0) state.kbqRemGroups = std::min(state.kbqRemGroups, state.kbq);
+        // If the group size is smaller than the alignment (in elements), limit the number of groups
+        //  per remainder step so that ngroups * groupK <= alignment.
+        int alignA = problem.A.alignment / Ta_load;
+        int alignB = problem.B.alignment / Tb_load;
+        if (problem.aqGroupK > 0 && problem.aqGroupK < alignA)
+            state.kaqRemGroups = std::min<int>(state.kaqRemGroups, alignA / problem.aqGroupK);
+        if (problem.bqGroupK > 0 && problem.bqGroupK < alignB)
+            state.kbqRemGroups = std::min<int>(state.kbqRemGroups, alignB / problem.bqGroupK);
+    }
+
     auto sliceQRem = [&](bool isA, bool late, const RegisterLayout &layout, RegisterLayout &layoutRem,
                          const vector<RegisterRange> &addrs, vector<RegisterRange> &addrsRem) {
         bool slm = isA ? strategy.slmA : strategy.slmB;
         if (layout.empty() || (slm && !late)) return;
-        layoutRem = layout.trySlice(addrsRem, addrs, isA, 0, 1, layout.addressingStrategy().padded);
+        int groups = late ? 1 : (isA ? state.kaqRemGroups : state.kbqRemGroups);
+        layoutRem = layout.trySlice(addrsRem, addrs, isA, 0, groups, layout.addressingStrategy().padded);
         if (!layoutRem) stub("Could not slice quantization parameters to a single group");
     };
 
