@@ -527,6 +527,12 @@ struct brgemm_desc_t {
         return is_fp8_via_convert() && isa_impl == avx10_2;
     }
 
+    bool has_fp8_postops() const {
+        return utils::one_of(data_type::f8_e5m2, dt_c, dt_d, dt_bias, sum_dt)
+                || utils::one_of(
+                        data_type::f8_e4m3, dt_c, dt_d, dt_bias, sum_dt);
+    }
+
     bool is_input_convert() const { return is_bf32 || is_fp8_via_convert(); }
 
     bool is_row_major() const {

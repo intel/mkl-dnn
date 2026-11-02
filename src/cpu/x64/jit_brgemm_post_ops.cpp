@@ -62,14 +62,16 @@ dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<
         bf16_emu_ = utils::make_unique<bf16_emulation_t>(this, emu_reserv_1,
                 emu_reserv_2, emu_reserv_3, emu_scratch, emu_reserv_4,
                 emu_reserv_4);
-    if (brg_.is_fp8 || has_f8_e5m2_binary_postops
+    if (brg_.is_fp8 || brg_.has_fp8_postops() || has_f8_e5m2_binary_postops
             || has_f8_e4m3_binary_postops) {
-        if (utils::one_of(data_type::f8_e5m2, brg_.dt_a, brg_.dt_b, brg_.dt_d)
+        if (utils::one_of(data_type::f8_e5m2, brg_.dt_a, brg_.dt_b, brg_.dt_c,
+                    brg_.dt_d, brg_.dt_bias, brg_.sum_dt)
                 || has_f8_e5m2_binary_postops)
             f8_e5m2_cvt_ = utils::make_unique<fp8_conversion_e5m2_t>(this,
                     emu_reserv_1, emu_reserv_2, emu_reserv_3, emu_mask,
                     emu_scratch);
-        if (utils::one_of(data_type::f8_e4m3, brg_.dt_a, brg_.dt_b, brg_.dt_d)
+        if (utils::one_of(data_type::f8_e4m3, brg_.dt_a, brg_.dt_b, brg_.dt_c,
+                    brg_.dt_d, brg_.dt_bias, brg_.sum_dt)
                 || has_f8_e4m3_binary_postops)
             f8_e4m3_cvt_ = utils::make_unique<fp8_conversion_e4m3_t>(this,
                     emu_reserv_1, emu_reserv_2, emu_reserv_3, emu_reserv_4,
@@ -657,7 +659,7 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::generate() {
 
     int m_max_regs = (brg_.is_bf16_emu
                     ? 24
-                    : (brg_.is_fp8_via_convert() ? 23 : max_vregs_ - 4));
+                    : ((f8_e5m2_cvt_ || f8_e4m3_cvt_) ? 23 : max_vregs_ - 4));
     m_max_regs /= n_block;
     int m_block
             = static_cast<int>(nstl::min<dim_t>(brg_.bcast_dim, m_max_regs));
@@ -737,10 +739,8 @@ void dnnl::impl::cpu::x64::jit_brgemm_kernel_post_ops_t<Vmm>::generate() {
 
     if (postops_injector_)
         postops_injector_->prepare_table(/* generate = */ true);
-    if (brg_.is_fp8_via_convert()) {
-        if (f8_e5m2_cvt_) f8_e5m2_cvt_->prepare_table();
-        if (f8_e4m3_cvt_) f8_e4m3_cvt_->prepare_table();
-    }
+    if (f8_e5m2_cvt_) f8_e5m2_cvt_->prepare_table();
+    if (f8_e4m3_cvt_) f8_e4m3_cvt_->prepare_table();
 }
 
 #undef GET_OFF

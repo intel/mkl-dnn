@@ -195,6 +195,11 @@ source, destination, and weights memory objects:
     There might be hardware and/or implementation specific restrictions.
     Check [Implementation Limitations](@ref dg_conv_impl_limits) section below.
 
+On x64 CPUs, the general and specialized 1x1 forward BRGEMM convolution
+implementations convert FP8 source and weights to FP16 in scratchpad memory when
+using AMX FP16 or AVX10.2 FP8 emulation. The conversions preserve tensor layouts,
+and accumulation remains FP32. Native FP8 execution is unchanged.
+
 ### Data Representation
 
 Like other CNN primitives, the convolution primitive expects the following
