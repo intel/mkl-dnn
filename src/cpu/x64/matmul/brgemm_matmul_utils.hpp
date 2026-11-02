@@ -254,6 +254,10 @@ struct brgemm_matmul_conf_t {
     // the symmetric src/wei zero-point + 128-shift correction in the grouped
     // int8 quantization path. Mirrors brgemm_desc_t::with_per_mn_compensation.
     bool with_per_mn_compensation = false;
+    // The int4 weights zero point is subtracted in copy B (buffer_B = wei -
+    // zp, exact in int8); has_zero_point_b is cleared so that nothing else
+    // compensates for it.
+    bool wei_zp_folded_in_buffer_b = false;
     // Per-(M, N) compensation summed over K and initialized into buffer C by
     // one f32 brgemm per tile: C = -U * V, U (M x K'), V (K' x N).
     bool per_mn_comp_via_brgemm = false;

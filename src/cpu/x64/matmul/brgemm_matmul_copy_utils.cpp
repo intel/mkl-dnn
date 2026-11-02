@@ -2928,6 +2928,7 @@ struct jit_brgemm_matmul_copy_b_int8_t
         , is_dynamic_N_(conf->is_runtime_N)
         , is_src_int4_(one_of(conf->orig_wei_dt, data_type::s4, data_type::u4))
         , has_vpermb_(cpu().has(Xbyak::util::Cpu::tAVX512_VBMI))
+        , fold_wei_zp_(conf->wei_zp_folded_in_buffer_b)
         , comp_acc_idx_(is_ymm_ && is_src_int4_      ? 11
                           : is_src_int4_             ? 23
                           : is_ymm_                  ? 13
@@ -2961,6 +2962,7 @@ protected:
     const bool is_dynamic_N_;
     const bool is_src_int4_;
     const bool has_vpermb_;
+    const bool fold_wei_zp_;
     const int comp_acc_idx_;
     const int src_elems_per_byte_;
 
@@ -2968,7 +2970,8 @@ protected:
     constexpr static int reg_tr_src_offs_ = 8;
     constexpr static int reg_current_K_pad_offs_ = 16;
     constexpr static int reg_n_offs_ = 24;
-    constexpr static int stack_space_needed_ = 32;
+    constexpr static int reg_wei_zp_offs_ = 32;
+    constexpr static int stack_space_needed_ = 40;
 
     reg64_t reg_src = rax;
     reg64_t reg_tr_src = rbx;
@@ -3001,6 +3004,8 @@ protected:
 
     // Shared
     Vmm vmm_comp_mul = Vmm(is_ymm_ ? 14 : 30);
+    // Folded int4 wei zp as s8 per N column; never live with compensation.
+    Vmm vmm_wei_zp = vmm_comp_mul;
     Vmm vmm_zero = Vmm(is_ymm_ ? 15 : 31);
     // Only used for decompressing int4 values
     Vmm vmm_tmp = Vmm(is_ymm_ ? 13 : 25);
@@ -3215,6 +3220,27 @@ protected:
     }
 
     void generate() override;
+
+    // Loads the int4 wei zp of the current N block into vmm_wei_zp as s8.
+    void load_wei_zp(bool is_tail) {
+        if (!fold_wei_zp_) return;
+        assert(!do_compute_compensation_ && is_src_int4_ && !is_ymm_);
+        mov(reg_tmp, ptr[rsp + reg_wei_zp_offs_]);
+        if (conf_->is_wei_zp_per_n) {
+            const Ymm ymm_zp(vmm_wei_zp.getIdx());
+            vmovdqu8(is_tail ? ymm_zp | kTail | T_z : ymm_zp, ptr[reg_tmp]);
+            cvt_int4_to_int8(Zmm(vmm_wei_zp.getIdx()));
+        } else {
+            movzx(reg_tmp.cvt32(), byte[reg_tmp]);
+            if (conf_->wei_zp_dt == data_type::s4) {
+                shl(reg_tmp.cvt32(), 28);
+                sar(reg_tmp.cvt32(), 28);
+            } else {
+                and_(reg_tmp.cvt32(), 0x0F);
+            }
+            vpbroadcastb(vmm_wei_zp, reg_tmp.cvt8());
+        }
+    }
 };
 
 template <>
@@ -3229,6 +3255,7 @@ inline void jit_brgemm_matmul_copy_b_int8_t<Zmm>::load(
         const auto ymm_src_load = maybe_mask(Ymm(src_load.getIdx()), is_tail);
         vmovdqu8(ymm_src_load, addr);
         cvt_int4_to_int8(vmm_src);
+        if (fold_wei_zp_) vpsubb(vmm_src, vmm_src, vmm_wei_zp);
     } else {
         vmovdqu8(src_load, addr);
     }
@@ -3379,6 +3406,7 @@ private:
         const auto tail_mask = size_t(((size_t)1 << tail_size) - 1);
 
         if (is_tail) kmovq(kTail, tail_mask);
+        if (!zeropad) load_wei_zp(is_tail);
 
         const int max_unroll = (do_compute_compensation_ ? 21 : 25) / blk_sz_;
 
@@ -3818,6 +3846,17 @@ void jit_brgemm_matmul_copy_b_int8_t<Vmm>::generate() {
 
     auto compute_N_loop_body = [&](int ncolumns) {
         mov(reg_tmp, ptr[rsp + reg_n_offs_]);
+
+        if (fold_wei_zp_) {
+            mov(reg_K_iters, ptr[param1 + GET_OFF(zp_b_value_ptr)]);
+            if (conf_->is_wei_zp_per_n) {
+                // int4 zp: two values per byte, n is even here.
+                mov(reg_K_start, reg_tmp);
+                shr(reg_K_start, 1);
+                add(reg_K_iters, reg_K_start);
+            }
+            mov(ptr[rsp + reg_wei_zp_offs_], reg_K_iters);
+        }
 
         mov(reg_src, ptr[param1 + GET_OFF(src)]);
         add(reg_src, reg_tmp);

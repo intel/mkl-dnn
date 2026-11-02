@@ -2475,6 +2475,20 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
             || bgmmc.wei_tag == adbc;
     bgmmc.use_buffer_b = bm_conf_utils.use_buffer_b();
 
+    // Int4 weights minus an int4 zero point fit int8, so the AMX int8 copy B
+    // kernel subtracts the (per-N and/or per-K-group) zero point while
+    // unpacking the weights. No zp-b work is left for the brgemm kernels or
+    // the per-(M, N) compensation, and A is not copied for it.
+    bgmmc.wei_zp_folded_in_buffer_b = bgmmc.with_int8_grouped_quantization
+            && bgmmc.is_int4_weights && bgmmc.has_zero_point_b
+            && !bgmmc.has_zero_point_a && !bgmmc.s8s8_compensation_required
+            && bgmmc.is_amx && !bgmmc.is_ace && bgmmc.use_buffer_b
+            && !bgmmc.blocked_B && !bgmmc.transposed_B
+            && !bgmmc.is_runtime_N
+            // Per-K-group rows of packed int4 zp must start on a byte.
+            && (bgmmc.is_wei_zp_common
+                    || (bgmmc.is_wei_zp_per_n && bgmmc.N % 2 == 0));
+    if (bgmmc.wei_zp_folded_in_buffer_b) bgmmc.has_zero_point_b = false;
     if ((bm_conf_utils.is_f32_f16() || bm_conf_utils.is_f32_bf16())
             && is_superset(bgmmc.isa, avx2) && bm_conf_utils.use_buffer_b()) {
         // ANCHOR: `CONVERT_F32_XF16_DATA_TYPES`
