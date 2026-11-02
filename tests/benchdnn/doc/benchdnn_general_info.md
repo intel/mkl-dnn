@@ -139,6 +139,9 @@ problem):
 * `SKIPPED`. Same as `LISTED` but the execution was stopped intentionally for
   the reason given in the short description, e.g. "Case not supported" or
   "Skip-impl option hit".
+  Note: The library `unsupported_data_type` status errors are always treated
+  as `SKIPPED "(Data type not supported)"` as the hardware lacks support for a
+  requested data type.
   Note: Nvidia backend is treated specially. See a note below.
 * `INVALID_ARGUMENTS`. It means that the library API returned an error due to
   incorrect argument values. It is treated as a failure.
