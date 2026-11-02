@@ -349,17 +349,17 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
 
     sdpa_full_softmax_run_args_t args;
     args.q.md = pd()->desc()->qry_md();
-    args.q.buffer = q;
+    args.q.buffer = static_cast<const char *>(q);
     args.k.md = pd()->desc()->key_md();
-    args.k.buffer = k;
+    args.k.buffer = static_cast<const char *>(k);
     args.v.md = pd()->desc()->val_md();
-    args.v.buffer = v;
+    args.v.buffer = static_cast<const char *>(v);
     if (pd()->with_select_mask()) {
         args.cond.md = pd()->desc()->attn_mask_md();
-        args.cond.buffer = cond;
+        args.cond.buffer = static_cast<const char *>(cond);
     }
     args.out.md = pd()->dst_md();
-    args.out.buffer = out;
+    args.out.buffer = static_cast<char *>(out);
     args.scratch = scratch;
     args.fill = fill_val;
     // rhs base pointers for the mm1 binary post-ops, in the same order they

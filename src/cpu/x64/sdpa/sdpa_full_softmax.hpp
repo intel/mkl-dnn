@@ -52,25 +52,6 @@ struct jit_softmax_kernel_base_t;
 // keys, then applies softmax over that axis using the JIT softmax kernel.
 // Parallelize over batch x num_head_q x query-tiles.
 // -----------------------------------------------------------------------------
-struct tensor_copy_desc_t {
-    size_t scratch_offset = 0;
-    size_t batch_stride = 0;
-    size_t head_stride = 0;
-};
-
-struct tensor_desc_t {
-    utils::optional_t<tensor_copy_desc_t> copy_desc;
-};
-
-struct tensor_arg_t {
-    const memory_desc_t *md = nullptr;
-    const void *buffer = nullptr;
-};
-
-struct tensor_output_arg_t {
-    const memory_desc_t *md = nullptr;
-    void *buffer = nullptr;
-};
 
 // One mm1 (QK^T) post-op in chain order, folded into the BRGEMM store: binary
 // entries apply their algorithm to an RHS; eltwise entries apply an activation.
@@ -106,9 +87,6 @@ struct sdpa_full_softmax_params_t {
     // SDPA output (result) data type; the f32 pv tile is down-converted to it.
     dnnl::impl::data_type_t out_dt = dnnl::impl::data_type::f32;
 
-    // The optional copy descriptors describe packed representations in scratch.
-    tensor_desc_t q, k, v, o, cond;
-
     // Derived source layout metadata used while configuring BRGEMM and packing.
     std::vector<dim_t> q_strides, k_strides, v_strides, o_strides;
     std::vector<dim_t> cond_strides, cond_dims;
@@ -129,10 +107,17 @@ struct sdpa_full_softmax_params_t {
     std::vector<sdpa_mm1_post_op_t> mm1_post_ops;
 };
 
+template <typename T>
+struct sdpa_arg_buf_t {
+    T *buffer = nullptr;
+    const memory_desc_t *md = nullptr;
+};
+
 // Runtime pointers / scalars, resolved per execute call.
 struct sdpa_full_softmax_run_args_t {
-    tensor_arg_t q, k, v, cond;
-    tensor_output_arg_t out;
+    sdpa_arg_buf_t<const char> q, k, v, cond;
+    sdpa_arg_buf_t<char> out;
+
     void *scratch = nullptr;
     float fill = 0.0f;
     // Base pointers for the mm1 binary post-op right-hand sides, one per binary
@@ -151,6 +136,12 @@ struct sdpa_amx_cfg_t {
     bool need_config = false;
     size_t wsp_size = 0;
     char palette[64] = {};
+};
+
+struct tensor_copy_desc_t {
+    size_t scratch_offset = 0;
+    size_t batch_stride = 0;
+    size_t head_stride = 0;
 };
 
 // Derived compute configuration: the JIT-free arithmetic (query/KV blocking,
@@ -182,6 +173,10 @@ struct sdpa_full_softmax_conf_t {
     size_t scratch_per_thread = 0;
     size_t copy_buffer_bytes = 0;
     int nthr = 0;
+
+    // The optional copy descriptors describe packed representations in scratch.
+    utils::optional_t<tensor_copy_desc_t> q_copy_desc, k_copy_desc, v_copy_desc,
+            o_copy_desc, cond_copy_desc;
 
     // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
     sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2][2];

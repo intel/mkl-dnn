@@ -94,54 +94,58 @@ inline void convert_from_f32(
     }
 }
 
-template <typename buffer_t>
-struct tensor_binding_t {
-    const tensor_desc_t *tensor_desc = nullptr;
-    const memory_desc_t *arg_md = nullptr;
-    buffer_t *arg_buffer_ptr = nullptr;
+// Tensor descriptor for a buffer, its memory descriptor, optional copy
+// descriptor, and scratch pointer. Templated to distinguish between const
+// and non-const byte buffers.
+template <typename T>
+struct tensor_desc_t {
+    sdpa_arg_buf_t<T> arg;
+    const tensor_copy_desc_t *copy_desc = nullptr;
     char *scratch_ptr = nullptr;
 };
 
-template <typename buffer_t>
-tensor_binding_t<buffer_t> bind_tensor(const tensor_desc_t &tensor_desc,
-        const memory_desc_t *arg_md, buffer_t *arg_buffer_ptr,
+template <typename T>
+tensor_desc_t<T> get_tensor_desc(const sdpa_arg_buf_t<T> &arg,
+        const utils::optional_t<tensor_copy_desc_t> &copy_desc,
         char *scratch_ptr, size_t copy_area_offset) {
-    tensor_binding_t<buffer_t> binding;
-    binding.tensor_desc = &tensor_desc;
-    binding.arg_md = arg_md;
-    binding.arg_buffer_ptr = arg_buffer_ptr;
-    if (tensor_desc.copy_desc)
-        binding.scratch_ptr = scratch_ptr + copy_area_offset
-                + tensor_desc.copy_desc->scratch_offset;
-    return binding;
+    tensor_desc_t<T> td;
+    td.arg = arg;
+    if (copy_desc) {
+        td.copy_desc = &*copy_desc;
+        td.scratch_ptr
+                = scratch_ptr + copy_area_offset + copy_desc->scratch_offset;
+    }
+    return td;
 }
 
-template <typename buffer_t>
-buffer_t *get_arg_ptr(const tensor_binding_t<buffer_t> &binding,
-        dim_t batch_idx, dim_t head_idx) {
-    const memory_desc_wrapper mdw(binding.arg_md);
+// Get the pointer to the argument buffer for the given batch and head indices.
+template <typename T>
+T *get_arg_ptr(const tensor_desc_t<T> &td, dim_t batch_idx, dim_t head_idx,
+        dim_t row_idx = 0) {
+    const memory_desc_wrapper mdw(td.arg.md);
     dim_t offset = 0;
     if (mdw.dims()[0] != 1) offset += batch_idx * mdw.strides()[0];
     if (mdw.dims()[1] != 1) offset += head_idx * mdw.strides()[1];
-    return binding.arg_buffer_ptr
-            + offset * types::data_type_size(mdw.data_type());
+    if (mdw.dims()[2] != 1) offset += row_idx * mdw.strides()[2];
+    return td.arg.buffer + offset * types::data_type_size(mdw.data_type());
 }
 
-template <typename buffer_t>
-char *get_copy_ptr(const tensor_binding_t<buffer_t> &binding, dim_t batch_idx,
-        dim_t head_idx) {
-    const tensor_copy_desc_t &copy_desc = *binding.tensor_desc->copy_desc;
-    return binding.scratch_ptr + batch_idx * copy_desc.batch_stride
-            + head_idx * copy_desc.head_stride;
+// Get the pointer to the copy buffer for the given batch and head indices.
+template <typename T>
+char *get_copy_ptr(
+        const tensor_desc_t<T> &td, dim_t batch_idx, dim_t head_idx) {
+    const auto *copy_desc = td.copy_desc;
+    assert(copy_desc);
+    return td.scratch_ptr + batch_idx * copy_desc->batch_stride
+            + head_idx * copy_desc->head_stride;
 }
 
-template <typename buffer_t>
-buffer_t *get_tile_ptr(const tensor_binding_t<buffer_t> &binding,
-        dim_t batch_idx, dim_t head_idx) {
-    if (binding.tensor_desc->copy_desc)
-        return static_cast<buffer_t *>(
-                get_copy_ptr(binding, batch_idx, head_idx));
-    return get_arg_ptr(binding, batch_idx, head_idx);
+// Get the pointer to the tile buffer for the given batch and head indices
+// depending on whether a copy buffer is used.
+template <typename T>
+T *get_tile_ptr(const tensor_desc_t<T> &td, dim_t batch_idx, dim_t head_idx) {
+    if (td.copy_desc) return get_copy_ptr(td, batch_idx, head_idx);
+    return get_arg_ptr(td, batch_idx, head_idx);
 }
 
 // Build a BRGEMM descriptor. Fills `brg` and, when the AMX out-params
@@ -570,7 +574,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         copy_desc.scratch_offset = copy_offset;
         copy_desc.head_stride = head_stride;
         copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
-        conf.params.k.copy_desc = copy_desc;
+        conf.k_copy_desc = copy_desc;
         copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
     }
     if (need_copy_v) {
@@ -581,7 +585,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         copy_desc.scratch_offset = copy_offset;
         copy_desc.head_stride = head_stride;
         copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
-        conf.params.v.copy_desc = copy_desc;
+        conf.v_copy_desc = copy_desc;
         copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
     }
     conf.copy_buffer_bytes = copy_offset;
@@ -610,14 +614,14 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
     constexpr int ndims = sdpa_pd_t::ndims;
     constexpr int row_dim = ndims - 2;
 
-    if (p_.k.copy_desc) {
+    if (conf.k_copy_desc) {
         const dim_t k_row = p_.k_strides[row_dim];
         const dim_t k_col = p_.k_strides[ndims - 1];
         kernels.k_packer.reset(new sdpa_brgemm_copy::b_packer_t());
         CHECK(kernels.k_packer->init(
                 p_.hs_qk, seq_kv, k_row, k_col, conf.ldk, p_.mm_dt, true));
     }
-    if (p_.v.copy_desc) {
+    if (conf.v_copy_desc) {
         const dim_t v_row = p_.v_strides[row_dim];
         const dim_t v_col = p_.v_strides[ndims - 1];
         kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
@@ -820,13 +824,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const memory_desc_wrapper o_mdw(args.out.md);
     const dim_t o_row_stride = o_mdw.strides()[row_dim];
     const dim_t o_col_stride = o_mdw.strides()[ndims - 1];
-    dim_t cond_row = 0;
-    if (has_select) {
-        const memory_desc_wrapper cond_mdw(args.cond.md);
-        if (cond_mdw.dims()[sdpa_pd_t::mask_q_index] != 1)
-            cond_row = cond_mdw.strides()[sdpa_pd_t::mask_q_index];
-    }
-
     const data_type_t mm_dt = p_.mm_dt;
     const size_t mm_dt_sz = types::data_type_size(mm_dt);
     const size_t o_dt_sz = types::data_type_size(o_mdw.data_type());
@@ -860,40 +857,36 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const dim_t num_head_kv = p_.num_head_q / p_.group_head;
     char *scratch_ptr = static_cast<char *>(args.scratch);
     const size_t copy_area_offset = conf.scratch_per_thread * nthr;
-    const auto q_binding = bind_tensor(p_.q, args.q.md,
-            static_cast<const char *>(args.q.buffer), scratch_ptr,
-            copy_area_offset);
-    const auto k_binding = bind_tensor(p_.k, args.k.md,
-            static_cast<const char *>(args.k.buffer), scratch_ptr,
-            copy_area_offset);
-    const auto v_binding = bind_tensor(p_.v, args.v.md,
-            static_cast<const char *>(args.v.buffer), scratch_ptr,
-            copy_area_offset);
-    const auto o_binding = bind_tensor(p_.o, args.out.md,
-            static_cast<char *>(args.out.buffer), scratch_ptr,
-            copy_area_offset);
-    const auto cond_binding = bind_tensor(p_.cond, args.cond.md,
-            static_cast<const char *>(args.cond.buffer), scratch_ptr,
-            copy_area_offset);
-    if (p_.k.copy_desc) {
+    const auto k_td = get_tensor_desc(
+            args.k, conf.k_copy_desc, scratch_ptr, copy_area_offset);
+    if (k_td.copy_desc) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
-            const char *k_src = get_arg_ptr(k_binding, batch_idx, kv_head_idx);
-            char *k_dst = get_copy_ptr(k_binding, batch_idx, kv_head_idx);
+            const char *k_src = get_arg_ptr(k_td, batch_idx, kv_head_idx);
+            char *k_dst = get_copy_ptr(k_td, batch_idx, kv_head_idx);
             kernels.k_packer->execute(k_src, k_dst);
         });
     }
-    if (p_.v.copy_desc) {
+
+    const auto v_td = get_tensor_desc(
+            args.v, conf.v_copy_desc, scratch_ptr, copy_area_offset);
+    if (v_td.copy_desc) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
-            const char *v_src = get_arg_ptr(v_binding, batch_idx, kv_head_idx);
-            char *v_dst = get_copy_ptr(v_binding, batch_idx, kv_head_idx);
+            const char *v_src = get_arg_ptr(v_td, batch_idx, kv_head_idx);
+            char *v_dst = get_copy_ptr(v_td, batch_idx, kv_head_idx);
             kernels.v_packer->execute(v_src, v_dst);
         });
     }
 
+    const auto q_td = get_tensor_desc(
+            args.q, conf.q_copy_desc, scratch_ptr, copy_area_offset);
+    const auto o_td = get_tensor_desc(
+            args.out, conf.o_copy_desc, scratch_ptr, copy_area_offset);
+    const auto cond_td = get_tensor_desc(
+            args.cond, conf.cond_copy_desc, scratch_ptr, copy_area_offset);
+
     const dim_t n_qblk = utils::div_up(p_.seq_q, q_block);
-    const dim_t q_row = q_mdw.strides()[row_dim];
     // Each work item computes one query block across the full seq_kv axis,
     // then writes its [m, hs_v] output block.
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
@@ -906,22 +899,19 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         const bool is_tail = m != q_block;
 
         const char *q_tile_buffer_ptr
-                = get_arg_ptr(q_binding, batch_idx, query_head_idx)
-                + q0 * q_row * mm_dt_sz;
+                = get_arg_ptr(q_td, batch_idx, query_head_idx, q0);
 
         const char *k_tile_buffer_ptr
-                = get_tile_ptr(k_binding, batch_idx, kv_head_idx);
+                = get_tile_ptr(k_td, batch_idx, kv_head_idx);
 
         const char *v_tile_buffer_ptr
-                = get_tile_ptr(v_binding, batch_idx, kv_head_idx);
+                = get_tile_ptr(v_td, batch_idx, kv_head_idx);
 
         char *o_tile_buffer_ptr
-                = get_arg_ptr(o_binding, batch_idx, query_head_idx)
-                + q0 * o_row_stride * o_dt_sz;
+                = get_arg_ptr(o_td, batch_idx, query_head_idx, q0);
         const uint8_t *c_ptr = has_select
                 ? reinterpret_cast<const uint8_t *>(
-                          get_arg_ptr(cond_binding, batch_idx, query_head_idx)
-                          + q0 * cond_row)
+                          get_arg_ptr(cond_td, batch_idx, query_head_idx, q0))
                 : nullptr;
 
         char *my_scratch = scratch_ptr + tid * block_size;
@@ -950,7 +940,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // Element stride to advance one seq_kv column of mm1's B: VNNI pack
         // factor for a packed tile, 1 for a dense transpose, else the K
         // tensor's seq_kv physical stride (== 1 for in-place, non-transposed).
-        const dim_t mm1_bcol = p_.k.copy_desc
+        const dim_t mm1_bcol = conf.k_copy_desc
                 ? (conf.mm1_needs_vnni_b ? mm_dt_vnni_granularity : 1)
                 : k_mdw.strides()[ndims - 1];
         const dim_t v_row = v_mdw.strides()[row_dim];
@@ -1007,7 +997,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = q_tile_buffer_ptr;
-            const size_t b_offset = p_.k.copy_desc
+            const size_t b_offset = conf.k_copy_desc
                     ? static_cast<size_t>(kv0 / 64) * hs_qk_padded * conf.ldk
                             + (kv0 % 64) * mm1_bcol
                     : static_cast<size_t>(kv0) * mm1_bcol;
@@ -1099,7 +1089,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
                     + static_cast<size_t>(kv0) * mm_dt_sz;
-            const size_t b_offset = p_.v.copy_desc
+            const size_t b_offset = conf.v_copy_desc
                     ? static_cast<size_t>(v0 / 64) * seq_kv_padded * conf.ldv
                             + (kv0 / v_copy_vnni_blk) * conf.ldv
                                     * v_copy_vnni_blk
