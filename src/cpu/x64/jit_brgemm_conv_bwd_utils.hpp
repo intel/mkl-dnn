@@ -62,7 +62,8 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         memory_desc_t &bias_md, primitive_attr_t &attr, int nthreads);
 
 void init_scratchpad(memory_tracking::registrar_t &scratchpad,
-        const jit_brgemm_conv_conf_t &jcp);
+        const jit_brgemm_conv_conf_t &jcp, const memory_desc_t &diff_dst_md,
+        const memory_desc_t &weights_md);
 
 } // namespace brgemm_convolution_bwd_utils
 
