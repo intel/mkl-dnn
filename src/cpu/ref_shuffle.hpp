@@ -53,8 +53,8 @@ struct ref_shuffle_t : public primitive_t {
                     utils::one_of(types::data_type_size(src_d.data_type()),
                             sizeof(float), sizeof(bfloat16_t), sizeof(int8_t)),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_SHUFFLE(
-                    platform::has_data_type_support(src_d.data_type()),
+            VDISPATCH_SHUFFLE_SC(
+                    platform::data_type_support_status(src_d.data_type()),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_SHUFFLE(
                     attr()->has_default_values(), VERBOSE_UNSUPPORTED_ATTR);

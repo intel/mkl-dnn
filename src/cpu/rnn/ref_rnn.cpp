@@ -87,6 +87,15 @@ status_t dnnl::impl::cpu::ref_rnn_common_t<aprop, src_type, weights_type,
     VDISPATCH_RNN(this->set_default_params() == status::success,
             VERBOSE_UNSUPPORTED_TAG);
     VDISPATCH_RNN(this->with_bias(), VERBOSE_UNSUPPORTED_BIAS_CFG);
+    // `init_conf()` below only reports a boolean, check data type support
+    // explicitly to return the specific status.
+    VDISPATCH_RNN_SC(platform::data_type_support_status(src_layer_dt),
+            VERBOSE_UNSUPPORTED_DT);
+    VDISPATCH_RNN_SC(platform::data_type_support_status(weights_layer_dt),
+            VERBOSE_UNSUPPORTED_DT);
+    VDISPATCH_RNN_SC(platform::data_type_support_status(
+                             this->desc()->dst_layer_desc.data_type),
+            VERBOSE_UNSUPPORTED_DT);
 
     rnn_ = zero<decltype(rnn_)>();
     rnn_.is_brgemm = false;
@@ -362,6 +371,15 @@ ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::pd_t::init_brgemm(
     VDISPATCH_RNN(this->set_default_params() == status::success,
             VERBOSE_UNSUPPORTED_ATTR);
     VDISPATCH_RNN(this->with_bias(), VERBOSE_UNSUPPORTED_BIAS_CFG);
+    // `init_conf()` below only reports a boolean, check data type support
+    // explicitly to return the specific status.
+    VDISPATCH_RNN_SC(platform::data_type_support_status(src_layer_dt),
+            VERBOSE_UNSUPPORTED_DT);
+    VDISPATCH_RNN_SC(platform::data_type_support_status(weights_layer_dt),
+            VERBOSE_UNSUPPORTED_DT);
+    VDISPATCH_RNN_SC(platform::data_type_support_status(
+                             this->desc()->dst_layer_desc.data_type),
+            VERBOSE_UNSUPPORTED_DT);
 
     VDISPATCH_RNN(init_conf<class_name>(rnn_, *this->desc(), *this->attr(),
                           this->src_md(0), this->src_md(1), this->src_md(2),
