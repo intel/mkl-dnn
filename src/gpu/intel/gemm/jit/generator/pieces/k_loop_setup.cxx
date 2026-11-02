@@ -203,8 +203,24 @@ bool Generator<hw>::kLoopSetup(const GEMMProblem &problem, const GEMMStrategy &s
     // Early-dequantized remainder loads cover at most one quantization group.
     bool aqGroupRem = problem.earlyDequantizeA() && !strategy.slmA && state.kaq > 1;
     bool bqGroupRem = problem.earlyDequantizeB() && !strategy.slmB && state.kbq > 1;
-    if (aqGroupRem) ka_loadRem = std::min(ka_loadRem, problem.aqGroupK);
-    if (bqGroupRem) kb_loadRem = std::min(kb_loadRem, problem.bqGroupK);
+    // If the group is smaller than the load, round the load up to a whole
+    // number of groups, without exceeding the alignment (in elements).
+    // If the group size does not divide the alignment evenly, stub.
+    auto roundToGroups = [&](int kLoadRem, int groupK, int alignElems) {
+        groupK = std::max(1, groupK);
+        if (groupK >= kLoadRem) return kLoadRem;
+        if (alignElems % groupK != 0) stub();
+        int up = ((kLoadRem + groupK - 1) / groupK) * groupK;
+        if (up > alignElems)
+            up = std::max(groupK, (alignElems / groupK) * groupK);
+        return up;
+    };
+    if (aqGroupRem)
+        ka_loadRem = roundToGroups(ka_loadRem, problem.aqGroupK,
+                std::max<int>(1, problem.A.alignment / Ta_load));
+    if (bqGroupRem)
+        kb_loadRem = roundToGroups(kb_loadRem, problem.bqGroupK,
+                std::max<int>(1, problem.B.alignment / Tb_load));
 
     // Fragment the A, B layouts into smaller blocks (usually 1 row/column) for remainder loads.
     state.A_layoutRem = state.A_layout.trySlice(state.A_addrsRem, state.A_addrs, true,  0, ka_loadRem, strategy.A.padded);
@@ -374,9 +390,13 @@ bool Generator<hw>::kLoopSetup(const GEMMProblem &problem, const GEMMStrategy &s
 
     // Each early-dequantized remainder repack (dequantization) step must lie within one quantization group.
     //  This holds by construction for power-of-two sizes, as remainder loads are capped to one group.
-    if (aqGroupRem && problem.aqGroupK % std::min(ka_loadRem, ka_repackRem))
+    //  A step may also span a whole number of groups (kgroups * group size).
+    auto stepOK = [](int group, int step) {
+        return (group % step == 0) || (step % group == 0);
+    };
+    if (aqGroupRem && !stepOK(problem.aqGroupK, std::min(ka_loadRem, ka_repackRem)))
         stub("Unexpected remainder repack size for quantization group size");
-    if (bqGroupRem && problem.bqGroupK % std::min(kb_loadRem, kb_repackRem))
+    if (bqGroupRem && !stepOK(problem.bqGroupK, std::min(kb_loadRem, kb_repackRem)))
         stub("Unexpected remainder repack size for quantization group size");
 
     // 2D quantization parameter remainder layouts cover a single group (K is assumed to be a multiple of the
