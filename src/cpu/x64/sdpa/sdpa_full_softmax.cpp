@@ -148,6 +148,27 @@ T *get_tile_ptr(const tensor_desc_t<T> &td, dim_t batch_idx, dim_t head_idx) {
     return get_arg_ptr(td, batch_idx, head_idx);
 }
 
+// Return the B-matrix offset in elements for logical coordinates [k0, n0].
+template <typename T>
+size_t get_tile_offset_in_elements(
+        const tensor_desc_t<T> &td, dim_t k0, dim_t n0) {
+    if (!td.copy_desc) {
+        constexpr int row_dim = sdpa_pd_t::ndims - 2;
+        constexpr int col_dim = sdpa_pd_t::ndims - 1;
+        const memory_desc_wrapper mdw(td.arg.md);
+        return static_cast<size_t>(k0) * mdw.strides()[row_dim]
+                + static_cast<size_t>(n0) * mdw.strides()[col_dim];
+    }
+
+    const auto *copy_desc = td.copy_desc;
+    return static_cast<size_t>(n0 / 64) * copy_desc->padded_k
+            * copy_desc->packed_ld
+            + static_cast<size_t>(k0 / copy_desc->vnni_factor)
+            * copy_desc->packed_ld * copy_desc->vnni_factor
+            + static_cast<size_t>(n0 % 64) * copy_desc->vnni_factor
+            + k0 % copy_desc->vnni_factor;
+}
+
 // Build a BRGEMM descriptor. Fills `brg` and, when the AMX out-params
 // are supplied, the tile palette + tile-store wsp size read from the
 // finalized descriptor.
@@ -322,8 +343,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     const dim_t mm_wei_k_blk = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
 
-    const dim_t vt_k_pad = need_copy_v ? mm_wei_k_blk : dim_t(1);
-
     const dim_t l2_budget_bytes
             = static_cast<dim_t>(3 * platform::get_per_core_cache_size(2) / 4);
 
@@ -352,6 +371,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t hs_max = nstl::max(p_.hs_qk, p_.hs_v);
     dim_t kv_block = b_panel_budget_bytes / (hs_max * mm_dt_sz);
+    const dim_t vt_k_pad = need_copy_v ? mm_wei_k_blk : dim_t(1);
     const dim_t min_granule = nstl::max<dim_t>(16, vt_k_pad);
     const dim_t granule
             = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
@@ -377,7 +397,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const bool need_copy_k
             = mm1_transpose_k || conf.mm1_needs_vnni_b || pack_k_for_aliasing;
     conf.pack_k_for_aliasing = pack_k_for_aliasing;
-    const dim_t kt_k_pad = need_copy_k ? mm_wei_k_blk : dim_t(1);
 
     if (need_copy_k) kv_block = nstl::min<dim_t>(kv_block, 64);
     conf.kv_block = kv_block;
@@ -563,28 +582,42 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     // Packed K and V are placed consecutively after the per-thread scratch.
     const dim_t num_head_kv = p_.num_head_q / p_.group_head;
+    auto make_b_copy_desc
+            = [&](size_t scratch_offset, dim_t padded_k, dim_t packed_cols,
+                      dim_t packed_ld, dim_t vnni_factor) {
+        tensor_copy_desc_t copy_desc;
+        copy_desc.scratch_offset = scratch_offset;
+        copy_desc.padded_k = padded_k;
+        copy_desc.packed_ld = packed_ld;
+        copy_desc.vnni_factor = vnni_factor;
+        copy_desc.head_stride
+                = static_cast<size_t>(padded_k) * packed_cols * mm_dt_sz;
+        copy_desc.batch_stride
+                = static_cast<size_t>(num_head_kv) * copy_desc.head_stride;
+        return copy_desc;
+    };
     size_t copy_offset = 0;
     if (need_copy_k) {
-        tensor_copy_desc_t copy_desc;
-        copy_desc.padded_k = utils::rnd_up(p_.hs_qk, kt_k_pad);
-        const size_t head_stride = static_cast<size_t>(copy_desc.padded_k)
-                * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv) * mm_dt_sz;
-        copy_desc.scratch_offset = copy_offset;
-        copy_desc.head_stride = head_stride;
-        copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
-        conf.k_copy_desc = copy_desc;
-        copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
+        const dim_t k_vnni_factor = conf.mm1_needs_vnni_b
+                ? data_type_vnni_granularity(p_.mm_dt)
+                : 1;
+        conf.k_copy_desc = make_b_copy_desc(copy_offset,
+                sdpa_brgemm_copy::b_packer_t::packed_k(p_.hs_qk, p_.mm_dt),
+                sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv), conf.ldk,
+                k_vnni_factor);
+        copy_offset += static_cast<size_t>(p_.batch)
+                * conf.k_copy_desc->batch_stride;
     }
     if (need_copy_v) {
-        tensor_copy_desc_t copy_desc;
-        copy_desc.padded_k = utils::rnd_up(p_.seq_kv, vt_k_pad);
-        const size_t head_stride = static_cast<size_t>(copy_desc.padded_k)
-                * sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v) * mm_dt_sz;
-        copy_desc.scratch_offset = copy_offset;
-        copy_desc.head_stride = head_stride;
-        copy_desc.batch_stride = static_cast<size_t>(num_head_kv) * head_stride;
-        conf.v_copy_desc = copy_desc;
-        copy_offset += static_cast<size_t>(p_.batch) * copy_desc.batch_stride;
+        const dim_t v_vnni_factor = conf.mm2_needs_vnni_b
+                ? data_type_vnni_granularity(p_.mm_dt)
+                : 1;
+        conf.v_copy_desc = make_b_copy_desc(copy_offset,
+                sdpa_brgemm_copy::b_packer_t::packed_k(p_.seq_kv, p_.mm_dt),
+                sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v), conf.ldv,
+                v_vnni_factor);
+        copy_offset += static_cast<size_t>(p_.batch)
+                * conf.v_copy_desc->batch_stride;
     }
     conf.copy_buffer_bytes = copy_offset;
 
@@ -817,7 +850,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const float fill = args.fill;
 
     const memory_desc_wrapper q_mdw(args.q.md);
-    const memory_desc_wrapper k_mdw(args.k.md);
     const memory_desc_wrapper v_mdw(args.v.md);
     const memory_desc_wrapper o_mdw(args.out.md);
     const dim_t o_row_stride = o_mdw.strides()[row_dim];
@@ -836,8 +868,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const size_t prob_bytes = mm_dt == data_type::f32
             ? 0
             : align64(static_cast<size_t>(q_block) * seq_kv * mm_dt_sz);
-
-    const dim_t mm_dt_vnni_granularity = data_type_vnni_granularity(p_.mm_dt);
 
     // Element strides to walk the K tensor's seq_kv / hs_qk axes when
     // materialising the dense [hs_qk, seq_kv] transpose (see init: derived from
@@ -897,12 +927,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         const char *q_tile_buffer_ptr
                 = get_arg_ptr(q_td, batch_idx, query_head_idx, q0);
 
-        const char *k_tile_buffer_ptr
-                = get_tile_ptr(k_td, batch_idx, kv_head_idx);
-
-        const char *v_tile_buffer_ptr
-                = get_tile_ptr(v_td, batch_idx, kv_head_idx);
-
         char *o_tile_buffer_ptr
                 = get_arg_ptr(o_td, batch_idx, query_head_idx, q0);
         const uint8_t *c_ptr = has_select
@@ -932,14 +956,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         const dim_t kv_block = kv_block_;
         const dim_t n_kv_full = seq_kv / kv_block;
         const dim_t kv_tail = seq_kv % kv_block;
-
-        // Element stride to advance one seq_kv column of mm1's B: VNNI pack
-        // factor for a packed tile, 1 for a dense transpose, else the K
-        // tensor's seq_kv physical stride (== 1 for in-place, non-transposed).
-        const dim_t mm1_bcol = conf.k_copy_desc
-                ? (conf.mm1_needs_vnni_b ? mm_dt_vnni_granularity : 1)
-                : k_mdw.strides()[ndims - 1];
-        const dim_t v_row = v_mdw.strides()[row_dim];
 
         // Build the binary post-op rhs table ONCE in chain order (it does not
         // depend on the kv-block): one entry per binary in mm1_post_ops (a
@@ -993,13 +1009,9 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = q_tile_buffer_ptr;
-            const size_t b_offset = conf.k_copy_desc
-                    ? static_cast<size_t>(kv0 / 64) * conf.k_copy_desc->padded_k
-                                    * conf.ldk
-                            + (kv0 % 64) * mm1_bcol
-                    : static_cast<size_t>(kv0) * mm1_bcol;
-            be.ptr.B = static_cast<const char *>(k_tile_buffer_ptr)
-                    + b_offset * mm_dt_sz;
+            be.ptr.B = get_tile_ptr(k_td, batch_idx, kv_head_idx)
+                    + get_tile_offset_in_elements(k_td, /*k0=*/0, /*n0=*/kv0)
+                            * mm_dt_sz;
             float *c_blk = scores + kv0;
             if (has_mm1_postops) {
                 brgemm_post_ops_data_t pod(
@@ -1076,9 +1088,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                 ? reinterpret_cast<float *>(o_tile_buffer_ptr)
                 : pv;
 
-        const dim_t v_copy_vnni_blk
-                = conf.mm2_needs_vnni_b ? mm_dt_vnni_granularity : 1;
-
         // Run mm2 for the kv-block [kv0, kv0+K): A is P's column slice (lda =
         // seq_kv), B is V's kv-block panel (packed: (kv0/k_pack) K-groups in;
         // f32: kv0 rows down), accumulating into mm2_c.
@@ -1086,14 +1095,9 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
                     + static_cast<size_t>(kv0) * mm_dt_sz;
-            const size_t b_offset = conf.v_copy_desc
-                    ? static_cast<size_t>(v0 / 64) * conf.v_copy_desc->padded_k
-                                    * conf.ldv
-                            + (kv0 / v_copy_vnni_blk) * conf.ldv
-                                    * v_copy_vnni_blk
-                    : static_cast<size_t>(kv0) * v_row + v0;
-            be.ptr.B = static_cast<const char *>(v_tile_buffer_ptr)
-                    + b_offset * mm_dt_sz;
+            be.ptr.B = get_tile_ptr(v_td, batch_idx, kv_head_idx)
+                    + get_tile_offset_in_elements(v_td, /*k0=*/kv0, /*n0=*/v0)
+                            * mm_dt_sz;
             brgemm_kernel_execute(k, 1, &be, mm2_c + v0, amx_wsp);
         };
 

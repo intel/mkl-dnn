@@ -143,6 +143,8 @@ struct tensor_copy_desc_t {
     size_t batch_stride = 0;
     size_t head_stride = 0;
     dim_t padded_k = 0;
+    dim_t packed_ld = 0;
+    dim_t vnni_factor = 1;
 };
 
 // Derived compute configuration: the JIT-free arithmetic (query/KV blocking,
