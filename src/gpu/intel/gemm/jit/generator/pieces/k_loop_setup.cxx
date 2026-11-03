@@ -211,9 +211,7 @@ bool Generator<hw>::kLoopSetup(const GEMMProblem &problem, const GEMMStrategy &s
         if (groupK >= kLoadRem) return kLoadRem;
         if (alignElems % groupK != 0) stub();
         int up = ((kLoadRem + groupK - 1) / groupK) * groupK;
-        if (up > alignElems)
-            up = std::max(groupK, (alignElems / groupK) * groupK);
-        return up;
+        return std::min(up, alignElems);
     };
     if (aqGroupRem)
         ka_loadRem = roundToGroups(ka_loadRem, problem.aqGroupK,

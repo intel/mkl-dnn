@@ -788,7 +788,7 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
         auto &gLayout      = rem ? state.Bg_layoutRem      : state.Bg_layout;
 
         int kbqInc = late ? state.kbqLate : state.kbqStride;
-        if (rem) kbqInc = 1;
+        if (rem) kbqInc = late ? 1 : state.kbqRemGroups;
 
         auto kbInc = kInc(h, kbqInc, problem.bqGroupK);
         if (doOffset) incAddrK(offsetAddrs, false, kbInc, state.ldbo,     state.ldboIncrements, offsetLayout, strategy, state);
