@@ -139,6 +139,11 @@ TEST(onednn_verbose_env_var_test, TestEnvVars) {
     // The setting function takes precedence over the environment variable.
     EXPECT_EQ(set_verbose(0), status::success);
     EXPECT_FALSE(verbose_profiling_enabled());
+
+    // With asynchronous verbose profiling, in-order GPU streams use
+    // device-measured timings only if exec profiling was on at stream
+    // creation (enabling it later via set_verbose() falls back to
+    // host-measured timings).
 }
 
 // The rest of the variables have no programmable public API to identify if

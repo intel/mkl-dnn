@@ -172,6 +172,12 @@ regardless of whether queue profiling was enabled at queue creation time. Note
 that this extension is experimental and its availability is not guaranteed
 across all SYCL toolkit versions.
 
+@note
+For GPU runtimes, asynchronous verbose profiling applies only to streams
+created while `profile_exec` is enabled; enabling it later with
+@ref dnnl::set_verbose falls back to host-measured times for existing streams.
+For the asynchronous threadpool, it can be enabled or disabled at any time.
+
 ### Understanding why a given implementation is dispatched
 
 When performance is lower than expected, it is usually likely due to

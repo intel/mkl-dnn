@@ -46,10 +46,10 @@ status_t stream_impl_t::init(ze_context_handle_t context,
     // to ensure the event pool is created with the correct
     // ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP flag to query profiling info during
     // logging operation.
-    // Note: The verbose profiler state is fixed at stream initialization and
-    // does not respond to runtime changes made via set_dnnl_verbose().
-    // TODO: allow runtime control of the asynchronous verbose mode via
-    // set_dnnl_verbose()
+    // Note: The verbose profiler is enabled only if exec profiling is on when
+    // the stream is created. dnnl_set_verbose() can disable it at runtime, but
+    // enabling exec profiling after stream creation falls back to
+    // host-measured timings.
     init_verbose_profiler(kind);
 
     if ((flags() & stream_flags::out_of_order) && is_profiling_enabled()) {

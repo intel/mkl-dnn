@@ -42,10 +42,10 @@ status_t stream_t::init() {
 
     // Enables profiling capabilities to allow the verbose mode to print
     // profiling info using device measured times.
-    // The verbose profiler state is fixed at stream initialization and does
-    // not respond to runtime changes made via set_dnnl_verbose().
-    // TODO: allow runtime control of the asynchronous verbose mode via
-    // set_dnnl_verbose()
+    // The verbose profiler is enabled only if exec profiling is on when the
+    // stream is created, since it requires a profiling-enabled queue.
+    // dnnl_set_verbose() can disable it at runtime, but enabling exec
+    // profiling after stream creation falls back to host-measured timings.
     CHECK(impl()->init_verbose_profiler(engine()->kind()));
 
     // Restore queue on successful exit, otherwise queue may be released
