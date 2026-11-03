@@ -1567,7 +1567,15 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             = everyone_is(f32, jcp.src_dt, jcp.dst_dt) && jcp.wei_dt == f16;
     jcp.is_fp8 = one_of(jcp.src_dt, f8_e5m2, f8_e4m3)
             && one_of(jcp.wei_dt, f8_e4m3, f8_e5m2);
-    jcp.req_fp8_convert_wsp = jcp.is_fp8 && isa == avx10_2;
+    jcp.is_fp8_convert = jcp.is_fp8 && cd.use_inversion && isa == avx10_2;
+    jcp.req_precvt_fp8 = jcp.is_fp8_convert && !is_amx(isa);
+    if (jcp.req_precvt_fp8) {
+        jcp.src_dt = jcp.wei_dt = f16;
+        jcp.src_dsz = jcp.wei_dsz = types::data_type_size(f16);
+        jcp.simd_w = static_cast<int>(isa_max_vlen(jcp.isa) / jcp.src_dsz);
+    }
+    jcp.req_fp8_convert_wsp
+            = jcp.is_fp8 && isa == avx10_2 && !jcp.req_precvt_fp8;
 
     VDISPATCH_CONV_IC(!jcp.is_bf32, VERBOSE_UNSUPPORTED_DT);
 
@@ -2190,7 +2198,17 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 }
 
 void init_scratchpad(memory_tracking::registrar_t &scratchpad,
-        const jit_brgemm_conv_conf_t &jcp) {
+        const jit_brgemm_conv_conf_t &jcp, const memory_desc_t &diff_dst_md,
+        const memory_desc_t &weights_md) {
+    if (jcp.req_precvt_fp8) {
+        scratchpad.book(key_brgemm_conv_fp8_src,
+                memory_desc_wrapper(&diff_dst_md).nelems(true),
+                types::data_type_size(f16), 0, P4K);
+        scratchpad.book(key_brgemm_conv_fp8_wei,
+                memory_desc_wrapper(&weights_md).nelems(true),
+                types::data_type_size(f16), 0, P4K);
+    }
+
     if (jcp.brg_type == brgemm_addr || jcp.brg_type == brgemm_offs
             || (jcp.brg_type == brgemm_strd && jcp.exec_type == exec_vpad))
         scratchpad.book(key_brgemm_primitive_batch,
