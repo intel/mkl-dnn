@@ -81,19 +81,6 @@ float f32_tile_l2_set_load(
     return static_cast<float>(max_occupancy) / ways;
 }
 
-inline void convert_from_f32(
-        void *dst, data_type_t dt, const float *src, size_t n) {
-    switch (dt) {
-        case data_type::f16:
-            cvt_float_to_float16(static_cast<float16_t *>(dst), src, n);
-            break;
-        case data_type::bf16:
-            cvt_float_to_bfloat16(static_cast<bfloat16_t *>(dst), src, n);
-            break;
-        default: break;
-    }
-}
-
 // Tensor descriptor for a buffer, its memory descriptor, optional copy
 // descriptor, and scratch pointer. Templated to distinguish between const
 // and non-const byte buffers.
@@ -765,14 +752,16 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
     }
 
     // Reuse the vectorized jit softmax kernel for the max/exp/normalize over
-    // the seq_kv axis: build a plain 2D [q_block x seq_kv] f32 softmax pd
-    // (axis = 1, the contiguous seq_kv axis) and extract its jit kernel. The
+    // the seq_kv axis. For xf16 mm2, keep the src f32 and write the normalized
+    // result directly in mm_dt, avoiding a separate conversion pass. The
     // kernel is per-row, so the same instance serves the query-tail block too.
     {
-        memory_desc_t sm_md;
+        memory_desc_t sm_src_md, sm_dst_md;
         dims_t sm_dims = {q_block_, seq_kv};
         CHECK(memory_desc_init_by_tag(
-                sm_md, 2, sm_dims, data_type::f32, format_tag::ab));
+                sm_src_md, 2, sm_dims, data_type::f32, format_tag::ab));
+        CHECK(memory_desc_init_by_tag(
+                sm_dst_md, 2, sm_dims, p_.mm_dt, format_tag::ab));
         softmax_desc_t sd {};
         sd.primitive_kind = primitive_kind::softmax;
         sd.prop_kind = prop_kind::forward_inference;
@@ -782,8 +771,8 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
         sd.alg_kind = p_.softmax_inf_as_zero
                 ? alg_kind::softmax_accurate_inf_as_zero
                 : alg_kind::softmax_accurate;
-        sd.src_desc = sm_md;
-        sd.dst_desc = sm_md;
+        sd.src_desc = sm_src_md;
+        sd.dst_desc = sm_dst_md;
         sd.softmax_axis = 1;
 
         primitive_attr_t attr;
@@ -1057,8 +1046,10 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
 
         // Full-axis softmax: scores[m, seq_kv] -> P[m, seq_kv], normalized
         // over all keys independently for each query row. The jit softmax
-        // kernel does the max/exp/normalize; any select not already folded
-        // into mm1 is applied in a cheap IR pre-pass first.
+        // kernel does the max/exp/normalize; for xf16 it writes the normalized
+        // result directly to prob while using scores for its f32 interim.
+        // Any select not already folded into mm1 is applied in a cheap IR
+        // pre-pass first.
         const bool prepass_select = has_select && !select_in_mm1;
         if (prepass_select && c_ptr) {
             // Standalone IR select kernel: dense condition (column stride 1),
@@ -1073,15 +1064,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         }
         for (dim_t i = 0; i < m; ++i) {
             float *srow = scores + i * seq_kv;
+            void *prob_row = static_cast<char *>(prob)
+                    + static_cast<size_t>(i) * seq_kv * mm_dt_sz;
             softmax_impl::jit_softmax_kernel_base_t::call_params_t sp;
             sp.src = srow;
-            sp.dst = srow;
+            sp.dst = prob_row;
             sp.diff_dst = nullptr;
-            sp.interim = nullptr;
+            sp.interim = mm_dt == data_type::f32 ? nullptr : srow;
             sp.src_scales = nullptr;
             sp.dst_scales = nullptr;
             sp.process_n_elems = static_cast<size_t>(seq_kv);
-            sp.dst_orig = srow;
+            sp.dst_orig = prob_row;
             sp.post_ops_binary_rhs_arg_vec = nullptr;
             (*softmax_kernel_)(&sp);
         }
@@ -1093,12 +1086,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // no destination pre-zeroing is needed; a single block uses beta = 0
         // (identical to the untiled path). mm2 writes either straight into the
         // f32 user output (mm2_direct_) or into the dense pv scratch tile.
-        // P is the softmax output in the compute type: for f32 that is the
-        // scores tile; otherwise down-convert the dense [m, seq_kv] scores into
-        // the prob tile first (mm2's A must match the BRGEMM input type).
-        if (mm_dt != data_type::f32)
-            convert_from_f32(
-                    prob, mm_dt, scores, static_cast<size_t>(m) * seq_kv);
+        // P is the softmax output in the compute type: f32 reuses the scores
+        // tile; bf16/f16 was written directly to the prob tile above.
 
         // mm2 destination: the user output directly (f32, unit-stride rows) or
         // the pv scratch tile that is scattered/down-converted below.
