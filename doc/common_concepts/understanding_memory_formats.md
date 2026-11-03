@@ -56,7 +56,7 @@ It would be simpler to start with an example.
 
 Consider 4D activations with batch equals 2, 16 channels, and 5 x 4 spatial
 domain. Logical representation is given in the picture below.
-![Activations](mem_fmt_img1.png)
+![Activations](images/mem_fmt_img1.png)
 
 The value at the position (n, c, h, w) is generated with the following formula:
 ~~~
@@ -160,7 +160,7 @@ The offset function for **CHWN** format is defined as:
 
 This layout corresponds to #dnnl_chwn or dnnl::memory::format_tag::chwn.
 
-![Different plain layouts](mem_fmt_img2.png)
+![Different plain layouts](images/mem_fmt_img2.png)
 
 #### Relevant Reading
 
@@ -182,7 +182,7 @@ The following picture shows a simplified case for a 2D matrix of size
 `rows x columns` kept in row-major format where rows have some non-trivial
 (that is, not equal to the number of columns) stride.
 
-![Strides](strides.png)
+![Strides](images/strides.png)
 
 In this case, the general offset function looks like:
 ~~~
@@ -254,7 +254,7 @@ the spatial domain is covered. Then next slice covers the subsequent 8 channels
 (that is, moving from `c=0..7` to `c=8..15`). Once all channel blocks are
 covered, the next image in the batch appears.
 
-![nChw8c format](mem_fmt_blk.png)
+![nChw8c format](images/mem_fmt_blk.png)
 
 @note We use lower- and uppercase letters in the formats to distinguish
 between the blocks (e.g. 8c) and the remaining co-dimension (**C** = channels
@@ -330,7 +330,7 @@ than the performance with the plain data layout.
 The picture below depicts the idea. Note that some extra computations occur
 during computation of `d0`, but that does not affect the result.
 
-![Padded format](mem_fmt_padded_blk.png)
+![Padded format](images/mem_fmt_padded_blk.png)
 
 Some pitfalls of the given approach:
 
