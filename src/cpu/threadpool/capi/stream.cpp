@@ -14,54 +14,47 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "oneapi/dnnl/dnnl_config.h"
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include <assert.h>
-#include "oneapi/dnnl/dnnl.h"
+#include <memory>
 
 #include "oneapi/dnnl/dnnl_threadpool.h"
 
 #include "common/c_types_map.hpp"
 #include "common/engine.hpp"
-#include "common/primitive.hpp"
-#include "common/primitive_exec_types.hpp"
+#include "common/stream.hpp"
 #include "common/utils.hpp"
-#include "cpu/cpu_stream.hpp"
-#include "cpu/cpu_stream_impl.hpp"
+
+#include "cpu/threadpool/stream_impl.hpp"
 
 using namespace dnnl::impl;
-using namespace dnnl::impl::status;
-using namespace dnnl::impl::utils;
 
 dnnl_status_t dnnl_threadpool_interop_stream_create(
         stream_t **stream, engine_t *engine, void *threadpool) {
-    bool args_ok = !utils::any_null(stream, engine);
-    if (!args_ok) return invalid_arguments;
+    bool args_ok = !utils::any_null(stream, engine)
+            && engine->runtime_kind() == runtime_kind::threadpool;
+    if (!args_ok) return status::invalid_arguments;
 
-    auto tp = static_cast<dnnl::threadpool_interop::threadpool_iface *>(
+    auto *tp = static_cast<dnnl::threadpool_interop::threadpool_iface *>(
             threadpool);
 
-    std::unique_ptr<dnnl::impl::cpu::stream_impl_t> stream_impl(
-            new dnnl::impl::cpu::stream_impl_t(tp));
+    std::unique_ptr<dnnl::impl::stream_impl_t> stream_impl(
+            new cpu::threadpool::stream_impl_t(tp));
     if (!stream_impl) return status::out_of_memory;
 
     CHECK(engine->create_stream(stream, stream_impl.get()));
+    // stream takes ownership of stream_impl if create_stream() succeeds.
     stream_impl.release();
     return status::success;
 }
 
 dnnl_status_t dnnl_threadpool_interop_stream_get_threadpool(
         dnnl_stream_t stream, void **threadpool) {
-    if (utils::any_null(stream, threadpool)) return status::invalid_arguments;
-    if (stream->engine()->kind() != engine_kind::cpu)
-        return status::invalid_arguments;
+    bool args_ok = !utils::any_null(stream, threadpool)
+            && stream->engine()->runtime_kind() == runtime_kind::threadpool;
+    if (!args_ok) return status::invalid_arguments;
 
-    auto *cpu_stream = utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(stream);
-    dnnl::threadpool_interop::threadpool_iface *tp;
-    auto status = cpu_stream->get_threadpool(&tp);
-    if (status == status::success) *threadpool = static_cast<void *>(tp);
-    return status;
+    const auto *tp_stream_impl
+            = utils::downcast<const cpu::threadpool::stream_impl_t *>(
+                    stream->impl());
+    *threadpool = static_cast<void *>(tp_stream_impl->get_threadpool());
+    return status::success;
 }
-
-#endif

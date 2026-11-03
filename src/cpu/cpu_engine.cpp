@@ -22,7 +22,10 @@
 #include "cpu/cpu_engine.hpp"
 #include "cpu/cpu_memory_storage.hpp"
 #include "cpu/cpu_stream.hpp"
-#include "cpu/cpu_stream_impl.hpp"
+
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "cpu/threadpool/engine.hpp"
+#endif
 
 namespace dnnl {
 namespace impl {
@@ -46,9 +49,23 @@ status_t cpu_engine_t::create_memory_storage(
 
 status_t cpu_engine_t::create_stream(
         stream_t **stream, impl::stream_impl_t *stream_impl) {
-    return safe_ptr_assign(*stream,
-            new cpu_stream_t(
-                    this, utils::downcast<cpu::stream_impl_t *>(stream_impl)));
+    return safe_ptr_assign(*stream, new cpu_stream_t(this, stream_impl));
+}
+
+status_t cpu_engine_factory_t::engine_create(
+        engine_t **engine, size_t index) const {
+    assert(index == 0);
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    *engine = new threadpool::engine_t(index);
+#else
+    *engine = new cpu_engine_t(new impl::engine_impl_t(
+            engine_kind::cpu, get_cpu_native_runtime(), index));
+#endif
+
+#if DNNL_AARCH64 && defined(DNNL_AARCH64_USE_ACL)
+    dnnl::impl::cpu::aarch64::acl_thread_utils::set_acl_threading();
+#endif
+    return status::success;
 }
 
 engine_t *get_service_engine() {
