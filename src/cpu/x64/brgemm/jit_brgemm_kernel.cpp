@@ -62,8 +62,10 @@ struct jit_brgemm_kernel_t : public brgemm_kernel_t {
 
         bool has_f8_e5m2_binary_postops = false;
         bool has_f8_e4m3_binary_postops = false;
-        bool has_f8_dt = one_of(data_type::f8_e5m2, brg.dt_d, brg.dt_bias)
-                || one_of(data_type::f8_e4m3, brg.dt_d, brg.dt_bias);
+        bool has_f8_dt = utils::one_of(data_type::f8_e5m2, brg.dt_a, brg.dt_b,
+                                 brg.dt_c, brg.dt_d, brg.dt_bias, brg.sum_dt)
+                || utils::one_of(data_type::f8_e4m3, brg.dt_a, brg.dt_b,
+                        brg.dt_c, brg.dt_d, brg.dt_bias, brg.sum_dt);
         if (brg.with_binary) {
             const auto &post_ops = brg.attr()->post_ops_;
             for (int i = 0; i < post_ops.len(); i++) {
@@ -81,7 +83,7 @@ struct jit_brgemm_kernel_t : public brgemm_kernel_t {
         if (brg.is_fp8 || has_f8_e5m2_binary_postops
                 || has_f8_e4m3_binary_postops || has_f8_dt) {
             if (one_of(data_type::f8_e5m2, brg.dt_a, brg.dt_b, brg.dt_c,
-                        brg.dt_d, brg.dt_bias)
+                        brg.dt_d, brg.dt_bias, brg.sum_dt)
                     || has_f8_e5m2_binary_postops)
                 // Note: avoid using 'vmm0' since it is used as
                 // 'fp8_to_f16_upconvert()' param and would collision with these
@@ -90,7 +92,7 @@ struct jit_brgemm_kernel_t : public brgemm_kernel_t {
                         vmm_fp8_emu_aux1(), vmm_fp8_emu_aux2(),
                         vmm_fp8_emu_aux3(), kmask_fp8_aux, reg64_fp8_aux);
             if (one_of(data_type::f8_e4m3, brg.dt_a, brg.dt_b, brg.dt_c,
-                        brg.dt_d, brg.dt_bias)
+                        brg.dt_d, brg.dt_bias, brg.sum_dt)
                     || has_f8_e4m3_binary_postops)
                 f8_e4m3_cvt_ = utils::make_unique<fp8_conversion_e4m3_t>(this,
                         vmm_fp8_emu_aux1(), vmm_fp8_emu_aux2(),
@@ -336,8 +338,7 @@ private:
             used_vregs = 2;
         else if (brg.is_fp8_via_convert() || brg.is_fp8_post_ops_emu())
             used_vregs = 5;
-        else if (brg.is_f16_b_non_amx_vnni())
-            used_vregs = 2;
+        if (brg.is_f16_b_non_amx_vnni()) used_vregs += 2;
         return isa_num_vregs(brg.isa_impl) - used_vregs;
     }
 
@@ -476,10 +477,12 @@ private:
     }
 
     Vmm f16_perm_even_vreg() const noexcept {
-        return Vmm(isa_num_vregs(brg.isa_impl) - 1);
+        return Vmm(isa_num_vregs(brg.isa_impl)
+                - (brg.is_fp8_post_ops_emu() ? 5 : 0) - 1);
     }
     Vmm f16_perm_odd_vreg() const noexcept {
-        return Vmm(isa_num_vregs(brg.isa_impl) - 2);
+        return Vmm(isa_num_vregs(brg.isa_impl)
+                - (brg.is_fp8_post_ops_emu() ? 5 : 0) - 2);
     }
 
     template <typename U>
@@ -1735,7 +1738,9 @@ void jit_brgemm_kernel_t<Wmm>::apply_alpha_beta(
 
     reg64_savable_guard_t reg_aux_guard(
             {{{&reg_aux_C}, brg.is_runtime_ldc && bd_block > 1},
-                    {{&reg64_fp8_aux}, brg.is_fp8_via_convert()}});
+                    {{&reg64_fp8_aux},
+                            brg.is_fp8_via_convert()
+                                    || brg.is_fp8_post_ops_emu()}});
 
     for_(int bd = 0; bd < bd_block; bd++)
     for (int ld = 0; ld < ld_block2; ld++) {
@@ -2103,7 +2108,8 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(int bd_block,
                 uni_vcvtdq2ps(vmm_zp_c, vmm_zp_c);
             }
         }
-        if (brg.is_fp8_via_convert()) reg64_fp8_aux.save();
+        if (brg.is_fp8_via_convert() || brg.is_fp8_post_ops_emu())
+            reg64_fp8_aux.save();
 
         for (int ld = 0; ld < ld_block2; ld++) {
             const bool is_tail = is_ld_tail && ld + 1 == ld_block2;
@@ -2125,7 +2131,8 @@ void jit_brgemm_kernel_t<Wmm>::store_accumulators_apply_post_ops(int bd_block,
                 uni_vaddps(vmm, vmm, vmm_zp_c);
             }
         }
-        if (brg.is_fp8_via_convert()) reg64_fp8_aux.restore();
+        if (brg.is_fp8_via_convert() || brg.is_fp8_post_ops_emu())
+            reg64_fp8_aux.restore();
     }
 
     const bool dt_requires_saturation

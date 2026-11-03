@@ -1710,6 +1710,7 @@ brgemm_broadcast_t get_zp_type(const primitive_attr_t &attr, int arg) {
             ? brgemm_broadcast_t::none
             : brgemm_broadcast_t::per_tensor;
 }
+
 status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         const convolution_desc_t &cd, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
@@ -1981,6 +1982,19 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     VDISPATCH_CONV_IC(
             IMPLICATION(jcp.is_f32_bf16, one_of(isa, avx512_core, avx2)),
             VERBOSE_ISA_DT_MISMATCH);
+
+    if (jcp.is_fp8_convert && !is_amx(jcp.isa)) {
+        jcp.req_precvt_fp8 = true;
+
+        // Keep public FP8 descriptors; blocking and addressing use FP16 buffers.
+        jcp.src_dt = jcp.wei_dt = f16;
+        jcp.src_dsz = jcp.wei_dsz = types::data_type_size(f16);
+        jcp.simd_w = static_cast<int>(isa_max_vlen(jcp.isa) / jcp.src_dsz);
+        jcp.vnni_block = data_type_vnni_granularity(f16);
+        jcp.req_fp8_convert_wsp = false;
+        jcp.is_rd_padded_to_block
+                = !jcp.is_1x1 && jcp.ic > jcp.simd_w && is_amx(jcp.isa);
+    }
 
     jcp.amx_h = 16;
     jcp.amx_w = static_cast<int>(
@@ -2822,6 +2836,13 @@ status_t init_scratchpad(memory_tracking::registrar_t &scratchpad,
     const memory_desc_wrapper src_d(&src_md);
     const memory_desc_wrapper weights_d(&weights_md);
     const memory_desc_wrapper dst_d(&dst_md);
+
+    if (jcp.req_precvt_fp8) {
+        scratchpad.book(key_brgemm_conv_fp8_src, src_d.nelems(true),
+                types::data_type_size(f16), 0, P4K);
+        scratchpad.book(key_brgemm_conv_fp8_wei, weights_d.nelems(true),
+                types::data_type_size(f16), 0, P4K);
+    }
 
     if (uses_batch_elements(jcp.brg_type, jcp.exec_type)) {
         scratchpad.book(key_brgemm_primitive_batch,
