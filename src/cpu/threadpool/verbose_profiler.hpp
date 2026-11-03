@@ -14,25 +14,23 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef CPU_VERBOSE_PROFILER_HPP
-#define CPU_VERBOSE_PROFILER_HPP
-
-#include "common/c_types_map.hpp"
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#ifndef CPU_THREADPOOL_VERBOSE_PROFILER_HPP
+#define CPU_THREADPOOL_VERBOSE_PROFILER_HPP
 
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "common/c_types_map.hpp"
 #include "common/verbose_profiler.hpp"
 #include "oneapi/dnnl/dnnl_threadpool_iface.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
+namespace threadpool {
 
-// CPU async threadpool specialization of verbose_profiler_t.
+// Async threadpool specialization of verbose_profiler_t.
 // Tracks primitive completion using threadpool_event_iface_t handles registered
 // with the threadpool after each parallel_for() dispatch.
 // Instantiated on the submission thread via thread_local_storage_t on the
@@ -96,9 +94,9 @@ private:
             dnnl::threadpool_interop::threadpool_event_iface_t> &event) const;
 };
 
+} // namespace threadpool
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
 
-#endif // DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#endif // CPU_VERBOSE_PROFILER_HPP
+#endif // CPU_THREADPOOL_VERBOSE_PROFILER_HPP

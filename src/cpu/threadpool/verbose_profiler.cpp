@@ -14,14 +14,14 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "cpu/verbose_profiler.hpp"
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
 #include "common/verbose.hpp"
+
+#include "cpu/threadpool/verbose_profiler.hpp"
 
 namespace dnnl {
 namespace impl {
 namespace cpu {
+namespace threadpool {
 
 void verbose_profiler_t::cleanup() {
     try {
@@ -218,8 +218,7 @@ void verbose_profiler_t::wait_for_event_completion(const std::shared_ptr<
     event->wait();
 }
 
+} // namespace threadpool
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl
-
-#endif // DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL

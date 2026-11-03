@@ -21,7 +21,7 @@
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
 #include "common/thread_local_storage.hpp"
-#include "cpu/verbose_profiler.hpp"
+#include "cpu/threadpool/verbose_profiler.hpp"
 #include "oneapi/dnnl/dnnl_threadpool_iface.hpp"
 #endif
 
@@ -63,9 +63,10 @@ struct cpu_stream_t : public stream_t {
     }
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+    // TODO: move threadpool-related logic to a dedicated threadpool utility class.
     // Returns a pointer to the active per-thread verbose profiler,
     // or nullptr if the profiler has not been initialized for this thread.
-    cpu::verbose_profiler_t *verbose_profiler() const {
+    cpu::threadpool::verbose_profiler_t *verbose_profiler() const {
         return (is_verbose_profiler_enabled() && verbose_profiler_.is_set())
                 ? verbose_profiler_.get().get()
                 : nullptr;
@@ -80,7 +81,8 @@ struct cpu_stream_t : public stream_t {
         // add a new entry for the incoming primitive.
         if (is_verbose_profiler_enabled()) {
             auto &verbose_profiler = verbose_profiler_.get_or_set(
-                    utils::make_unique<cpu::verbose_profiler_t>(this));
+                    utils::make_unique<cpu::threadpool::verbose_profiler_t>(
+                            this));
             verbose_profiler->update_event_list();
         }
     }
@@ -137,7 +139,8 @@ private:
     // own independent profiling_data_ list and event tracking state.
     // Worker threads interact only with threadpool_event_iface_t directly via
     // the completion mechanism and never access the profiler state.
-    utils::thread_local_storage_t<std::unique_ptr<cpu::verbose_profiler_t>>
+    utils::thread_local_storage_t<
+            std::unique_ptr<cpu::threadpool::verbose_profiler_t>>
             verbose_profiler_;
 
 #endif
