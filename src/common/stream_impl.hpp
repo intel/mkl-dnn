@@ -17,11 +17,8 @@
 #ifndef COMMON_STREAM_IMPL_HPP
 #define COMMON_STREAM_IMPL_HPP
 
-#include "oneapi/dnnl/dnnl_threadpool_iface.hpp"
-
 #include "common/c_types_map.hpp"
 #include "common/utils.hpp"
-#include "common/verbose.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -40,19 +37,13 @@ public:
         return (flags() & dnnl::impl::stream_flags::profiling);
     }
 
-    bool is_verbose_profiler_enabled() const {
-        return dnnl::impl::get_verbose(dnnl::impl::verbose_t::exec_profile)
-                && use_verbose_profiler_;
-    }
+    bool is_verbose_profiler_enabled() const;
 
     // Returns true if the stream can be synchronized (blocked on) around
     // primitive execution without breaking its execution model.
     virtual bool is_syncable() const { return true; }
 
-    virtual status_t init_verbose_profiler(engine_kind_t) {
-        use_verbose_profiler_ = false;
-        return status::success;
-    }
+    virtual status_t init_verbose_profiler(engine_kind_t);
 
 protected:
     bool use_verbose_profiler_;
