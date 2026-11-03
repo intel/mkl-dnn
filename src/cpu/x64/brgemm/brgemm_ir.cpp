@@ -37,6 +37,7 @@
 #include "common/verbose.hpp"
 
 #include "cpu/x64/brgemm/brgemm_ir.hpp"
+#include "cpu/x64/brgemm/brgemm_ir_compute_path.hpp"
 #include "cpu/x64/brgemm/brgemm_ir_conf.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
@@ -296,64 +297,13 @@ dim_t max_looped_pos(const std::vector<block_run_t> &runs) {
     return std::max(max_pos, ptr_pos);
 }
 
-// Innermost reduction step, over `rd_loop` elements of K starting at K index
-// `rd_start`, counted from where the A and B pointers stand.
-//
-// Loads one B vector per N register, then for each M row broadcasts one A
-// element and multiply-adds it into that row's accumulators. This is the
-// `!n_bcast_1_load` variant of `gemm_microkernel()` in `jit_brgemm_kernel.cpp`.
-void emit_microkernel(ir::ir_t &ir, const conf_t &cfg, const out_block_t &blk,
-        const std::vector<ir::vreg_t> &acc, const std::vector<ir::vreg_t> &b,
-        ir::vreg_t a, ir::vreg_t a_ptr, ir::vreg_t b_ptr, dim_t rd_start,
-        int rd_loop) {
-
-    for (int rd = 0; rd < rd_loop; rd++) {
-        const dim_t rd_pos = rd_start + rd;
-
-        // Only the last register of a block can be partial, and a block that
-        // has one holds nothing else, so the mask covers every B load here.
-        for (int ld = 0; ld < blk.ld_block2; ld++) {
-            if (blk.ld_tail_mask == ir::vreg_t::none)
-                ir.vload(b[ld], b_ptr, cfg.b_off(rd_pos, cfg.ld_pos(blk, ld)),
-                        cfg.microkernel.dt_b);
-            else
-                ir.vload_masked(b[ld], b_ptr,
-                        cfg.b_off(rd_pos, cfg.ld_pos(blk, ld)),
-                        blk.ld_tail_mask, cfg.microkernel.dt_b);
-        }
-
-        // One prefetch per B register, issued on the first `ld_block2` rows, so
-        // each reduction step fetches the next K block of B exactly once.
-        int n_pf_b = 0;
-        for (int bd = 0; bd < blk.bd_block; bd++) {
-            ir.vload_bcast(a, a_ptr, cfg.a_off(blk.bd_start + bd, rd_pos),
-                    cfg.microkernel.dt_a);
-            if (n_pf_b < blk.ld_block2) {
-                // The prefetch address is one K block past the B loads, so it
-                // can be outside B. `check_displacements()` does not cover it,
-                // and the prefetch is skipped if its displacement does not
-                // fit in int32.
-                const dim_t pf_off = cfg.b_off(rd_pos, cfg.ld_pos(blk, n_pf_b))
-                        + cfg.rdb_b_off();
-                if (jit_generator_t::imm_fits_int32(pf_off))
-                    ir.prefetch(b_ptr, pf_off);
-                n_pf_b++;
-            }
-
-            for (int ld = 0; ld < blk.ld_block2; ld++)
-                ir.vdot(acc[bd * blk.ld_block2 + ld], b[ld], a);
-        }
-    }
-}
-
 // One batch element.
 //
 // Derives the A and B pointers of the element, shifts them to the current M and
 // N block, then runs the reduction loop over K.
-void emit_bs_body(ir::ir_t &ir, const conf_t &cfg,
+void emit_bs_body(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
         const m_loop_input_regs_t &regs, const out_block_t &blk,
-        const std::vector<ir::vreg_t> &acc, const std::vector<ir::vreg_t> &b,
-        ir::vreg_t a, ir::vreg_t batch_ptr) {
+        const std::vector<ir::vreg_t> &acc, ir::vreg_t batch_ptr) {
 
     const ir::vreg_t a_ptr = ir.new_gpr();
     const ir::vreg_t b_ptr = ir.new_gpr();
@@ -397,46 +347,36 @@ void emit_bs_body(ir::ir_t &ir, const conf_t &cfg,
     // and one element of A, so a short tail is just fewer steps.
     emit_looped_level(
             ir, k_runs(cfg.loop), 0, [&](dim_t rd_loop, dim_t rd_start) {
-        emit_microkernel(
-                ir, cfg, blk, acc, b, a, a_ptr, b_ptr, rd_start, (int)rd_loop);
+        cp.emit_microkernel(
+                ir, cfg, blk, acc, a_ptr, b_ptr, rd_start, (int)rd_loop);
     }, step);
 }
 
 // One N block.
 //
-// Holds one accumulator per (M row, N register), reduces them over the batch,
-// and stores them to C, or to D on a post-ops call.
-void emit_n_block(ir::ir_t &ir, const conf_t &cfg,
+// Creates the accumulators of the block with the compute path, reduces them
+// over the batch, and stores them to C, or to D on a post-ops call.
+void emit_n_block(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
         const m_loop_input_regs_t &regs, const out_block_t &blk) {
 
-    std::vector<ir::vreg_t> acc(blk.bd_block * blk.ld_block2, ir::vreg_t::none);
-
-    for (int bd = 0; bd < blk.bd_block; bd++) {
-        for (int ld = 0; ld < blk.ld_block2; ld++) {
-            const int i = bd * blk.ld_block2 + ld;
-            acc[i] = ir.new_vec(cfg.microkernel.dt_acc);
-            ir.vzero(acc[i]);
-        }
-    }
-
-    std::vector<ir::vreg_t> b(blk.ld_block2, ir::vreg_t::none);
-    for (int ld = 0; ld < blk.ld_block2; ld++)
-        b[ld] = ir.new_vec(cfg.microkernel.dt_b);
+    const std::vector<ir::vreg_t> acc = cp.init_accumulators(ir, cfg, blk);
 
     // Batch reduction over the bs dimension.
     const ir::vreg_t batch_ptr = ir.new_gpr();
     ir.mov_reg(batch_ptr, regs.invariant.batch);
 
-    const ir::vreg_t a = ir.new_vec(cfg.microkernel.dt_a);
-
     auto bs_body
-            = [&]() { emit_bs_body(ir, cfg, regs, blk, acc, b, a, batch_ptr); };
+            = [&]() { emit_bs_body(ir, cfg, cp, regs, blk, acc, batch_ptr); };
 
     if (cfg.loop.max_bs > 1)
         ir::emit_loop_reg(ir, regs.invariant.bs, bs_body);
     else
         ir::emit_loop_imm(ir, 1, bs_body);
 
+    // Only the vector compute path exists so far. Its accumulators are the rows
+    // of the output, one register per (M row, N register), so the output path
+    // below works on them directly.
+    //
     // The kernel takes only 0 and 1 for beta. C is added after the reduction,
     // as in the classic kernel. Loading it into the accumulators up front
     // would make every FMA chain wait for those loads.
@@ -596,7 +536,7 @@ void emit_n_block(ir::ir_t &ir, const conf_t &cfg,
 // N blocks of `ld_block2 * ld_block` columns. Each block keeps its result in
 // registers across the whole batch and K reduction, then stores it once. The
 // looped schedule walks N inside M, as `jit_brgemm_kernel_t` does.
-void build_brgemm(const conf_t &cfg, ir::ir_t &ir) {
+void build_brgemm(const conf_t &cfg, const compute_path_t &cp, ir::ir_t &ir) {
     const m_loop_input_regs_t regs = init_m_loop_input_regs(ir, cfg);
 
     // Every partial N block is the same width, so one mask serves the whole
@@ -658,7 +598,7 @@ void build_brgemm(const conf_t &cfg, ir::ir_t &ir) {
             const out_block_t blk {(int)bd_block,
                     (int)utils::div_up(ld_elems, cfg.loop.ld_block), bd_start,
                     ld_start, is_ld_tail ? ld_tail_mask : ir::vreg_t::none};
-            emit_n_block(ir, cfg, regs, blk);
+            emit_n_block(ir, cfg, cp, regs, blk);
         }, n_step);
     }, m_step);
 }
@@ -669,11 +609,11 @@ void build_brgemm(const conf_t &cfg, ir::ir_t &ir) {
 // it is read from there. Only the vector compute path exists so far, and the
 // tile compute paths are rejected.
 status_t init_compute_path(
-        compute_path_t &compute_path, const brgemm_desc_t &brg) {
+        compute_path_kind_t &kind, const brgemm_desc_t &brg) {
     VCONDCHECK_BRGEMM_IR(!brg.is_tmm && !brg.is_ace(),
             VERBOSE_UNSUPPORTED_FEATURE, "tile accumulation");
 
-    compute_path = compute_path_t::vector;
+    kind = compute_path_kind_t::vector;
     return status::success;
 }
 
@@ -722,9 +662,9 @@ status_t init_loop_conf(loop_conf_t &loop, const brgemm_desc_t &brg) {
     return status::success;
 }
 
-// Fills the microkernel configuration of the vector compute path.
-status_t init_microkernel_conf(
-        microkernel_conf_t &microkernel, const brgemm_desc_t &brg) {
+// Fills the configuration of the vector compute path.
+status_t init_compute_path_conf(
+        compute_path_conf_t &compute_path, const brgemm_desc_t &brg) {
     using namespace data_type;
 
     // `avx2` and `avx512_core` compute f32 directly. The other ISAs receive
@@ -739,9 +679,9 @@ status_t init_microkernel_conf(
     VCONDCHECK_BRGEMM_IR(!brg.embd_bcst, VERBOSE_UNSUPPORTED_FEATURE,
             "embedded broadcast microkernel");
 
-    microkernel.dt_a = brg.dt_a;
-    microkernel.dt_b = brg.dt_b;
-    microkernel.dt_acc = f32;
+    compute_path.dt_a = brg.dt_a;
+    compute_path.dt_b = brg.dt_b;
+    compute_path.dt_acc = f32;
     return status::success;
 }
 
@@ -875,9 +815,9 @@ status_t init_conf(conf_t &conf, const brgemm_desc_t &brg) {
     VCONDCHECK_BRGEMM_IR(!brg.is_gemv, VERBOSE_UNSUPPORTED_FEATURE, "gemv");
     VCONDCHECK_BRGEMM_IR(!brg.is_dgmm, VERBOSE_UNSUPPORTED_FEATURE, "dgmm");
 
-    CHECK(init_compute_path(conf.microkernel.compute_path, brg));
+    CHECK(init_compute_path(conf.compute_path.kind, brg));
     CHECK(init_loop_conf(conf.loop, brg));
-    CHECK(init_microkernel_conf(conf.microkernel, brg));
+    CHECK(init_compute_path_conf(conf.compute_path, brg));
     CHECK(init_output_conf(conf.output, brg));
     return check_displacements(conf);
 }
@@ -890,8 +830,15 @@ struct jit_brgemm_ir_kernel_t : public brgemm_kernel_t {
         : brgemm_kernel_t(jit_name(), isa), conf_(conf) {}
 
     void generate() override {
+        std::unique_ptr<compute_path_t> cp;
+        switch (conf_.compute_path.kind) {
+            case compute_path_kind_t::vector:
+                cp = make_vector_compute_path();
+                break;
+        }
+
         ir::ir_t ir;
-        build_brgemm(conf_, ir);
+        build_brgemm(conf_, *cp, ir);
 
         ir::postops_config_t postops;
         if (conf_.output.with_injector_postops) {

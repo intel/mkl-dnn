@@ -59,12 +59,12 @@ struct out_block_t {
 // Builder configuration
 //
 // `conf_t` holds one configuration per module of the builder:
-//   loop        - the loop nest: the batch, the leading dimensions, and the
-//                 blocking
-//   microkernel - the compute path and the data types of A, B, and the
-//                 accumulators
-//   output      - the output path: beta, the bias, the scales, and the
-//                 attribute post-ops
+//   loop         - the loop nest: the batch, the leading dimensions, and the
+//                  blocking
+//   compute_path - the compute path and the data types of A, B, and the
+//                  accumulators
+//   output       - the output path: beta, the bias, the scales, and the
+//                  attribute post-ops
 //
 // Every field is a build-time constant.
 
@@ -73,7 +73,7 @@ struct out_block_t {
 //
 //   vector - broadcasts one A element and multiply-adds it with B vectors into
 //            vector accumulators
-enum class compute_path_t { vector };
+enum class compute_path_kind_t { vector };
 
 // Loop nest configuration.
 //
@@ -102,13 +102,13 @@ struct loop_conf_t {
     int bdb_tail = 0, ldb2_tail = 0, ldb_tail = 0, rdb_tail = 0;
 };
 
-// Microkernel configuration.
+// Compute path configuration.
 //
-//   compute_path - how the product is computed
-//   dt_a/dt_b    - element data type of A and B in memory
-//   dt_acc       - accumulation data type
-struct microkernel_conf_t {
-    compute_path_t compute_path = compute_path_t::vector;
+//   kind      - how the product is computed
+//   dt_a/dt_b - element data type of A and B in memory
+//   dt_acc    - accumulation data type
+struct compute_path_conf_t {
+    compute_path_kind_t kind = compute_path_kind_t::vector;
     data_type_t dt_a = data_type::undef;
     data_type_t dt_b = data_type::undef;
     data_type_t dt_acc = data_type::undef;
@@ -157,21 +157,25 @@ struct output_conf_t {
 
 // Builder configuration.
 //
-//   loop        - loop nest configuration
-//   microkernel - microkernel configuration
-//   output      - output path configuration
+//   loop         - loop nest configuration
+//   compute_path - compute path configuration
+//   output       - output path configuration
 //
 // The member functions derive the addressing of the builder from the module
 // configurations.
 struct conf_t {
     loop_conf_t loop;
-    microkernel_conf_t microkernel;
+    compute_path_conf_t compute_path;
     output_conf_t output;
 
     // Element sizes in bytes of A, B, C, and the bias. The bias size is 0
     // without a bias.
-    int dt_sz_a() const { return (int)types::data_type_size(microkernel.dt_a); }
-    int dt_sz_b() const { return (int)types::data_type_size(microkernel.dt_b); }
+    int dt_sz_a() const {
+        return (int)types::data_type_size(compute_path.dt_a);
+    }
+    int dt_sz_b() const {
+        return (int)types::data_type_size(compute_path.dt_b);
+    }
     int dt_sz_c() const { return (int)types::data_type_size(output.dt_c); }
     int dt_sz_bias() const {
         return output.with_bias ? (int)types::data_type_size(output.dt_bias)
