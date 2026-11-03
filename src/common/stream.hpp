@@ -77,6 +77,8 @@ struct dnnl_stream {
         return impl_->is_verbose_profiler_enabled();
     }
 
+    bool is_syncable() const { return impl_->is_syncable(); }
+
     virtual dnnl::impl::status_t run_verbose_profiler(
             const std::string &pd_info, double start_ms, uint64_t component) {
         return dnnl::impl::status::unimplemented;
