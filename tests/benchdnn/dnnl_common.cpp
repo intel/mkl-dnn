@@ -839,27 +839,27 @@ void skip_unimplemented_data_type(
     const bool has_f64_support = is_f64_supported();
 #if DNNL_CPU_RUNTIME != DNNL_RUNTIME_NONE
     using namespace dnnl::impl::cpu::platform;
-    // bf16 is supported on AVX512-CORE+
-    const bool has_bf16_support = is_gpu()
-            || (is_cpu() && has_data_type_support(dnnl_bf16)
-                    && IMPLICATION(!(dir & FLAG_INF),
-                            has_training_support(dnnl_bf16)));
-    const bool has_f16_support = is_gpu()
-            || (is_cpu() && has_data_type_support(dnnl_f16)
-                    && IMPLICATION(
-                            !(dir & FLAG_INF), has_training_support(dnnl_f16)));
+    // When the CPU lacks an ISA required for a data type, the library returns
+    // `dnnl_unsupported_data_type` and `check_dnnl_status()` skips the case.
+    // Only skip data types that the library doesn't support on any CPU of this
+    // architecture, as it returns `dnnl_unimplemented` for them.
+    const auto has_cpu_support = [&](dnnl_data_type_t dt, bool check_training) {
+        if (data_type_support_status(dt) == dnnl_unimplemented) return false;
+        return IMPLICATION(check_training && !(dir & FLAG_INF),
+                training_support_status(dt) != dnnl_unimplemented);
+    };
+    const bool has_bf16_support
+            = is_gpu() || (is_cpu() && has_cpu_support(dnnl_bf16, true));
+    const bool has_f16_support
+            = is_gpu() || (is_cpu() && has_cpu_support(dnnl_f16, true));
     const bool has_e8m0_support
-            = is_gpu() || (is_cpu() && has_data_type_support(dnnl_e8m0));
+            = is_gpu() || (is_cpu() && has_cpu_support(dnnl_e8m0, false));
     const bool has_f4_e2m1_support
-            = is_gpu() || (is_cpu() && has_data_type_support(dnnl_f4_e2m1));
-    const bool has_f8_e5m2_support = is_gpu()
-            || (is_cpu() && has_data_type_support(dnnl_f8_e5m2)
-                    && IMPLICATION(!(dir & FLAG_INF),
-                            has_training_support(dnnl_f8_e5m2)));
-    const bool has_f8_e4m3_support = is_gpu()
-            || (is_cpu() && has_data_type_support(dnnl_f8_e4m3)
-                    && IMPLICATION(!(dir & FLAG_INF),
-                            has_training_support(dnnl_f8_e4m3)));
+            = is_gpu() || (is_cpu() && has_cpu_support(dnnl_f4_e2m1, false));
+    const bool has_f8_e5m2_support
+            = is_gpu() || (is_cpu() && has_cpu_support(dnnl_f8_e5m2, true));
+    const bool has_f8_e4m3_support
+            = is_gpu() || (is_cpu() && has_cpu_support(dnnl_f8_e4m3, true));
 #else
     const bool has_bf16_support = is_gpu();
     // f16 is supported on GPU for inference only.
