@@ -225,7 +225,7 @@ private:
     void call_brgemm_kernel(const brgemm_thread_ctx_t &btc,
             const brgemm_kernel_t *brg_ker, int batch_size, char *ptr_C,
             char *ptr_D, const char *bias_w, int g_oc, bool do_postops,
-            int comp_ker_offs, bool do_only_comp) const;
+            dim_t comp_ker_offs, bool do_only_comp) const;
 
     void maybe_conv_inp(int ithr, const char *__restrict src,
             char *__restrict inp_buffer, uint8_t *__restrict inp_buffer_mask,
@@ -242,7 +242,7 @@ private:
             int32_t *src_zp_buffer, int32_t *s8s8_comp_buffer) const;
     int get_comp_ker_idx(const int kd_b, const int kd_e, const int kh_b,
             const int kh_e, const int kw_b, const int kw_e) const;
-    int get_comp_offset(const int g, const int ocb, const int ow,
+    dim_t get_comp_offset(const int g, const int ocb, const int ow,
             const int kd_b, const int kd_e, const int kh_b, const int kh_e,
             const int kw_b, const int kw_e) const;
     inline const pd_t *pd() const {
@@ -271,7 +271,9 @@ private:
             KD_BLOCK_PAD, KH_BLOCK_PAD, ID, IH, IW, IDP, IHP, IWP, OD, OH, OW,
             SD, SH, SW, FP, TP, LP, DD, DH, DW;
     dim_t src_w_sz, src_h_sz, src_d_sz, dst_w_sz, dst_h_sz, dst_d_sz;
-    dim_t ker_vpad_sz, comp_ocb_sz, comp_ker_sz, comp_kw_sz;
+    dim_t ker_vpad_sz;
+    // Compensation-buffer strides in int32_t elements.
+    dim_t comp_group_stride, comp_ocb_stride, comp_range_stride;
 
     bool need_compensation;
 };

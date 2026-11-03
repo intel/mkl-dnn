@@ -86,19 +86,50 @@ inline constexpr int mmla_bd_blk() {
 inline constexpr int mmla_ld_blk() {
     return 2;
 }
+// Two 64-bit chunks per reduction block: K8 for BF16, K16 for INT8.
 inline constexpr int mmla_rd_chunk_bytes() {
     return 8;
 }
-inline constexpr int mmla_rd_block() {
-    return 8;
-}
-
 inline constexpr int mmla_rd_chunk_elems(int dt_a_sz) {
     return mmla_rd_chunk_bytes() / dt_a_sz;
 }
-inline constexpr int mmla_rd_chunks_per_block(int dt_a_sz) {
-    return mmla_rd_block() / mmla_rd_chunk_elems(dt_a_sz);
+inline constexpr int mmla_rd_chunks_per_block() {
+    return 2;
 }
+inline constexpr int mmla_rd_block(int dt_a_sz) {
+    return mmla_rd_chunks_per_block() * mmla_rd_chunk_elems(dt_a_sz);
+}
+// Packed weights use K8 panels for both BF16 and INT8.
+inline constexpr int mmla_wei_k_block() {
+    return 8;
+}
+
+// Preferred blocking for large plain-A problems: 24 accumulator registers.
+inline constexpr int mmla_default_ld_block2_plain_a() {
+    return 4;
+}
+inline constexpr int mmla_default_bd_block_plain_a() {
+    return 6;
+}
+inline int mmla_n_block(cpu_isa_t isa) {
+    return mmla_default_ld_block2_plain_a() * simd_elems(data_type::f32, isa);
+}
+
+inline bool has_sufficient_mmla_work(
+        double work, int nthr, double min_work_per_thread) {
+    return work >= min_work_per_thread * nstl::max(1, nthr);
+}
+
+// Small OpenMP workloads can favor BFDOT. Scale the work threshold by
+// the ISA-specific N tile without changing the requested thread team.
+inline bool has_sufficient_bf16_mmla_work(double work, int nthr, int n_block) {
+    return DNNL_CPU_THREADING_RUNTIME != DNNL_RUNTIME_OMP || nthr <= 1
+            || has_sufficient_mmla_work(work, nthr, 16. * 1024 * n_block);
+}
+
+status_t init_mmla_wei_md(memory_desc_t &md, int k_dim, int n_dim, int n_block);
+
+void set_mmla_attr(brgemm_attr_t &attr, dim_t M);
 
 status_t validate_mmla_compute(const brgemm_desc_t &brg);
 

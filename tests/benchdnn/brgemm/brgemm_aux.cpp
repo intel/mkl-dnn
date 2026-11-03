@@ -1,5 +1,6 @@
 /*******************************************************************************
 * Copyright 2022 Intel Corporation
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -94,22 +95,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
 void prb_t::skip_invalid(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
 #if !defined(DNNL_EXPERIMENTAL_UKERNEL)
-    // Reorder does not support s8 and zp compensations for arbitrary shapes,
-    // so skip unsupported cases.
-    // Note: this check must be done here to avoid runtime error in benchdnn due
-    // to failed reorder creation.
-    // TODO: enable this support and remove this check.
-    const bool is_bad_ldb = prb->get_ldb() % 16 > 0 || prb->get_ldb() > 64;
-    const bool req_s8_comp = prb->src_dt() == dnnl_s8;
-    const bool req_zp_comp = !prb->attr.zero_points.is_def(DNNL_ARG_SRC);
-    if (is_bad_ldb && (req_s8_comp || req_zp_comp)) {
-        BENCHDNN_PRINT(2, "%s\n",
-                "Reorder with compensation is not supported for a given LDB");
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-        return;
-    }
-
     if (!prb->attr.zero_points.is_def(DNNL_ARG_WEIGHTS)) {
         // TODO: weights zero point is not supported yet.
         // It requires enabling f32 -> u8 reorder with compensation on the

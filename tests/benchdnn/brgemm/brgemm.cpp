@@ -191,8 +191,15 @@ dnnl_status_t brgemm_attr_init(
 }
 
 #if defined(brg_aarch64)
-std::string mmla_wei_tag(int ld_block, int ld_block2) {
-    return std::string("BA2a") + std::to_string(ld_block * ld_block2) + "b4a";
+std::string mmla_wei_tag(int ld_block, int ld_block2, dnnl_data_type_t wei_dt) {
+    const int n_block = ld_block * ld_block2;
+    switch (wei_dt) {
+        case dnnl_s8:
+            return std::string("BA") + std::to_string(n_block) + "b8a";
+        case dnnl_bf16:
+            return std::string("BA2a") + std::to_string(n_block) + "b4a";
+        default: assert(!"unsupported MMLA weights data type"); return {};
+    }
 }
 #endif
 
@@ -324,8 +331,13 @@ struct kernel_args_t {
 
 std::string prepare_src_format_string(const kernel_args_t &kernel_args) {
 #if !defined(DNNL_EXPERIMENTAL_UKERNEL) && defined(brg_aarch64)
-    if (kernel_args.use_mmla_ && kernel_args.use_mmla_packed_a_)
-        return "AB2a4b";
+    if (kernel_args.use_mmla_ && kernel_args.use_mmla_packed_a_) {
+        switch (kernel_args.prb_->src_dt()) {
+            case dnnl_u8: return "AB2a8b";
+            case dnnl_bf16: return "AB2a4b";
+            default: assert(!"unsupported MMLA source data type"); return {};
+        }
+    }
 #else
     MAYBE_UNUSED(kernel_args);
 #endif
@@ -428,11 +440,26 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
 #if defined(brg_aarch64)
     kernel_args.use_mmla_ = brgemm_desc.brgattr.use_mmla;
     if (kernel_args.use_mmla_) {
-        kernel_args.mmla_wei_tag_
-                = mmla_wei_tag(brgemm_desc.ld_block, brgemm_desc.ld_block2);
+        kernel_args.mmla_wei_tag_ = mmla_wei_tag(
+                brgemm_desc.ld_block, brgemm_desc.ld_block2, prb->wei_dt());
     }
     kernel_args.use_mmla_packed_a_ = brgemm_desc.brgattr.use_mmla_packed_a;
 #endif
+
+    bool unsupported_comp_ldb = prb->get_ldb() % 16 > 0 || prb->get_ldb() > 64;
+#if defined(brg_aarch64)
+    // MMLA weight packing supports compensation beyond these LDB limits.
+    unsupported_comp_ldb = unsupported_comp_ldb && !kernel_args.use_mmla_;
+#endif
+    const bool needs_reorder_comp = prb->src_dt() == dnnl_s8
+            || !prb->attr.zero_points.is_def(DNNL_ARG_SRC);
+    if (unsupported_comp_ldb && needs_reorder_comp) {
+        BENCHDNN_PRINT(2, "%s\n",
+                "Reorder with compensation is not supported for a given LDB");
+        res->state = SKIPPED;
+        res->reason = reason_t::skip_not_supported;
+        return OK;
+    }
 
     // Create BRGeMM kernel, analogous to primitive creation.
     // ctx_init can here be used to select core type on hetero ISA with TBB.

@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2022 Intel Corporation
 * Copyright 2024 FUJITSU LIMITED
-* Copyright 2024-2025 Arm Ltd. and affiliates
+* Copyright 2024-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -54,6 +54,7 @@ protected:
     jit_brgemm_conv_conf_t jcp_ = utils::zero<decltype(jcp_)>();
     const int inp_dsz_;
     const int out_dsz_;
+    const int ic_block_;
     const size_t nb_ic_;
     const size_t inp_ic_sz_;
     const size_t inp_kw_sz_;
@@ -85,7 +86,6 @@ protected:
     Xbyak_aarch64::ZReg zmm_one_words = Xbyak_aarch64::ZReg(27);
     Xbyak_aarch64::ZReg zmm_int8_temp = Xbyak_aarch64::ZReg(26);
 
-    const int last_ic_block_ = 4;
     const int n_block2_ = 4;
     const int m_block2_ = cpu_isa_traits<isa>::vlen / sizeof(int32_t);
     const int n_max_regs_ = 4;

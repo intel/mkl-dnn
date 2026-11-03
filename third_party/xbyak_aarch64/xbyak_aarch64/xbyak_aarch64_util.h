@@ -73,6 +73,7 @@ enum hwCap_t {
   XBYAK_AARCH64_HWCAP_SME_F64F64 = 1 << 11,
   XBYAK_AARCH64_HWCAP_FPHP = 1 << 12,
   XBYAK_AARCH64_HWCAP_FHM = 1 << 13,
+  XBYAK_AARCH64_HWCAP_SVEI8MM = 1 << 14,
 };
 
 struct implementer_t {

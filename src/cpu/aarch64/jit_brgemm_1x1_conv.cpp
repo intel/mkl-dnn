@@ -25,6 +25,7 @@
 #include "cpu/cpu_primitive.hpp"
 #include "cpu/scale_utils.hpp"
 
+#include "cpu/aarch64/brgemm/brgemm_utils.hpp"
 #include "cpu/aarch64/injectors/jit_uni_binary_injector.hpp"
 #include "cpu/aarch64/jit_brgemm_1x1_conv.hpp"
 
@@ -148,6 +149,13 @@ status_t brgemm_1x1_convolution_fwd_t<isa>::pd_t::init(const engine_t *engine) {
                 false, false, brgemm_row_major, alpha, vbeta, jcp_.LDA,
                 jcp_.LDB, jcp_.LDC, vM, vN, vK, strides_ptr));
 
+        if (jcp_.use_mmla) {
+            brgemm_attr_t brgattr;
+            brgemm_utils::set_mmla_attr(brgattr, vM);
+            brgattr.max_bs = jcp_.max_batch;
+            CHECK(brgemm_desc_set_attr(&brg, brgattr));
+        }
+
         auto LDD = jcp_.oc_without_padding;
         brg.with_sum = with_sum;
         brg.with_weights_scale_adjust = jcp_.scale_adjust_factor != 1.0f;
@@ -200,7 +208,9 @@ status_t brgemm_1x1_convolution_fwd_t<isa>::init(engine_t *engine) {
 
     const auto src_type = pd()->src_md(0)->data_type;
 
-    const auto last_ic_block = data_type_vnni_granularity(src_type);
+    const auto last_ic_block = jcp.use_mmla
+            ? brgemm_utils::mmla_wei_k_block()
+            : data_type_vnni_granularity(src_type);
 
     wei_ic_stride = jcp.wei_plain ? jcp.oc_without_padding : jcp.oc_block;
     wei_ocb_stride = jcp.wei_plain

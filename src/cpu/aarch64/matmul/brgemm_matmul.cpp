@@ -222,6 +222,10 @@ status_t brgemm_matmul_t<isa>::pd_t::init(const engine_t *engine) {
         brgemm_attr_t brgattr;
         brgattr.generate_skip_accumulation
                 = bgmmc_.post_ops_applicable && bgmmc_.nthr_k > 1;
+        if (bgmmc_.use_mmla) {
+            brgemm_utils::set_mmla_attr(brgattr, vM);
+            brgattr.max_bs = get_brg_batchsize(bgmmc_, i_bs, i_K);
+        }
 
         CHECK(brgemm_desc_set_attr(&brg, brgattr));
 

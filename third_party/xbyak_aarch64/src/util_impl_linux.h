@@ -45,6 +45,9 @@
 #ifndef HWCAP2_BF16
 #define HWCAP2_BF16 (1UL << 14)
 #endif
+#ifndef HWCAP2_SVEI8MM
+#define HWCAP2_SVEI8MM (1UL << 9)
+#endif
 #ifndef HWCAP2_SME
 #define HWCAP2_SME (1UL << 23)
 #endif
@@ -433,6 +436,8 @@ private:
     const unsigned long hwcap2 = getauxval(AT_HWCAP2);
     if (hwcap2 & HWCAP2_BF16)
       type_ |= (Type)XBYAK_AARCH64_HWCAP_BF16;
+    if (hwcap2 & HWCAP2_SVEI8MM)
+      type_ |= (Type)XBYAK_AARCH64_HWCAP_SVEI8MM;
     if (hwcap2 & HWCAP2_SME)
       type_ |= (Type)XBYAK_AARCH64_HWCAP_SME;
     if (hwcap2 & HWCAP2_SME_I16I64)

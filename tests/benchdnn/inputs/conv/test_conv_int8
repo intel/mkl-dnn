@@ -14,3 +14,9 @@
 --batch=harness_conv_depthwise_int8
 
 --batch=harness_conv_zero_points
+
+# 1x1 with a source zero point.
+--reset --impl=brgconv --dir=FWD_I --dt=u8:s8:f32 --stag=nhwc --dtag=nhwc --attr-zero-points=src:common:3 mb1ic72ih20oc64oh20kh1
+
+# Padded stride-2 3x3 with a source zero point.
+--reset --impl=brgconv --dir=FWD_I --dt=u8:s8:f32 --stag=nhwc --dtag=nhwc --attr-zero-points=src:common:3 mb32ic72ih31iw33oc64oh16ow17kh3kw3sh2sw2ph1pw1

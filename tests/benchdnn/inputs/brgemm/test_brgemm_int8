@@ -89,3 +89,15 @@
 --wtag=ba
 --dt=u8:s8:f32,s8:s8:s32,u8:u8:u8
 --batch=option_set_int8
+
+# Plain A with K=8 and an N tail.
+--reset --dt=u8:s8:s32 --brgemm-attr=use_mmla:1 6x8:8x33
+
+# Packed A with N/K tails, beta, source ZP, and LDB > 64.
+--reset --dt=u8:s8:s32 --beta=1 --attr-zero-points=src:common:3 --brgemm-attr=use_mmla:1+use_mmla_packed_a:1 10x63:63x81
+
+# Plain A with large row offsets and non-unit alpha/beta.
+--reset --dt=u8:s8:f32 --alpha=0.5 --beta=2 --ld=20000:16:16 --brgemm-attr=use_mmla:1 5x16:16x16
+
+# Bias, scales, sum, eltwise, conversion, and destination tails.
+--reset --dt=u8:s8:u8 --bia_dt=f32 --attr-post-ops=sum:2+relu --attr-scales=src:common:0.5+wei:per_oc+dst:common:5 --brgemm-attr=use_mmla:1 5x15:15x17

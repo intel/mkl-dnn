@@ -50,6 +50,122 @@ bool allow_perf_heuristics(const jit_brgemm_conv_conf_t &jcp) {
     if (jcp.wei_plain) return false;
     return true;
 }
+
+bool use_in_loop_compensation(const jit_brgemm_conv_conf_t &jcp) {
+    const auto output_size = static_cast<dim_t>(jcp.mb) * jcp.ngroups * jcp.oc
+            * jcp.od * jcp.oh * jcp.ow;
+    return output_size <= 8192 && jcp.oc < 512;
+}
+
+constexpr int int8_mmla_1x1_min_ic = 64;
+constexpr int int8_mmla_1x1_min_os = 400;
+
+// Require enough convolution work to amortize source-ZP compensation.
+constexpr int int8_mmla_vpad_comp_min_ic = 16;
+constexpr int int8_mmla_vpad_comp_min_boundary_to_table_ratio = 8;
+constexpr dim_t int8_mmla_vpad_comp_min_spatial_work = 160;
+constexpr dim_t int8_mmla_vpad_comp_min_compute_work_per_thread = 192 * 1024;
+
+bool has_sufficient_int8_vpad_comp_work(const jit_brgemm_conv_conf_t &jcp) {
+    // Compare repeated DOT boundary compensation with MMLA table construction.
+    // Both estimates omit OC and fixed kernel factors.
+    const auto boundary_work = static_cast<dim_t>(jcp.mb) * jcp.oh * jcp.ic;
+    const auto table_work = static_cast<dim_t>(jcp.ic) + jcp.ow;
+    const auto spatial_work = static_cast<dim_t>(jcp.mb) * jcp.oh * jcp.ow;
+    const auto compute_work = spatial_work * jcp.ic * jcp.oc;
+    return jcp.ic >= int8_mmla_vpad_comp_min_ic
+            && boundary_work
+            >= int8_mmla_vpad_comp_min_boundary_to_table_ratio * table_work
+            && spatial_work >= int8_mmla_vpad_comp_min_spatial_work
+            && brgemm_utils::has_sufficient_mmla_work(compute_work, jcp.nthr,
+                    int8_mmla_vpad_comp_min_compute_work_per_thread);
+}
+
+bool use_mmla(const jit_brgemm_conv_conf_t &jcp,
+        const memory_desc_t &weights_md, bool is_1x1_path) {
+    const bool is_bf16 = everyone_is(bf16, jcp.src_dt, jcp.wei_dt);
+    const bool is_int8 = jcp.src_dt == u8 && jcp.wei_dt == s8;
+    if (!one_of(jcp.isa, sve_128, sve_256) || !(is_bf16 || is_int8))
+        return false;
+    if (is_bf16 && (!mayiuse(sve) || !mayiuse_bf16())) return false;
+    if (is_int8 && !mayiuse_sve_i8mm()) return false;
+
+    // Packing expects ungrouped 2D weights.
+    if (jcp.ndims != 4 || weights_md.ndims != jcp.ndims) return false;
+    if (jcp.prop_kind != forward_inference
+            || !everyone_is(0, jcp.dilate_h, jcp.dilate_w))
+        return false;
+
+    // Match the driver; is_1x1 excludes positive padding.
+    if (jcp.is_1x1 != is_1x1_path) return false;
+    if (is_1x1_path) {
+        if (!everyone_is(1, jcp.stride_h, jcp.stride_w)) return false;
+    } else {
+        // The 3x3 path supports equal strides of 1/2. Horizontal padding 0/1
+        // keeps spans and one-row M tails valid.
+        if (!everyone_is(3, jcp.kh, jcp.kw) || !one_of(jcp.stride_h, 1, 2)
+                || jcp.stride_w != jcp.stride_h || !one_of(jcp.l_pad, 0, 1)
+                || !one_of(jcp.r_pad, 0, 1))
+            return false;
+    }
+
+    // Convolution packing requires full N tiles and K8-aligned input channels.
+    const int n_block = brgemm_utils::mmla_n_block(jcp.isa);
+    const int k_block = brgemm_utils::mmla_wei_k_block();
+    if (jcp.ic % k_block || jcp.oc % n_block) return false;
+
+    const bool horizontal_pad = jcp.l_pad > 0 || jcp.r_pad > 0;
+    if (is_int8 && !is_1x1_path && jcp.src_zero_point) {
+        const bool vertical_pad = jcp.t_pad > 0 || jcp.b_pad > 0;
+        // Small padded outputs use in-loop compensation, unsupported by MMLA.
+        if (vertical_pad && use_in_loop_compensation(jcp)) return false;
+        // Horizontal-only padding has no driver compensation buffer.
+        if (horizontal_pad && !vertical_pad) return false;
+    }
+
+    auto want_weights_md = weights_md;
+    if (is_bf16) {
+        const auto wei_tag = n_block == 16 ? OhwI2i16o4i : OhwI2i32o4i;
+        CHECK_BOOL(memory_desc_init_by_tag(want_weights_md, wei_tag));
+    } else {
+        CHECK_BOOL(
+                brgemm_utils::init_mmla_wei_md(want_weights_md, 1, 0, n_block));
+        want_weights_md.extra = weights_md.extra;
+    }
+    // Apply utilization checks only when weights are 'any'.
+    if (weights_md.format_kind != format_kind::any)
+        return weights_md == want_weights_md;
+
+    const double work = static_cast<double>(jcp.mb) * jcp.os * jcp.oc * jcp.ic
+            * jcp.kh * jcp.kw;
+    if (is_bf16)
+        return brgemm_utils::has_sufficient_bf16_mmla_work(
+                work, jcp.nthr, n_block);
+    if (is_1x1_path) {
+        if (jcp.ic >= int8_mmla_1x1_min_ic && jcp.os >= int8_mmla_1x1_min_os)
+            return true;
+        return jcp.os >= brgemm_utils::mmla_bd_blk()
+                && jcp.ic >= brgemm_utils::mmla_rd_block(jcp.src_dsz)
+                && brgemm_utils::has_sufficient_mmla_work(
+                        work, jcp.nthr, 8. * 1024 * n_block);
+    }
+    return !jcp.src_zero_point || !horizontal_pad
+            || has_sufficient_int8_vpad_comp_work(jcp);
+}
+
+// MMLA convolution requires packed weights, full N tiles and K8-aligned
+// reductions. BRGEMM masks for irregular spatial rows and internally padded
+// input channels are unsupported. The 3x3 path uses virtual padding.
+bool native_mmla_blocking_ok(
+        const jit_brgemm_conv_conf_t &jcp, bool require_vpad) {
+    const int n_block = brgemm_utils::mmla_n_block(jcp.isa);
+    const int k_block = brgemm_utils::mmla_wei_k_block();
+    return IMPLICATION(require_vpad, jcp.exec_type == exec_vpad)
+            && !jcp.use_M_mask && !jcp.wei_plain && !jcp.is_ic_padded
+            && jcp.oc_block == n_block && jcp.N == n_block && jcp.N_tail == 0
+            && jcp.K % k_block == 0 && jcp.K_tail % k_block == 0
+            && jcp.ic_block % k_block == 0;
+}
 } // namespace
 
 namespace brgemm_convolution_utils {
@@ -157,7 +273,20 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
         }
     } else {
         jcp.LDB = jcp.oc_block;
-        if (jcp.oc_block == 64) {
+        if (jcp.use_mmla) {
+            if (jcp.wei_dt == data_type::bf16) {
+                wei_tag = jcp.oc_block == 16 ? OhwI2i16o4i : OhwI2i32o4i;
+            } else {
+                auto want_weights_md = weights_md;
+                CHECK(brgemm_utils::init_mmla_wei_md(
+                        want_weights_md, 1, 0, jcp.oc_block));
+                want_weights_md.extra = weights_md.extra;
+                if (weights_d.format_kind() == format_kind::any)
+                    weights_md = want_weights_md;
+                else if (weights_md != want_weights_md)
+                    return status::unimplemented;
+            }
+        } else if (jcp.oc_block == 64) {
             if (is_3d) {
                 switch (vnni_granularity) {
                     case 1: wei_tag = with_groups ? gOdhwi64o : Odhwi64o; break;
@@ -466,7 +595,10 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
     const bool any_eligible = is_any_eligible(jcp);
     CHECK(init_tag(jcp.src_tag, src_md, src_d, src_tag, any_eligible));
     CHECK(init_tag(jcp.dst_tag, dst_md, dst_d, dst_tag, any_eligible));
-    CHECK(init_tag(jcp.wei_tag, weights_md, weights_d, wei_tag, true));
+    if (jcp.use_mmla && jcp.wei_dt == data_type::s8)
+        jcp.wei_tag = format_tag::undef;
+    else
+        CHECK(init_tag(jcp.wei_tag, weights_md, weights_d, wei_tag, true));
 
     return status::success;
 }
@@ -559,6 +691,7 @@ struct brg_blocking_t : public jit_brgemm_conv_conf_t {
 
     void update_blocks();
     bool fast_check_oc_block() const;
+    float get_ur_eff() const;
     float est_eff();
     void iterate_ker_block(brg_blocking_t &best_brgb, int kd_block,
             int kh_block, bool maybe_use_buffer, int max_ow_block_thr);
@@ -725,7 +858,15 @@ status_t brg_blocking_t::estimate_brgemm_ur() {
     CHECK(brgemm_utils::init_brgemm_conf(&brg, isa, brgemm_addr, src_dt, wei_dt,
             brgemm_row_major, alpha, beta, LDA, LDB, LDC, vM, vN, vK, nullptr,
             is_bf32));
-    CHECK(brgemm_utils::brgemm_blocking(&brg));
+    if (use_mmla) {
+        brgemm_attr_t brgattr;
+        brgemm_utils::set_mmla_attr(brgattr, vM);
+        brgattr.max_top_vpad
+                = exec_type == exec_vpad ? nstl::max(l_pad, r_pad) : 0;
+        brgattr.max_bottom_vpad = brgattr.max_top_vpad;
+        CHECK(brgemm_desc_set_attr(&brg, brgattr));
+    }
+    CHECK(brgemm_desc_finalize(&brg));
     ur = brg.bd_block;
     ur_block = brg.bd_block;
     ur_block_tail = 0;
@@ -771,9 +912,9 @@ status_t brg_blocking_t::get_brgemm_ur(
                 CHECK(brgemm_utils::init_brgemm_conf(&brg, isa, brg_type,
                         src_dt, wei_dt, brgemm_row_major, alpha, vbeta, LDA,
                         LDB, LDC, vM, vN, vK, strides_ptr, is_bf32));
-                CHECK(brgemm_utils::brgemm_blocking(&brg));
 
                 brgemm_attr_t brgattr;
+                if (use_mmla) brgemm_utils::set_mmla_attr(brgattr, vM);
                 brgattr.max_bs = max_batch;
                 max_vpad = exec_type == exec_vpad ? nstl::max(l_pad, r_pad) : 0;
                 brgattr.max_top_vpad = max_vpad;
@@ -784,6 +925,10 @@ status_t brg_blocking_t::get_brgemm_ur(
                 brg.with_sum = with_sum;
                 CHECK(brgemm_desc_set_postops(
                         &brg, attr, &dst_md, LDD, bia_dt));
+                // Match the driver's compensation per M row for virtual padding.
+                brg.zp_a_compensation_per_m
+                        = use_mmla && src_zero_point && max_vpad > 0;
+                CHECK(brgemm_desc_finalize(&brg));
             }
         }
     }
@@ -837,13 +982,22 @@ bool brg_blocking_t::fast_check_oc_block() const {
     return res;
 }
 
+float brg_blocking_t::get_ur_eff() const {
+    // MMLA executes full row pairs, even in the tail.
+    const auto issued_rows = use_mmla
+            ? (sp_block / ur) * rnd_up(ur, brgemm_utils::mmla_bd_blk())
+                    + rnd_up(sp_block % ur, brgemm_utils::mmla_bd_blk())
+            : rnd_up(sp_block, ur);
+    return static_cast<float>(sp_block) / issued_rows;
+}
+
 float brg_blocking_t::est_eff() {
     const auto ocblock = oc_block / acc_simd_w;
 
     const auto brgemm_microkernel_eff
             = (static_cast<float>(ocblock) * ur) / ((ur + ocblock) * max_regs);
 
-    const auto ur_eff = static_cast<float>(sp_block) / rnd_up(sp_block, ur);
+    const auto ur_eff = get_ur_eff();
     const auto brgemm_eff = squeeze_val(ur
                     * (2.f - nstl::min(1.9f, static_cast<float>(ur) / sp_block))
                     / 64,
@@ -1253,7 +1407,7 @@ float brg_blocking_t::est_eff_1x1() {
 
     const auto brgemm_microkernel_eff
             = (static_cast<float>(ocblock) * ur) / ((ur + ocblock) * max_regs);
-    const auto ur_eff = static_cast<float>(sp_block) / rnd_up(sp_block, ur);
+    const auto ur_eff = get_ur_eff();
     const auto brgemm_eff = squeeze_val(ur
                     * (2.f - nstl::min(1.9f, static_cast<float>(ur) / sp_block))
                     / 64,
@@ -1717,8 +1871,6 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         }
     }
 
-    brg_blocking_t::last_ic_block_size = data_type_vnni_granularity(jcp.wei_dt);
-
     // TODO: optimize depthwise convolutions (for now direct approach is faster)
     const bool is_depthwise
             = with_groups && jcp.ngroups > 1 && everyone_is(1, jcp.ic, jcp.oc);
@@ -1775,6 +1927,11 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             VERBOSE_UNSUPPORTED_ZP_CFG);
 
     jcp.nthr = nthreads;
+    jcp.use_mmla = use_mmla(jcp, weights_md, false);
+    brg_blocking_t::last_ic_block_size = jcp.use_mmla
+            ? brgemm_utils::mmla_wei_k_block()
+            : data_type_vnni_granularity(jcp.wei_dt);
+
     jcp.kh_sets = 1;
     jcp.kw_sets = 1;
     jcp.copy_block_only = false;
@@ -1858,6 +2015,10 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             cur_brgb.get_from_jcp(jcp);
             cur_brgb.oc_block = ocb * jcp.acc_simd_w;
             cur_brgb.nb_oc = utils::div_up(jcp.oc, cur_brgb.oc_block);
+            // Packed weights fix OC blocking to one ISA-sized N tile.
+            if (jcp.use_mmla
+                    && cur_brgb.oc_block != brgemm_utils::mmla_n_block(jcp.isa))
+                continue;
             if (!cur_brgb.fast_check_oc_block()) continue;
             // eff heuristics seem to be wrong for sve_128, <16 is always worse
             if (isa == sve_128 && cur_brgb.oc_block < 16) break;
@@ -1945,6 +2106,9 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     jcp.adjusted_batch_size
             = div_up(rnd_up(jcp.gemm_batch_size * sc_size, P4K), sc_size);
 
+    if (jcp.use_mmla && !native_mmla_blocking_ok(jcp, true))
+        return status::unimplemented;
+
     if (!jcp.wei_plain)
         CHECK(pick_tags(jcp, src_md, weights_md, dst_md, bias_md));
 
@@ -2019,16 +2183,14 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     if (one_of(jcp.src_dt, u8, s8) && !is_ok_large_spatial)
         if (allow_perf_heuristics(jcp)) return status::unimplemented;
 
-    // For padding shapes, we calculate the comp along with the computation
-    // inside brgemm kernel when output size is small to get optimal perf
-    // Or we calculate the comp using brgemm_coomp_pad kernel
-    const auto output_sz = static_cast<dim_t>(jcp.mb) * jcp.ngroups * jcp.oc
-            * jcp.od * jcp.oh * jcp.ow;
+    // Use in-loop compensation for small outputs and a separate kernel otherwise.
     const auto comp_with_pads
             = (jcp.src_zero_point || jcp.s8s8_compensation_required)
             && IMPLICATION(jcp.exec_type == exec_vpad, with_pad);
-    jcp.req_brg_comp_pad = comp_with_pads && output_sz <= 8192 && jcp.oc < 512;
+    jcp.req_brg_comp_pad = comp_with_pads && use_in_loop_compensation(jcp);
     jcp.req_cal_comp_pad = comp_with_pads && !jcp.req_brg_comp_pad;
+    jcp.use_mmla_vpad_comp = jcp.use_mmla && jcp.src_zero_point
+            && jcp.req_cal_comp_pad && jcp.max_vpad > 0;
 
     // estimate the number of kernel range combination for compensation
     const auto kd_cnt = 1 + utils::div_up(abs(jcp.f_pad), jcp.dilate_d + 1)
@@ -2044,9 +2206,11 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
     jcp.ker_ranges_size = jcp.exec_type == exec_base ? kd_cnt * kh_cnt * kw_cnt
                                                      : kd_cnt * kh_cnt;
-    jcp.comp_a_buffer_size
+    const auto comp_ow_size = jcp.use_mmla_vpad_comp ? jcp.ow : 1;
+    jcp.comp_a_buffer_size = jcp.ngroups * jcp.nb_oc * jcp.ker_ranges_size
+            * comp_ow_size * jcp.oc_block;
+    jcp.s8s8_comp_buffer_size
             = jcp.ngroups * jcp.nb_oc * jcp.ker_ranges_size * jcp.oc_block;
-    jcp.s8s8_comp_buffer_size = jcp.comp_a_buffer_size;
 
     // enable ununroll_bd_loop for big shapes to reduce kernel sizes
     jcp.ununroll_bd_loop
@@ -2075,6 +2239,11 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     const memory_desc_wrapper bias_d(&bias_md);
 
     if (!jcp.is_1x1) return status::unimplemented;
+
+    jcp.use_mmla = use_mmla(jcp, weights_md, true);
+    brg_blocking_t::last_ic_block_size = jcp.use_mmla
+            ? brgemm_utils::mmla_wei_k_block()
+            : data_type_vnni_granularity(jcp.wei_dt);
 
     using namespace data_type;
     // ===================== blocking =================================
@@ -2111,6 +2280,10 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         cur_brgb.get_from_jcp(jcp);
         cur_brgb.oc_block = ocb * min_oc_block;
         cur_brgb.nb_oc = utils::div_up(jcp.oc, cur_brgb.oc_block);
+        // Packed weights fix OC blocking to one ISA-sized N tile.
+        if (jcp.use_mmla
+                && cur_brgb.oc_block != brgemm_utils::mmla_n_block(jcp.isa))
+            continue;
 
         // eff heuristics seem to be wrong for sve_128, <16 is always worse
         if (isa == sve_128 && cur_brgb.oc_block < 16) break;
@@ -2158,6 +2331,9 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     // The following condition checks for shapes where down-convert execution
     // in brgemm fails
     if (jcp.is_bf32 && jcp.ic < 64 && jcp.ic % 32 != 0)
+        return status::unimplemented;
+
+    if (jcp.use_mmla && !native_mmla_blocking_ok(jcp, false))
         return status::unimplemented;
 
     if (jcp.use_uker)

@@ -185,8 +185,6 @@ status_t brgemm_desc_init(brgemm_desc_t *brg, cpu_isa_t isa,
                 false, brg->is_int8, brg->is_bf16, brg->is_f32, brg->is_f16))
         return status::unimplemented;
 
-    CHECK(brgemm_blocking(brg));
-
     return status::success;
 }
 
@@ -209,8 +207,6 @@ status_t brdgmm_desc_init(brgemm_desc_t *brg, cpu_isa_t isa,
     if (utils::everyone_is(
                 false, brg->is_int8, brg->is_bf16, brg->is_f32, brg->is_f16))
         return status::unimplemented;
-
-    CHECK(brdgmm_blocking(brg));
 
     return status::success;
 }
@@ -355,13 +351,6 @@ status_t brgemm_desc_set_postops(brgemm_desc_t *brg,
     init_zp_type(brg->zp_type_b, DNNL_ARG_WEIGHTS);
     init_zp_type(brg->zp_type_c, DNNL_ARG_DST);
 
-    // src zero points require additional register in brgemm kernel
-    const bool is_zp_src = brg->zp_type_a != brgemm_broadcast_t::none;
-    if (brg->is_dgmm) {
-        if (is_zp_src) CHECK(brdgmm_blocking(brg));
-    } else if (is_zp_src || brg->is_bf16_emu)
-        CHECK(brgemm_blocking(brg));
-
     return status::success;
 }
 
@@ -395,54 +384,6 @@ status_t brgemm_desc_set_attr(
 
     if (brgattr.fpmath_mode != fpmath_mode::strict) maybe_try_bf32(brg);
 
-    const int max_vpad = nstl::max(brgattr.max_top_vpad,
-            brgattr.max_bottom_vpad); // these should be equal
-    bool hint_blocking_set
-            = (brgattr.hint_bd_block != 0 || brgattr.hint_bd_block2 != 0
-                    || brgattr.hint_ld_block != 0 || brgattr.hint_ld_block2 != 0
-                    || brgattr.hint_load_nt_A != brgemm_hint_nt_undef
-                    || brgattr.hint_load_nt_B != brgemm_hint_nt_undef);
-    if (brgattr.use_uker || hint_blocking_set || brgattr.bd_mask_level
-            || brgattr.fpmath_mode != fpmath_mode::strict || max_vpad > 0
-            || brgattr.use_mmla) {
-        if (brg->is_dgmm)
-            CHECK(brdgmm_blocking(brg));
-        else
-            CHECK(brgemm_blocking(brg));
-    }
-
-    if (!brg->is_dgmm) {
-        // virtual padding is restricted by bd_block size due to
-        // brgemm_kernel implementation. TODO: remove this restriction
-        const int min_bd_block
-                = brg->bdb_tail > 0 ? brg->bdb_tail : brg->bd_block;
-        if ((max_vpad > min_bd_block)) return status::unimplemented;
-    }
-
-    if (brgattr.use_mmla) {
-        constexpr int max_mmla_acc_regs = 24;
-        constexpr int max_mmla_bd_block = 12;
-        const int compute_ld_blocks = brg->ld_block2;
-        const int acc_regs = rnd_up(brg->bd_block, brgemm_utils::mmla_bd_blk())
-                * compute_ld_blocks;
-        if (brg->rd_block != brgemm_utils::mmla_rd_block()
-                || brg->bd_block > max_mmla_bd_block
-                || !is_mmla_ld_blocks_supported(compute_ld_blocks)
-                || acc_regs > max_mmla_acc_regs)
-            return status::unimplemented;
-    }
-
-    brg->LDA2 = (brgattr.LDA2 != 0) ? brgattr.LDA2 : brg->LDA;
-    brg->LDB2 = (brgattr.LDB2 != 0) ? brgattr.LDB2 : brg->LDB;
-    brg->LDC2_M = (brgattr.LDC2_M != 0) ? brgattr.LDC2_M : brg->LDC;
-    brg->LDC2_N = (brgattr.LDC2_N != 0) ? brgattr.LDC2_N : brg->ld_block;
-
-    brg->is_blocked = (brg->LDA2 != brg->LDA || brg->LDB2 != brg->LDB
-            || brg->LDC2_M != brg->LDC || brg->LDC2_N != brg->ld_block);
-
-    if (!IMPLICATION(brg->is_blocked, brg->layout == brgemm_row_major))
-        return status::invalid_arguments;
-
     brg->prfA = brgattr.hint_prfA;
     brg->prfB = brgattr.hint_prfB;
     brg->prfC = brgattr.hint_prfC;
@@ -460,7 +401,66 @@ status_t brgemm_desc_set_attr(
 }
 
 status_t brgemm_desc_finalize(brgemm_desc_t *brg) {
-    // TODO: implement functionality here similar to corresponding one in x64
+    if (brg == nullptr) return status::invalid_arguments;
+
+    const auto &brgattr = brg->brgattr;
+    const int max_vpad
+            = nstl::max(brgattr.max_top_vpad, brgattr.max_bottom_vpad);
+
+    if (brg->is_dgmm)
+        CHECK(brdgmm_blocking(brg));
+    else
+        CHECK(brgemm_blocking(brg));
+
+    if (!brg->is_dgmm) {
+        // virtual padding is restricted by bd_block size due to
+        // brgemm_kernel implementation. TODO: remove this restriction
+        const int min_bd_block
+                = brg->bdb_tail > 0 ? brg->bdb_tail : brg->bd_block;
+        if ((max_vpad > min_bd_block)) return status::unimplemented;
+    }
+
+    if (brgattr.use_mmla) {
+        constexpr int max_mmla_acc_regs = 24;
+        constexpr int max_mmla_bd_block = 12;
+        const int compute_ld_blocks = brg->ld_block2;
+        const int acc_regs = rnd_up(brg->bd_block, brgemm_utils::mmla_bd_blk())
+                * compute_ld_blocks;
+        if (brg->rd_block != brgemm_utils::mmla_rd_block(brg->typesize_A)
+                || brg->bd_block > max_mmla_bd_block
+                || (brgattr.use_mmla_packed_a
+                        && brg->bd_block % brgemm_utils::mmla_bd_blk()
+                        && brg->bcast_dim > brg->bd_block)
+                || !is_mmla_ld_blocks_supported(compute_ld_blocks)
+                || acc_regs > max_mmla_acc_regs)
+            return status::unimplemented;
+    }
+
+    brg->LDA2 = (brgattr.LDA2 != 0) ? brgattr.LDA2 : brg->LDA;
+    brg->LDB2 = (brgattr.LDB2 != 0) ? brgattr.LDB2 : brg->LDB;
+    brg->LDC2_M = (brgattr.LDC2_M != 0) ? brgattr.LDC2_M : brg->LDC;
+    brg->LDC2_N = (brgattr.LDC2_N != 0) ? brgattr.LDC2_N : brg->ld_block;
+
+    brg->is_blocked = (brg->LDA2 != brg->LDA || brg->LDB2 != brg->LDB
+            || brg->LDC2_M != brg->LDC || brg->LDC2_N != brg->ld_block);
+
+    if (!IMPLICATION(brg->is_blocked, brg->layout == brgemm_row_major))
+        return status::invalid_arguments;
+
+    const bool is_int8_mmla = brgattr.use_mmla && brg->is_int8;
+    const bool has_src_zp = brg->zp_type_a != brgemm_broadcast_t::none;
+    const bool has_per_m_zp_comp = brg->zp_a_compensation_per_m;
+    if (has_per_m_zp_comp
+            && !(is_int8_mmla && has_src_zp && !brg->req_s8s8_compensation
+                    && !brg->req_cal_comp_pads))
+        return status::unimplemented;
+
+    const bool needs_int8_comp_pads = brg->req_cal_comp_pads
+            || (max_vpad > 0 && (brg->req_s8s8_compensation || has_src_zp));
+    // INT8 MMLA uses caller-supplied padding compensation for each M row.
+    if (is_int8_mmla && needs_int8_comp_pads && !has_per_m_zp_comp)
+        return status::unimplemented;
+
     return status::success;
 }
 
@@ -532,6 +532,7 @@ int brgemm_cmp(const brgemm_desc_t &lhs, const brgemm_desc_t &rhs) {
     CMP_BRGEMM_FIELD(is_dgmm);
     CMP_BRGEMM_FIELD(with_sum);
     CMP_BRGEMM_FIELD(req_cal_comp_pads);
+    CMP_BRGEMM_FIELD(zp_a_compensation_per_m);
 
     CMP_BRGEMM_FIELD(sum_scale);
     CMP_BRGEMM_FIELD(sum_zp);

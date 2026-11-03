@@ -668,6 +668,9 @@ struct jit_brgemm_conv_conf_t {
     bool brgemm_bd_loop_innermost;
 
     bool use_uker;
+    bool use_mmla {false};
+    // Source-ZP compensation per output column for virtual padding.
+    bool use_mmla_vpad_comp {false};
     bool var_bs {false};
     bool use_interleave_stores;
     brgemm_kernel_prefetching_t hint_prefetching;

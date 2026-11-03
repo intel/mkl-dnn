@@ -150,10 +150,10 @@ struct DNNL_API brgemm_attr_t {
     // use_interleave_stores is a value that determines whether to use the
     // interleave stores or not
     bool use_interleave_stores;
-    // use_mmla requests the mmla compute path explicitly
-    // currently supported mmla is only bf16 mmla
+    // use_mmla requests the MMLA compute path explicitly.
+    // Supported inputs are bf16 x bf16 and u8 x s8.
     bool use_mmla;
-    // use_mmla_packed_a expects A to use the mmla pack
+    // use_mmla_packed_a expects A to use the MMLA packed layout.
     bool use_mmla_packed_a;
     impl::fpmath_mode_t fpmath_mode = fpmath_mode::strict;
     bool b_is_vnni {false};
@@ -224,6 +224,9 @@ struct brgemm_desc_t {
     bool is_dgmm = false; // set to true in brdgmm_desc_init
     bool with_sum = false;
     bool req_cal_comp_pads = false;
+    // Use an M-by-N s32 compensation table with row stride LDB elements.
+    // The kernel applies the source zero-point value.
+    bool zp_a_compensation_per_m = false;
 
     float sum_scale = 0.0f;
     int32_t sum_zp = 0;

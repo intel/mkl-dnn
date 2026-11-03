@@ -382,6 +382,7 @@ status_t brdgmm_dw_convolution_fwd_t<isa>::pd_t::init_brdgmm_conf() {
                 LDA, LDC, M, N, &strides));
         CHECK(brgemm_desc_set_attr(&bcp, brg_attr));
         CHECK(brgemm_desc_set_postops(&bcp, attr(), dst_md(), LDD, jcp.bia_dt));
+        CHECK(brgemm_desc_finalize(&bcp));
         ++idx;
         return status::success;
     };

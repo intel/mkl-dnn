@@ -265,6 +265,11 @@ inline bool mayiuse_bf16() {
     return cpu().isBf16Supported();
 }
 
+inline bool mayiuse_sve_i8mm() {
+    using namespace Xbyak_aarch64::util;
+    return mayiuse(sve) && cpu().has(XBYAK_AARCH64_HWCAP_SVEI8MM);
+}
+
 inline bool mayiuse_f16() {
     using namespace Xbyak_aarch64::util;
     return cpu().isF16Supported();

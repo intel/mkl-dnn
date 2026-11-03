@@ -86,6 +86,47 @@ void init_common_conf(brgemm_desc_t *brg, brgemm_batch_kind_t type, float alpha,
 
 namespace brgemm_utils {
 
+status_t init_mmla_wei_md(
+        memory_desc_t &md, int k_dim, int n_dim, int n_block) {
+    if (!utils::one_of(md.data_type, data_type::bf16, data_type::s8))
+        return status::invalid_arguments;
+
+    if (k_dim < 0 || k_dim >= md.ndims || n_dim < 0 || n_dim >= md.ndims
+            || k_dim == n_dim || n_block <= 0)
+        return status::invalid_arguments;
+
+    const int k_chunk
+            = mmla_rd_chunk_elems(types::data_type_size(md.data_type));
+    blocking_desc_t blk {};
+    // memory_desc_init_by_blocking_desc interprets strides as ordering ranks.
+    int order = md.ndims;
+    for (int d = 0; d < md.ndims; ++d)
+        if (d != k_dim) blk.strides[d] = order--;
+    blk.strides[k_dim] = order;
+    if (md.data_type == data_type::s8) {
+        blk.inner_nblks = 2;
+        blk.inner_blks[0] = n_block;
+        blk.inner_idxs[0] = n_dim;
+        blk.inner_blks[1] = k_chunk;
+        blk.inner_idxs[1] = k_dim;
+    } else {
+        blk.inner_nblks = 3;
+        blk.inner_blks[0] = mmla_rd_chunks_per_block();
+        blk.inner_idxs[0] = k_dim;
+        blk.inner_blks[1] = n_block;
+        blk.inner_idxs[1] = n_dim;
+        blk.inner_blks[2] = k_chunk;
+        blk.inner_idxs[2] = k_dim;
+    }
+    return memory_desc_init_by_blocking_desc(md, blk);
+}
+
+void set_mmla_attr(brgemm_attr_t &attr, dim_t M) {
+    attr.use_mmla = true;
+    attr.hint_ld_block2 = mmla_default_ld_block2_plain_a();
+    attr.hint_bd_block = nstl::min<dim_t>(mmla_default_bd_block_plain_a(), M);
+}
+
 bool can_dispatch_uker(const brgemm_desc_t *brg) {
     return false;
 }
@@ -93,11 +134,13 @@ void maybe_try_bf32(brgemm_desc_t *brg) {
     //
 }
 
-// only bf16 mmla is currently supported
 status_t validate_mmla_compute(const brgemm_desc_t &brg) {
-    const bool is_valid = brg.is_bf16 && !brg.is_bf16_emu && !brg.is_dgmm
-            && brg.is_row_major()
-            && utils::one_of(brg.isa_impl, sve_128, sve_256);
+    const bool isa_ok = utils::one_of(brg.isa_impl, sve_128, sve_256);
+    const bool is_bf16_mmla = brg.is_bf16 && !brg.is_bf16_emu;
+    const bool is_int8_mmla = brg.is_int8 && brg.dt_a == data_type::u8
+            && brg.dt_b == data_type::s8 && mayiuse_sve_i8mm();
+    const bool is_valid = isa_ok && (is_bf16_mmla || is_int8_mmla)
+            && !brg.is_dgmm && brg.is_row_major();
     return is_valid ? status::success : status::unimplemented;
 }
 
@@ -182,7 +225,8 @@ int default_mmla_ld_block2(const brgemm_desc_t *brg) {
     constexpr int heur_max_ld_block2 = 6;
 
     if (brg->bcast_dim <= 2) return 12;
-    if (!brg->brgattr.use_mmla_packed_a && brg->bcast_dim > 8) return 4;
+    if (!brg->brgattr.use_mmla_packed_a && brg->bcast_dim > 8)
+        return mmla_default_ld_block2_plain_a();
 
     const int bd_block = nstl::min(brg->bcast_dim, 8);
     const int bd_pairs = utils::div_up(bd_block, mmla_bd_blk());
@@ -222,8 +266,6 @@ status_t brgemm_blocking(brgemm_desc_t *brg) {
     const int min_block = 1;
     const int max_vpad = nstl::max(
             brg->brgattr.max_top_vpad, brg->brgattr.max_bottom_vpad);
-    const int mmla_max_bd_block = 8;
-
     auto calc_max_bcast_block = [&](int try_ld_block2) {
         const int adj_ld_block2 = calculate_ldb_params(brg, try_ld_block2);
         return calculate_max_bcast_block(brg, adj_ld_block2);
@@ -234,21 +276,19 @@ status_t brgemm_blocking(brgemm_desc_t *brg) {
                 ? brg->brgattr.hint_ld_block2
                 : default_mmla_ld_block2(brg);
         calculate_ldb_params(brg, ld_block2);
-        auto set_mmla_blocking = [&]() {
-            brg->bdb = brg->bcast_dim / brg->bd_block;
-            brg->bdb_tail = brg->bcast_dim % brg->bd_block;
-            brg->rd_block = mmla_rd_block();
-            brg->rdb = brg->reduce_dim / brg->rd_block;
-            brg->rdb_tail = brg->reduce_dim % brg->rd_block;
-            brg->is_M_tail = false;
-        };
+        const int default_bd_block
+                = brg->brgattr.use_mmla_packed_a || brg->bcast_dim <= 8
+                ? 8
+                : mmla_default_bd_block_plain_a();
         brg->bd_block = brg->brgattr.hint_bd_block != 0
                 ? brg->brgattr.hint_bd_block
-                : (brg->brgattr.use_mmla_packed_a
-                                          || brg->bcast_dim <= mmla_max_bd_block
-                                  ? nstl::min(brg->bcast_dim, mmla_max_bd_block)
-                                  : nstl::min(brg->bcast_dim, 6));
-        set_mmla_blocking();
+                : nstl::min(brg->bcast_dim, default_bd_block);
+        brg->bdb = brg->bcast_dim / brg->bd_block;
+        brg->bdb_tail = brg->bcast_dim % brg->bd_block;
+        brg->rd_block = mmla_rd_block(brg->typesize_A);
+        brg->rdb = brg->reduce_dim / brg->rd_block;
+        brg->rdb_tail = brg->reduce_dim % brg->rd_block;
+        brg->is_M_tail = false;
         return status::success;
     }
 
@@ -298,13 +338,6 @@ status_t brdgmm_blocking(brgemm_desc_t *brg) {
 
     if (brg->isa_impl == isa_undef) return status::unimplemented;
 
-    const int requires_permute_dst_vmm = brg->isa_impl == sve_512
-            && jit_brdgmm_kernel_base_t::is_fast_vnni_int8(*brg);
-    const int max_vregs = isa_num_vregs(brg->isa_impl);
-    const int compute_vregs = 2; // b_vmm + a_vmm
-    const int aux_vregs
-            = nstl::max(brg->is_bf16_emu * 4, 2) + requires_permute_dst_vmm;
-    const int max_acc_vmms = max_vregs - aux_vregs - compute_vregs;
     const int simd_w = isa_max_vlen(brg->isa_impl) / brg->typesize_C;
 
     auto &M = brg->bcast_dim;
@@ -336,6 +369,14 @@ status_t brdgmm_blocking(brgemm_desc_t *brg) {
     n_block2 = nstl::min(max_n_block2, nb_n_block1);
     nb_n_block2 = div_up(nb_n_block1, n_block2);
     n_block2_tail = nb_n_block1 % n_block2;
+
+    const int requires_permute_dst_vmm = brg->isa_impl == sve_512
+            && jit_brdgmm_kernel_base_t::is_fast_vnni_int8(*brg);
+    const int max_vregs = isa_num_vregs(brg->isa_impl);
+    const int compute_vregs = 2; // b_vmm + a_vmm
+    const int aux_vregs
+            = nstl::max(brg->is_bf16_emu * 4, 2) + requires_permute_dst_vmm;
+    const int max_acc_vmms = max_vregs - aux_vregs - compute_vregs;
 
     m_block1 = 1;
     nb_m_block1 = M / m_block1;

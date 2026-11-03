@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2023-2024 FUJITSU LIMITED
-* Copyright 2025 Arm Ltd. and affiliates
+* Copyright 2025-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -171,6 +171,7 @@ struct brgemm_matmul_conf_t {
     bool transposed_A;
     bool transposed_B;
     bool blocked_B;
+    bool use_mmla {false};
 
     dim_t zp_a_comp_shift_n;
     dim_t zp_a_comp_elems_per_thr;
@@ -209,8 +210,7 @@ struct brgemm_matmul_conf_utils_t {
     }
 
     inline bool get_blocked_B() const {
-        return blocked_B_layouts_allowed
-                && check_b_layout_blocked_by_n(bgmmc.wei_tag);
+        return bgmmc.use_mmla || check_b_layout_blocked_by_n(bgmmc.wei_tag);
     }
 
     inline bool use_buffer_b(bool use_heuristic = true) const {
@@ -254,6 +254,7 @@ struct brgemm_matmul_conf_utils_t {
     }
 
     inline bool check_n_blk_fixed() const { return n_blk_fixed; }
+    inline void set_n_blk_fixed() { n_blk_fixed = true; }
 
     inline bool check_is_transposed(format_tag_t tag) const {
         return tag == transposed_tensor_layout_tag;
@@ -307,7 +308,7 @@ private:
     const format_tag_t blocked_64n_B_layout_tag, blocked_48n_B_layout_tag,
             blocked_32n_B_layout_tag, blocked_16n_B_layout_tag;
     const bool blocked_B_layouts_allowed;
-    const bool n_blk_fixed;
+    bool n_blk_fixed;
     const cpu_isa_t isa_;
 };
 
