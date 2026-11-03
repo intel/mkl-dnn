@@ -359,6 +359,8 @@ inline void jit_uni_dw_conv_fwd_kernel_base_t::init_scratchpad(
     using namespace dnnl::impl::memory_tracking::names;
     if (jcp.with_bias && jcp.bia_dt == data_type::bf16) {
         scratchpad.book<float>(key_conv_bias_bf16_convert_wsp, jcp.oc);
+    } else if (jcp.with_bias && jcp.bia_dt == data_type::f16) {
+        scratchpad.book<float>(key_conv_bias_f16_convert_wsp, jcp.oc);
     } else if (jcp.with_bias && jcp.oc_without_padding != jcp.oc) {
         scratchpad.book<float>(key_conv_padded_bias, jcp.oc);
     }
