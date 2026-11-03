@@ -191,8 +191,14 @@ dnnl_status_t brgemm_attr_init(
 }
 
 #if defined(brg_aarch64)
-std::string mmla_wei_tag(int ld_block, int ld_block2) {
-    return std::string("BA2a") + std::to_string(ld_block * ld_block2) + "b4a";
+std::string mmla_wei_tag(int ld_block, int ld_block2, dnnl_data_type_t wei_dt) {
+    const std::string n_blk = std::to_string(ld_block * ld_block2) + "b";
+    if (dnnl_data_type_size(wei_dt) == 1) return "BA" + n_blk + "8a";
+    return "BA2a" + n_blk + "4a";
+}
+
+std::string mmla_src_tag(dnnl_data_type_t src_dt) {
+    return dnnl_data_type_size(src_dt) == 1 ? "AB2a8b" : "AB2a4b";
 }
 #endif
 
@@ -325,7 +331,7 @@ struct kernel_args_t {
 std::string prepare_src_format_string(const kernel_args_t &kernel_args) {
 #if !defined(DNNL_EXPERIMENTAL_UKERNEL) && defined(brg_aarch64)
     if (kernel_args.use_mmla_ && kernel_args.use_mmla_packed_a_)
-        return "AB2a4b";
+        return mmla_src_tag(kernel_args.prb_->src_dt());
 #else
     MAYBE_UNUSED(kernel_args);
 #endif
@@ -414,6 +420,13 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
         SAFE(check_dnnl_status(dnnl_unimplemented, prb, res), WARN);
         return OK;
     }
+    // The reorder into the int8 mmla weights layout cannot compute the src
+    // zero-point compensation yet.
+    if (brgemm_attr.use_mmla
+            && !prb->attr.zero_points.is_def(DNNL_ARG_SRC)) {
+        SAFE(check_dnnl_status(dnnl_unimplemented, prb, res), WARN);
+        return OK;
+    }
 #endif
     SAFE(check_dnnl_status(
                  brgemm_desc_set_attr(&brgemm_desc, brgemm_attr), prb, res),
@@ -429,7 +442,7 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
     kernel_args.use_mmla_ = brgemm_desc.brgattr.use_mmla;
     if (kernel_args.use_mmla_) {
         kernel_args.mmla_wei_tag_
-                = mmla_wei_tag(brgemm_desc.ld_block, brgemm_desc.ld_block2);
+                = mmla_wei_tag(brgemm_desc.ld_block, brgemm_desc.ld_block2, prb->wei_dt());
     }
     kernel_args.use_mmla_packed_a_ = brgemm_desc.brgattr.use_mmla_packed_a;
 #endif
@@ -647,7 +660,13 @@ void init_memory_args(
     // zero point reduction values are needed.
     dnnl::impl::memory_extra_desc_t wei_md_extra {};
     wei_md_extra.flags = dnnl::impl::memory_extra_flags::none;
-    if (prb->get_dt(SRC) == dnnl_s8 && prb->get_dt(WEI) == dnnl_s8) {
+    bool need_s8s8_comp = prb->get_dt(SRC) == dnnl_s8 && prb->get_dt(WEI) == dnnl_s8;
+    #if !defined(DNNL_EXPERIMENTAL_UKERNEL) && defined(brg_aarch64)
+        // SVE int8 (sdot/smmla) handles s8:s8 natively; the mmla weight layout
+        // has no reorder with s8s8 compensation, so do not request it there.
+        if (kernel_args.use_mmla_) need_s8s8_comp = false;
+    #endif
+    if (need_s8s8_comp) {
         wei_md_extra.flags
                 |= dnnl::impl::memory_extra_flags::compensation_conv_s8s8;
         wei_md_extra.compensation_mask = 2; // N dimension

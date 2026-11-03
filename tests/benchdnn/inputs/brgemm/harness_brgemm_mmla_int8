@@ -1,0 +1,23 @@
+--reset
+
+# int8 mmla (smmla / usmmla / ummla): data types, bias, alpha/beta, post-ops
+--dt=u8:s8:s32,s8:s8:s32,u8:u8:s32,u8:s8:f32,s8:s8:f32,u8:s8:u8,s8:s8:s8
+--bia_dt=undef,f32,s32
+--alpha=1,2
+--beta=0,1
+--attr-post-ops=,sum:2,relu
+--brgemm-attr=use_mmla:1,use_mmla:1+use_mmla_packed_a:1
+--batch=shapes_2d_no_tail_int8
+--batch=shapes_2d_tail_n_int8
+--batch=shapes_2d_tail_k_int8
+--batch=shapes_2d_big_k_int8
+--batch=shapes_2d_tail_k_tail_n_int8
+--batch=shapes_2d_big_k_tail_n_int8
+
+# scales are applied after the mmla de-interleave
+--reset
+--dt=u8:s8:f32,s8:s8:u8
+--brgemm-attr=use_mmla:1,use_mmla:1+use_mmla_packed_a:1
+--attr-scales=,src:common:0.5+dst:common:5+wei:per_oc
+--batch=shapes_2d_no_tail_int8
+--batch=shapes_2d_tail_k_tail_n_int8

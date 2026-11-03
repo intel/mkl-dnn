@@ -102,6 +102,14 @@ inline constexpr int mmla_rd_chunks_per_block(int dt_a_sz) {
 
 status_t validate_mmla_compute(const brgemm_desc_t &brg);
 
+status_t validate_mmla_zero_points(const brgemm_desc_t &brg);
+
+// B panel width in ld blocks: hint_ld_block2 if set, else equal to ld_block2.
+inline int mmla_b_panel_ld_block2(const brgemm_desc_t &brg) {
+    return brg.brgattr.hint_ld_block2 > 0 ? brg.brgattr.hint_ld_block2
+                                          : brg.ld_block2;
+}
+
 inline bool is_mmla_ld_blocks_supported(dim_t ld_blocks) {
     return ld_blocks >= 1 && ld_blocks <= 12;
 }

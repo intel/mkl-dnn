@@ -1,6 +1,6 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
-* Copyright 2024 FUJITSU LIMITED
+* Copyright 2024-2026 FUJITSU LIMITED
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -38,6 +38,11 @@ constexpr size_t P4K = 4096;
 
 bool uses_batch_elements(
         brgemm_batch_kind_t brg_type, conv_brgemm_exec_type_t exec_type);
+
+int mmla_bd_block(int oc_block, int M);
+
+void set_mmla_brgattr(
+        const jit_brgemm_conv_conf_t &jcp, int M, brgemm_attr_t &brgattr);
 
 status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         const convolution_desc_t &cd, memory_desc_t &src_md,

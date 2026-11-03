@@ -28,6 +28,7 @@
 #include "common/primitive.hpp"
 #include "common/utils.hpp"
 #include "cpu/aarch64/brgemm/brgemm_containers.hpp"
+#include "cpu/aarch64/jit_brgemm_conv_mmla_pack_kernel.hpp"
 #include "cpu/aarch64/jit_brgemm_conv_trans_kernel.hpp"
 #include "cpu/aarch64/jit_brgemm_post_ops.hpp"
 #include "cpu/cpu_convolution_pd.hpp"
@@ -46,7 +47,11 @@ struct brgemm_convolution_fwd_t : public primitive_t {
         using cpu_convolution_fwd_pd_t::cpu_convolution_fwd_pd_t;
 
         // ------- DECLARE_COMMON_PD_t -----
-        DECLARE_COMMON_PD_T(JIT_IMPL_NAME_HELPER("brgconv:", jcp_.isa, ""),
+        DECLARE_COMMON_PD_T(
+                (jcp_.use_mmla ? JIT_IMPL_NAME_HELPER(
+                                         "brgconv_mmla:", jcp_.isa, "")
+                               : JIT_IMPL_NAME_HELPER(
+                                         "brgconv:", jcp_.isa, "")),
                 brgemm_convolution_fwd_t);
 
         status_t init(const engine_t *engine);
@@ -257,6 +262,21 @@ private:
                     jit_sve_core_brgemm_conv_trans_kernel_t>
             copy_to_pbuffer_;
     std::unique_ptr<jit_generator_t> comp_vpad_pbuffer_;
+
+    // int8 mmla: A packers for the full-K and the K-tail brgemm calls
+    std::unique_ptr<jit_brgemm_conv_mmla_pack_kernel::
+                    jit_brgemm_conv_mmla_pack_kernel_t>
+            mmla_pack_kernels_[2];
+    int mmla_pack_K_[2] = {0, 0};
+
+    void mmla_pack_src(brgemm_thread_ctx_t &btc, int bs, int rows,
+            bool is_k_tail, int kd_b, int kd_e, int kh_b, int kh_e, int iid,
+            int iih, bool mark_dh_padding) const;
+
+    void mmla_compute_wei_sums(const char *weights, int32_t *wsum) const;
+    bool mmla_zp_correction(const brgemm_thread_ctx_t &btc, int rows, int N,
+            int iid, int iih, const dim_t *kw_top_vpads,
+            const dim_t *kw_bottom_vpads, int32_t *corr, dim_t ldc) const;
 
     size_t acc_dsz, bia_dsz, src_dsz, wei_dsz, dst_dsz;
 

@@ -27,6 +27,7 @@
 #include "cpu/aarch64/cpu_barrier.hpp"
 #include "cpu/aarch64/cpu_isa_traits.hpp"
 #include "cpu/aarch64/injectors/jit_uni_postops_injector.hpp"
+#include "cpu/aarch64/jit_brgemm_conv_mmla_pack_kernel.hpp"
 #include "cpu/aarch64/jit_brgemm_conv_utils.hpp"
 #include "cpu/platform.hpp"
 
@@ -87,6 +88,27 @@ bool uses_batch_elements(
     return IMPLICATION(brg_type == brgemm_strd, exec_type == exec_vpad);
 }
 
+int mmla_bd_block(int oc_block, int M) {
+    constexpr int max_acc_regs = 24;
+    constexpr int ld_block = 8; // s32 lanes per vector on sve_256
+    const int ld_block2 = div_up(oc_block, ld_block);
+    // one register pair (2 rows) per ld block; at most 12 rows per bd block
+    const int max_bd = nstl::min(12, 2 * (max_acc_regs / (2 * ld_block2)));
+    return nstl::max(1, nstl::min(M, max_bd));
+}
+
+void set_mmla_brgattr(
+        const jit_brgemm_conv_conf_t &jcp, int M, brgemm_attr_t &brgattr) {
+    brgattr.use_mmla = true;
+    brgattr.use_mmla_packed_a = true;
+    // weights are stored in oc_block-wide panels; the N-tail kernels must use
+    // the same panel stride, so the panel width is always passed as the hint
+    brgattr.hint_ld_block2 = div_up(jcp.oc_block, jcp.acc_simd_w);
+    brgattr.hint_bd_block = mmla_bd_block(jcp.oc_block, M);
+    brgattr.max_top_vpad = 0;
+    brgattr.max_bottom_vpad = 0;
+}
+
 bool post_ops_ok(jit_brgemm_conv_conf_t &jcp, primitive_attr_t &attr,
         const memory_desc_wrapper &dst_d) {
     using namespace injector;
@@ -112,6 +134,17 @@ bool is_groups_ok(jit_brgemm_conv_conf_t &jcp) {
                     jcp.ic % 4 == 0 && jcp.oc % 4 == 0);
 }
 
+static bool int8_large_spatial_ok(
+        const jit_brgemm_conv_conf_t &jcp, int oc_block, int ow_block) {
+    return IMPLICATION(jcp.ic <= 128,
+                   jcp.od * jcp.oh < 100 || jcp.ic * oc_block * ow_block > 8192)
+            && !(jcp.oc == 1024
+                    && utils::everyone_is(1, jcp.od, jcp.oh, jcp.kd, jcp.kh)
+                    && jcp.ow >= 595 && jcp.kw <= 5);
+}
+
+static constexpr int mmla_max_oc_block = 24;
+
 status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
         memory_desc_t &bias_md) {
@@ -123,7 +156,9 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
     const memory_desc_wrapper dst_d(&dst_md);
     const memory_desc_wrapper bias_d(&bias_md);
     const bool with_groups = weights_d.ndims() == src_d.ndims() + 1;
-    const int vnni_granularity = data_type_vnni_granularity(jcp.wei_dt);
+
+    const int vnni_granularity
+            = jcp.use_mmla ? 8 : data_type_vnni_granularity(jcp.wei_dt);
 
     const bool is_1d = jcp.ndims == 3;
     const bool is_2d = jcp.ndims == 4;
@@ -344,6 +379,9 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                     case 4:
                         wei_tag = with_groups ? gOdhwI24o4i : OdhwI24o4i;
                         break;
+                    case 8:
+                        wei_tag = with_groups ? gOdhwI24o8i : OdhwI24o8i;
+                        break;
                     default: return status::unimplemented;
                 }
             } else if (is_1d) {
@@ -351,6 +389,7 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                     case 1: wei_tag = with_groups ? gOwi24o : Owi24o; break;
                     case 2: wei_tag = with_groups ? gOwI24o2i : OwI24o2i; break;
                     case 4: wei_tag = with_groups ? gOwI24o4i : OwI24o4i; break;
+                    case 8: wei_tag = with_groups ? gOwI24o8i : OwI24o8i; break;
                     default: return status::unimplemented;
                 }
             } else {
@@ -363,6 +402,9 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                         break;
                     case 4:
                         wei_tag = with_groups ? gOhwI24o4i : OhwI24o4i;
+                        break;
+                    case 8:
+                        wei_tag = with_groups ? gOhwI24o8i : OhwI24o8i;
                         break;
                     default: return status::unimplemented;
                 }
@@ -385,6 +427,11 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                         else
                             wei_tag = with_groups ? gOdhwI16o4i : OdhwI16o4i;
                         break;
+                    case 8:
+                        assert(!jcp.is_ic_padded);
+                        wei_tag = with_groups ? gOdhwI16o8i : OdhwI16o8i;
+                        break;
+
                     default: return status::unimplemented;
                 }
             } else if (is_1d) {
@@ -401,6 +448,10 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                             wei_tag = with_groups ? gOwI16i16o4i : OwI16i16o4i;
                         else
                             wei_tag = with_groups ? gOwI16o4i : OwI16o4i;
+                        break;
+                    case 8:
+                        assert(!jcp.is_ic_padded);
+                        wei_tag = with_groups ? gOwI16o8i : OwI16o8i;
                         break;
                     default: return status::unimplemented;
                 }
@@ -424,6 +475,10 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                         else
                             wei_tag = with_groups ? gOhwI16o4i : OhwI16o4i;
                         break;
+                    case 8:
+                        assert(!jcp.is_ic_padded);
+                        wei_tag = with_groups ? gOhwI16o8i : OhwI16o8i;
+                        break;
                     default: return status::unimplemented;
                 }
             }
@@ -437,6 +492,9 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                     case 4:
                         wei_tag = with_groups ? gOdhwI8o4i : OdhwI8o4i;
                         break;
+                    case 8:
+                        wei_tag = with_groups ? gOdhwI8o8i : OdhwI8o8i;
+                        break;
                     default: return status::unimplemented;
                 }
             } else if (is_1d) {
@@ -444,6 +502,7 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                     case 1: wei_tag = with_groups ? gOwi8o : Owi8o; break;
                     case 2: wei_tag = with_groups ? gOwI8o2i : OwI8o2i; break;
                     case 4: wei_tag = with_groups ? gOwI8o4i : OwI8o4i; break;
+                    case 8: wei_tag = with_groups ? gOwI8o8i : OwI8o8i; break;
                     default: return status::unimplemented;
                 }
             } else {
@@ -453,6 +512,7 @@ status_t pick_tags(jit_brgemm_conv_conf_t &jcp, memory_desc_t &src_md,
                     case 1: wei_tag = with_groups ? gOhwi8o : Ohwi8o; break;
                     case 2: wei_tag = with_groups ? gOhwI8o2i : OhwI8o2i; break;
                     case 4: wei_tag = with_groups ? gOhwI8o4i : OhwI8o4i; break;
+                    case 8: wei_tag = with_groups ? gOhwI8o8i : OhwI8o8i; break;
                     default: return status::unimplemented;
                 }
             }
@@ -507,6 +567,7 @@ struct brg_blocking_t : public jit_brgemm_conv_conf_t {
         ur = 0;
         ur_block = 0;
         ur_block_tail = 0;
+        mmla_choice_fixed = false;
         eff = 0.f;
         nb_kd = 0;
         nb_kh = 0;
@@ -521,6 +582,7 @@ struct brg_blocking_t : public jit_brgemm_conv_conf_t {
 
     int ur, ur_block, ur_block_tail;
     int nb_kd, nb_kh, nb_kw;
+    bool mmla_choice_fixed;
     int max_regs;
     int bcast_simd;
     float eff;
@@ -562,6 +624,8 @@ struct brg_blocking_t : public jit_brgemm_conv_conf_t {
     float est_eff();
     void iterate_ker_block(brg_blocking_t &best_brgb, int kd_block,
             int kh_block, bool maybe_use_buffer, int max_ow_block_thr);
+    bool mmla_pack_fits() const;
+    bool mmla_threads_ok() const;
     status_t calc_blocks();
 
     bool fast_check_oc_block_1x1() const;
@@ -726,8 +790,8 @@ status_t brg_blocking_t::estimate_brgemm_ur() {
             brgemm_row_major, alpha, beta, LDA, LDB, LDC, vM, vN, vK, nullptr,
             is_bf32));
     CHECK(brgemm_utils::brgemm_blocking(&brg));
-    ur = brg.bd_block;
-    ur_block = brg.bd_block;
+    ur = use_mmla ? mmla_bd_block(oc_block, vM) : brg.bd_block;
+    ur_block = ur;
     ur_block_tail = 0;
 
     return status::success;
@@ -779,6 +843,7 @@ status_t brg_blocking_t::get_brgemm_ur(
                 brgattr.max_top_vpad = max_vpad;
                 brgattr.max_bottom_vpad = max_vpad;
                 brgattr.fpmath_mode = attr->fpmath_.mode_;
+                if (use_mmla) set_mmla_brgattr(*this, vM, brgattr);
                 CHECK(brgemm_desc_set_attr(&brg, brgattr));
 
                 brg.with_sum = with_sum;
@@ -1081,9 +1146,36 @@ float brg_blocking_t::est_eff() {
     return res_eff;
 }
 
+// ow_block choice of the int8 mmla path. The packed source of a call is
+// reused for every oc block a thread computes for the same output row, and
+// every weight byte loaded by the kernel is reused by all M rows, so the
+// widest row block is preferred, subject to:
+//  - the packed source of one call fits in half of L2, and
+//  - with the (row block, oc block) jobs split over the threads, each thread
+//    gets enough oc blocks of a row to reuse its pack (min(nb_oc, 4) jobs)
+//    and the jobs are balanced (>= 80%).
+// Candidates are visited from the widest down; see iterate_ker_block().
+bool brg_blocking_t::mmla_pack_fits() const {
+    const dim_t taps = static_cast<dim_t>(kd_block) * kh_block * kw_block;
+    const dim_t pack_bytes = static_cast<dim_t>(rnd_up(ow_block, 2))
+            * rnd_up(ic_block, 8) * src_dsz * taps;
+    return ow_block <= 2 || pack_bytes <= L2 / 2;
+}
+
+bool brg_blocking_t::mmla_threads_ok() const {
+    const dim_t jobs
+            = static_cast<dim_t>(mb) * ngroups * od * oh * nb_ow * nb_oc;
+    const dim_t per_thr_min = nstl::min(nb_oc, 4);
+    const bool reuse_ok = jobs >= static_cast<dim_t>(nthr) * per_thr_min;
+    const bool balance_ok
+            = static_cast<float>(jobs) / rnd_up(jobs, static_cast<dim_t>(nthr))
+            >= 0.8f;
+    return reuse_ok && balance_ok;
+}
+
 void brg_blocking_t::iterate_ker_block(brg_blocking_t &best_brgb, int kd_block_,
         int kh_block_, bool maybe_use_buffer, int max_ow_block_thr) {
-
+    if (best_brgb.mmla_choice_fixed) return;
     unsigned est_k_amount = ic * oc_block * wei_dsz;
 
     kd_block = kd_block_;
@@ -1148,6 +1240,11 @@ void brg_blocking_t::iterate_ker_block(brg_blocking_t &best_brgb, int kd_block_,
     sp = ow;
     const auto start_sp_block = is_os_blocking ? ow : start_ow_block;
     auto prev_spb = 0;
+    // mmla: widest candidate whose pack fits in L2 (fallback choice)
+    const bool mmla_full_kernel = use_mmla && kd_block == kd && kh_block == kh;
+    constexpr int mmla_min_rows = 16;
+    bool mmla_have_fit = false;
+    brg_blocking_t mmla_first_fit;
     for (auto ns = 1; ns <= sp; ns++) {
         const auto spb = div_up(sp, ns);
         if (spb == prev_spb || spb > start_sp_block) continue;
@@ -1174,6 +1271,26 @@ void brg_blocking_t::iterate_ker_block(brg_blocking_t &best_brgb, int kd_block_,
         eff = est_eff();
 
         if (eff > best_brgb.eff || best_brgb.eff == 0) best_brgb = *this;
+
+        if (mmla_full_kernel) {
+            const bool fits = mmla_pack_fits();
+            if (fits && !mmla_have_fit) {
+                mmla_first_fit = *this;
+                mmla_have_fit = true;
+            }
+            if (fits && mmla_threads_ok()) {
+                best_brgb = *this;
+                best_brgb.mmla_choice_fixed = true;
+                return;
+            }
+            // splitting rows below mmla_min_rows does not pay off: keep the
+            // widest block that fits instead
+            if (ow_block <= mmla_min_rows && mmla_have_fit) break;
+        }
+    }
+    if (mmla_full_kernel && mmla_have_fit) {
+        best_brgb = mmla_first_fit;
+        best_brgb.mmla_choice_fixed = true;
     }
 }
 
@@ -1590,7 +1707,8 @@ brgemm_broadcast_t get_zp_type(const primitive_attr_t &attr, int arg) {
 status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         const convolution_desc_t &cd, memory_desc_t &src_md,
         memory_desc_t &weights_md, memory_desc_t &dst_md,
-        memory_desc_t &bias_md, primitive_attr_t &attr, int nthreads) {
+        memory_desc_t &bias_md, primitive_attr_t &attr, int nthreads,
+        bool allow_mmla) {
     using namespace prop_kind;
 
     brg_blocking_t::L1 = platform::get_per_core_cache_size(1);
@@ -1607,6 +1725,7 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
     jcp = utils::zero<decltype(jcp)>();
     jcp.isa = isa;
+    if (!is_superset(jcp.isa, sve_128)) return status::unimplemented;
 
     jcp.ndims = ndims;
     jcp.prop_kind = cd.prop_kind;
@@ -1684,9 +1803,10 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     const bool is_f32
             = jcp.src_dt == data_type::f32 && jcp.wei_dt == data_type::f32;
 
-    if (one_of(jcp.prop_kind, prop_kind::forward_training,
-                prop_kind::forward_inference)
-            && jcp.ngroups == 1 && jcp.dilate_w == 0 && jcp.kw > 1
+    const bool is_fwd = one_of(jcp.prop_kind, prop_kind::forward_training,
+            prop_kind::forward_inference);
+
+    if (is_fwd && jcp.ngroups == 1 && jcp.dilate_w == 0 && jcp.kw > 1
             && jcp.stride_w > 1 && jcp.l_pad <= 0 && jcp.r_pad <= 0 && is_f32) {
         // such convolutions are equivalent to
         // [iw / k][kw / k][stride_w / k][ic * k]
@@ -1717,8 +1837,6 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         }
     }
 
-    brg_blocking_t::last_ic_block_size = data_type_vnni_granularity(jcp.wei_dt);
-
     // TODO: optimize depthwise convolutions (for now direct approach is faster)
     const bool is_depthwise
             = with_groups && jcp.ngroups > 1 && everyone_is(1, jcp.ic, jcp.oc);
@@ -1741,7 +1859,22 @@ status_t init_jcp(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     jcp.s8s8_compensation_required = is_signed_input && !isa_has_s8s8(jcp.isa);
     jcp.has_int8_vnni = isa_has_s8s8(jcp.isa);
 
-    if (!is_superset(jcp.isa, sve_128)) return status::unimplemented;
+    const bool vpad_ok = div_up(nstl::max(0, jcp.l_pad), jcp.stride_w) < jcp.kw
+            && div_up(nstl::max(0, jcp.r_pad), jcp.stride_w) < jcp.kw;
+
+    const bool mmla_shape_ok = jcp.ow >= 4 && jcp.ic > 4 && jcp.oc >= 8;
+
+    jcp.use_mmla = allow_mmla && is_fwd && isa == sve_256
+            && one_of(jcp.src_dt, u8, s8) && jcp.wei_dt == s8
+            && jcp.ngroups == 1 && !jcp.is_1x1 && !jcp.wei_plain
+            && !jcp.s8s8_compensation_required && vpad_ok
+            && IMPLICATION(allow_perf_heuristics(jcp),
+                    mmla_shape_ok
+                            && int8_large_spatial_ok(
+                                    jcp, mmla_max_oc_block, jcp.ow));
+
+    brg_blocking_t::last_ic_block_size
+            = jcp.use_mmla ? 8 : data_type_vnni_granularity(jcp.wei_dt);
 
     const bool is_bf16
             = jcp.src_dt == data_type::bf16 && jcp.wei_dt == data_type::bf16;
@@ -1816,8 +1949,8 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     using namespace prop_kind;
     if (!mayiuse(isa)) return status::unimplemented;
 
-    CHECK(init_jcp(
-            jcp, isa, cd, src_md, weights_md, dst_md, bias_md, attr, nthreads));
+    CHECK(init_jcp(jcp, isa, cd, src_md, weights_md, dst_md, bias_md, attr,
+            nthreads, true));
 
     const memory_desc_wrapper src_d(&src_md);
     const memory_desc_wrapper weights_d(&weights_md);
@@ -1836,6 +1969,8 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
     jcp.loop_order = (bcast_amount < wei_amount) ? loop_ngcdhw : loop_ndhwgc;
 
+    if (jcp.use_mmla) jcp.loop_order = loop_ndhwgc;
+
     const int min_oc_block = jcp.acc_simd_w;
 
     int selected_ur = 0;
@@ -1851,6 +1986,10 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         // TODO: remove this heuristic
         if (isa == sve_128)
             start_ocb = nstl::max(start_ocb, div_up(16, jcp.acc_simd_w));
+
+        if (jcp.use_mmla)
+            start_ocb = nstl::min(div_up(jcp.oc, jcp.acc_simd_w),
+                    mmla_max_oc_block / jcp.acc_simd_w);
 
         auto finish_ocb = 1;
         for (auto ocb = start_ocb; ocb >= finish_ocb; ocb--) {
@@ -1907,8 +2046,13 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         // to avoid case when both top and bottom virtual padding are non-zero
         // TODO: remove this restriction
         const auto iw_block = (jcp.ow_block - 1) * jcp.stride_w + 1;
-        if (!must_exec_vpad && (iw_block > jcp.iw)) try_exec_type_res = false;
+        if (!must_exec_vpad && !jcp.use_mmla && (iw_block > jcp.iw))
+            try_exec_type_res = false;
     }
+
+    if (jcp.use_mmla && try_exec_type_res == false)
+        return status::unimplemented;
+
     if (try_exec_type_res == false && try_exec_trans) {
         jcp.exec_type = exec_trans;
 
@@ -2009,13 +2153,11 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
 
     // disables the shape with small ic but large spatial
     // or specific large spatial shapes for int8 conv
-    const auto is_ok_large_spatial
-            = IMPLICATION(jcp.ic <= 128,
-                      jcp.od * jcp.oh < 100
-                              || jcp.ic * jcp.oc_block * jcp.ow_block > 8192)
-            && !(jcp.oc == 1024
-                    && utils::everyone_is(1, jcp.od, jcp.oh, jcp.kd, jcp.kh)
-                    && jcp.ow >= 595 && jcp.kw <= 5);
+    // new
+    const auto is_ok_large_spatial = jcp.use_mmla
+            ? int8_large_spatial_ok(jcp, mmla_max_oc_block, jcp.ow)
+            : int8_large_spatial_ok(jcp, jcp.oc_block, jcp.ow_block);
+
     if (one_of(jcp.src_dt, u8, s8) && !is_ok_large_spatial)
         if (allow_perf_heuristics(jcp)) return status::unimplemented;
 
@@ -2029,6 +2171,20 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             && IMPLICATION(jcp.exec_type == exec_vpad, with_pad);
     jcp.req_brg_comp_pad = comp_with_pads && output_sz <= 8192 && jcp.oc < 512;
     jcp.req_cal_comp_pad = comp_with_pads && !jcp.req_brg_comp_pad;
+
+    if (jcp.use_mmla) {
+        /// padded taps are packed as zp rows, so full-filter comp applies
+        jcp.req_brg_comp_pad = false;
+        jcp.req_cal_comp_pad = false;
+
+        using namespace jit_brgemm_conv_mmla_pack_kernel;
+        const int rows = nstl::max(jcp.M, jcp.M_tail);
+        jcp.mmla_pack_buffer_size = rnd_up(jcp.max_batch
+                        * jit_brgemm_conv_mmla_pack_kernel_t::tap_size(
+                                rows, jcp.ic_block),
+                P4K);
+        jcp.mmla_pad_row_size = rnd_up(jcp.ic_block, 64);
+    }
 
     // estimate the number of kernel range combination for compensation
     const auto kd_cnt = 1 + utils::div_up(abs(jcp.f_pad), jcp.dilate_d + 1)
@@ -2066,8 +2222,8 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
     using namespace prop_kind;
     if (!mayiuse(isa)) return status::unimplemented;
 
-    CHECK(init_jcp(
-            jcp, isa, cd, src_md, weights_md, dst_md, bias_md, attr, nthreads));
+    CHECK(init_jcp(jcp, isa, cd, src_md, weights_md, dst_md, bias_md, attr,
+            nthreads, false));
 
     const memory_desc_wrapper src_d(&src_md);
     const memory_desc_wrapper weights_d(&weights_md);
@@ -2232,6 +2388,27 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
                 = static_cast<size_t>(jcp.nthr) * jcp.inp_buffer_mask_size;
         scratchpad.book(key_conv_brgemm_inp_buffer_mask, inp_buffer_mask_size,
                 sizeof(uint8_t), 0, P4K);
+    }
+    if (jcp.use_mmla) {
+        // exec_vpad only, so the exec_trans input buffer key is free
+        assert(jcp.exec_type == exec_vpad);
+        scratchpad.book(key_conv_brgemm_inp_buffer,
+                static_cast<size_t>(jcp.nthr)
+                        * (jcp.mmla_pack_buffer_size + jcp.mmla_pad_row_size),
+                sizeof(char), 0, P4K);
+        if (jcp.src_zero_point) {
+            // used only when the runtime src zero point does not fit the src
+            // data type (see mmla_zp_correction); the padded-compensation
+            // keys are free since the mmla path never uses them
+            assert(!jcp.req_cal_comp_pad && !jcp.s8s8_compensation_required);
+            const size_t ks = static_cast<size_t>(jcp.kd) * jcp.kh * jcp.kw;
+            scratchpad.book(key_brgemm_primitive_zp_comp_a,
+                    jcp.nb_oc * ks * jcp.oc_block, sizeof(int32_t), 0, P4K);
+            const size_t rows = nstl::max(jcp.M, jcp.M_tail);
+            scratchpad.book(key_brgemm_primitive_buffer_comp,
+                    static_cast<size_t>(jcp.nthr) * rows * jcp.LDC,
+                    sizeof(int32_t), 0, P4K);
+        }
     }
     if (jcp.use_buffer) {
         scratchpad.book(key_brgemm_primitive_buffer, jcp.nthr * jcp.buffer_size,

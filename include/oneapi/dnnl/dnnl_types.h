@@ -1085,6 +1085,24 @@ typedef enum {
     dnnl_Abc32a,
     dnnl_aBcdef8b,
     dnnl_aBcdef32b,
+    dnnl_AcB8a8b,
+    dnnl_AcdB8a8b,
+    dnnl_AcdeB8a8b,
+    dnnl_aBdC8b8c,
+    dnnl_aBdeC8b8c,
+    dnnl_aBdefC8b8c,
+    dnnl_AcB16a8b,
+    dnnl_AcdB16a8b,
+    dnnl_AcdeB16a8b,
+    dnnl_aBdC16b8c,
+    dnnl_aBdeC16b8c,
+    dnnl_aBdefC16b8c,
+    dnnl_AcB24a8b,
+    dnnl_AcdB24a8b,
+    dnnl_AcdeB24a8b,
+    dnnl_aBdC24b8c,
+    dnnl_aBdeC24b8c,
+    dnnl_aBdefC24b8c,
 
     /// Just a sentinel, not real memory format tag. Must be changed after new
     /// format tag is added.
@@ -1378,6 +1396,9 @@ typedef enum {
     dnnl_OIw8i16o = dnnl_ABc8b16a,
     dnnl_OwI8i16o = dnnl_AcB8b16a,
     dnnl_OwI8o4i = dnnl_AcB8a4b,
+    dnnl_OwI8o8i = dnnl_AcB8a8b,
+    dnnl_OwI16o8i = dnnl_AcB16a8b,
+    dnnl_OwI24o8i = dnnl_AcB24a8b,
 
     // weights, 4D
     dnnl_IOhw16i16o = dnnl_BAcd16b16a,
@@ -1454,6 +1475,9 @@ typedef enum {
     dnnl_OhwI8i24o = dnnl_AcdB8b24a,
     dnnl_OIhw8i16o = dnnl_ABcd8b16a,
     dnnl_OhwI8i16o = dnnl_AcdB8b16a,
+    dnnl_OhwI8o8i = dnnl_AcdB8a8b,
+    dnnl_OhwI16o8i = dnnl_AcdB16a8b,
+    dnnl_OhwI24o8i = dnnl_AcdB24a8b,
 
     // weights, 5D
     dnnl_Odhwi16o = dnnl_Acdeb16a,
@@ -1529,6 +1553,9 @@ typedef enum {
     dnnl_OdhwI8i24o = dnnl_AcdeB8b24a,
     dnnl_OIdhw8i16o = dnnl_ABcde8b16a,
     dnnl_OdhwI8i16o = dnnl_AcdeB8b16a,
+    dnnl_OdhwI8o8i = dnnl_AcdeB8a8b,
+    dnnl_OdhwI16o8i = dnnl_AcdeB16a8b,
+    dnnl_OdhwI24o8i = dnnl_AcdeB24a8b,
 
     // weights w/ groups, 3D
     dnnl_Goiw16g = dnnl_Abcd16a,
@@ -1580,6 +1607,9 @@ typedef enum {
     dnnl_gOIw4o8i2o = dnnl_aBCd4b8c2b,
     dnnl_goIw4i = dnnl_abCd4c,
     dnnl_goIw32i = dnnl_abCd32c,
+    dnnl_gOwI8o8i = dnnl_aBdC8b8c,
+    dnnl_gOwI16o8i = dnnl_aBdC16b8c,
+    dnnl_gOwI24o8i = dnnl_aBdC24b8c,
 
     // weights w/ groups, 4D
     dnnl_gIOhw16i16o = dnnl_aCBde16c16b,
@@ -1632,6 +1662,9 @@ typedef enum {
     dnnl_gOwhi16o = dnnl_aBedc16b,
     dnnl_goIhw4i = dnnl_abCde4c,
     dnnl_goIhw32i = dnnl_abCde32c,
+    dnnl_gOhwI8o8i = dnnl_aBdeC8b8c,
+    dnnl_gOhwI16o8i = dnnl_aBdeC16b8c,
+    dnnl_gOhwI24o8i = dnnl_aBdeC24b8c,
 
     dnnl_OIw4o8i8o4i = dnnl_ABc4a8b8a4b,
     dnnl_OIhw4o8i8o4i = dnnl_ABcd4a8b8a4b,
@@ -1701,6 +1734,9 @@ typedef enum {
     dnnl_gOIdhw4o8i2o = dnnl_aBCdef4b8c2b,
     dnnl_goIdhw4i = dnnl_abCdef4c,
     dnnl_goIdhw32i = dnnl_abCdef32c,
+    dnnl_gOdhwI8o8i = dnnl_aBdefC8b8c,
+    dnnl_gOdhwI16o8i = dnnl_aBdefC16b8c,
+    dnnl_gOdhwI24o8i = dnnl_aBdefC24b8c,
 
     // weights, 3D
     dnnl_Owi24o = dnnl_Acb24a,
@@ -1750,6 +1786,7 @@ typedef enum {
     dnnl_gwio = dnnl_adcb,
     dnnl_gwIo2i = dnnl_adCb2c,
     dnnl_gwIo4i = dnnl_adCb4c,
+
     // weights, 4D
     dnnl_OhwI24o = dnnl_Acdb24a,
     dnnl_OhwI24o2i = dnnl_AcdB24a2b,
@@ -1796,6 +1833,7 @@ typedef enum {
     dnnl_ghwio = dnnl_adecb,
     dnnl_ghwIo2i = dnnl_adeCb2c,
     dnnl_ghwIo4i = dnnl_adeCb4c,
+  
     // weights, 5D
     dnnl_Odhwi24o = dnnl_Acdeb24a,
     dnnl_OdhwI24o2i = dnnl_AcdeB24a2b,

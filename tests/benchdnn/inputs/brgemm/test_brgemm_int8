@@ -89,3 +89,6 @@
 --wtag=ba
 --dt=u8:s8:f32,s8:s8:s32,u8:u8:u8
 --batch=option_set_int8
+
+# aarch64 int8 mmla coverage
+--batch=harness_brgemm_mmla_int8

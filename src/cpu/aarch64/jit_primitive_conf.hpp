@@ -680,6 +680,11 @@ struct jit_brgemm_conv_conf_t {
     bool is_bf32;
     bool comp_with_vpads;
 
+    bool use_mmla;
+
+    dim_t mmla_pack_buffer_size;
+    dim_t mmla_pad_row_size;
+
     int nthr_mb, nthr_g, nthr_oc_b, nthr_ic_b, nthr_oh;
     bool transform_to_vnni;
     bool has_int8_vnni;

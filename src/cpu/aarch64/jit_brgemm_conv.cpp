@@ -110,9 +110,11 @@ void brgemm_convolution_fwd_t<isa>::pd_t::init_batch(int icc,
                         brg_batch[b_idx].offset.A = (dim_t)A_addr - (dim_t)ptrA;
                         brg_batch[b_idx].offset.B = (dim_t)B_addr - (dim_t)ptrB;
                     }
-                    if (jcp.max_vpad != 0) {
-                        brg_batch[b_idx].vvpad.top = kw_top_vpads[kw];
-                        brg_batch[b_idx].vvpad.bottom = kw_bottom_vpads[kw];
+                    if (jcp.max_vpad != 0 || jcp.use_mmla) {
+                        brg_batch[b_idx].vvpad.top
+                                = kw_top_vpads ? kw_top_vpads[kw] : 0;
+                        brg_batch[b_idx].vvpad.bottom
+                                = kw_bottom_vpads ? kw_bottom_vpads[kw] : 0;
                     }
 
                     k++;
@@ -279,6 +281,9 @@ status_t brgemm_convolution_fwd_t<isa>::pd_t::add_brg_descriptor(int vM,
     brgattr.max_bottom_vpad = jcp_.max_vpad;
     brgattr.fpmath_mode = attr()->fpmath_.mode_;
     brgattr.K_koef = (float)bs / KW;
+
+    if (jcp_.use_mmla)
+        brgemm_convolution_utils::set_mmla_brgattr(jcp_, vbrgM, brgattr);
 
     CHECK(brgemm_desc_set_attr(&brg, brgattr));
 
@@ -835,6 +840,23 @@ status_t brgemm_convolution_fwd_t<isa>::init(engine_t *engine) {
         CHECK(comp_vpad_pbuffer_->create_kernel());
     }
 
+    if (jcp.use_mmla) {
+        using namespace jit_brgemm_conv_mmla_pack_kernel;
+        // K bytes actually read from the source: the full ic block, and the
+        // real remainder of the last ic block (the brgemm K tail is rounded
+        // up to 8, the packer zero-fills the difference)
+        mmla_pack_K_[0] = jcp.ic_block;
+        mmla_pack_K_[1] = jcp.ic % jcp.ic_block;
+        const dim_t lda_bytes = static_cast<dim_t>(jcp.LDA) * src_dsz;
+        for (int i = 0; i < 2; i++) {
+            if (mmla_pack_K_[i] <= 0) continue;
+            CHECK(safe_ptr_assign(mmla_pack_kernels_[i],
+                    new jit_brgemm_conv_mmla_pack_kernel_t(
+                            jcp, mmla_pack_K_[i], lda_bytes)));
+            CHECK(mmla_pack_kernels_[i]->create_kernel());
+        }
+    }
+
     for (const auto &key_value_pair : _pd->batchsizes) {
         const int kd_b = key_value_pair.first[0];
         const int kd_e = key_value_pair.first[1];
@@ -976,7 +998,7 @@ status_t brgemm_convolution_fwd_t<isa>::init(engine_t *engine) {
                 const auto top_vpad = iw >= 0 ? 0 : div_up(abs(iw), SW);
                 const auto bottom_vpad
                         = iw + iiw_l <= IW ? 0 : div_up(iw + iiw_l - IW, SW);
-                assert(top_vpad == 0 || bottom_vpad == 0);
+                assert(jcp.use_mmla || top_vpad == 0 || bottom_vpad == 0);
                 owb_kw_top_vpads[owb * KW + kw] = top_vpad;
                 owb_kw_bottom_vpads[owb * KW + kw] = bottom_vpad;
             }
@@ -1094,6 +1116,15 @@ struct brgemm_convolution_fwd_t<isa>::brgemm_thread_ctx_t {
     const int32_t *dst_zp_vals {nullptr};
     int32_t *s8s8_comp_ptr {nullptr};
     const float *dst_scales {nullptr};
+    // int8 mmla: per-thread packed A buffer, zero-point row and the identity
+    // of the tile currently packed (reused across oc blocks)
+    char *mmla_pack_buf {nullptr};
+    char *mmla_pad_row {nullptr};
+    // out-of-range src zero point: per-tap weight sums and a C buffer
+    bool mmla_zp_corr {false};
+    const int32_t *mmla_wsum {nullptr};
+    int32_t *mmla_corr_buf {nullptr};
+    std::array<int, 9> mmla_packed_key {{-1, -1, -1, -1, -1, -1, -1, -1, -1}};
 };
 
 template <cpu_isa_t isa>
@@ -1153,7 +1184,7 @@ status_t brgemm_convolution_fwd_t<isa>::execute(const exec_ctx_t &ctx) const {
             ? scratchpad.template get<char>(key_brgemm_primitive_buffer)
             : nullptr;
 
-    auto inp_p_buffer = (jcp.exec_type == exec_trans)
+    auto inp_p_buffer = (jcp.exec_type == exec_trans || jcp.use_mmla)
             ? scratchpad.template get<char>(key_conv_brgemm_inp_buffer)
             : nullptr;
     auto inp_p_buffer_mask = (jcp.exec_type == exec_trans)
@@ -1171,6 +1202,23 @@ status_t brgemm_convolution_fwd_t<isa>::execute(const exec_ctx_t &ctx) const {
             : nullptr;
 
     cal_compensation(wei, src_zp_comp_base, s8s8_comp_base);
+
+    // int8 mmla: padded rows are packed with the src zero point when it is
+    // representable in the src data type. Otherwise they are packed with 0 and
+    // the zero-point contribution of the padded taps is added per row.
+    const int32_t mmla_zp = src_zero_points ? src_zero_points[0] : 0;
+    const bool mmla_zp_fits = jcp.src_dt == data_type::u8
+            ? (mmla_zp >= 0 && mmla_zp <= 255)
+            : (mmla_zp >= -128 && mmla_zp <= 127);
+    const bool mmla_zp_corr
+            = jcp.use_mmla && jcp.src_zero_point && !mmla_zp_fits;
+    int32_t *const mmla_wsum = mmla_zp_corr
+            ? scratchpad.template get<int32_t>(key_brgemm_primitive_zp_comp_a)
+            : nullptr;
+    int32_t *const mmla_corr_global = mmla_zp_corr
+            ? scratchpad.template get<int32_t>(key_brgemm_primitive_buffer_comp)
+            : nullptr;
+    if (mmla_zp_corr) mmla_compute_wei_sums(wei, mmla_wsum);
 
     if (needs_oscales || inv_dst_scales_precomputed) {
         parallel(1, [= COMPAT_THIS_CAPTURE](const int, const int) {
@@ -1219,6 +1267,26 @@ status_t brgemm_convolution_fwd_t<isa>::execute(const exec_ctx_t &ctx) const {
 
         brgemm_thread_ctx_t btc(
                 brgemm_ctx, ithr, brg_batch, c_buffer, wsp_tile);
+
+        if (jcp.use_mmla) {
+            char *const mmla_buf = inp_p_buffer
+                    + static_cast<size_t>(ithr)
+                            * (jcp.mmla_pack_buffer_size
+                                    + jcp.mmla_pad_row_size);
+            btc.mmla_pack_buf = mmla_buf;
+            btc.mmla_pad_row = mmla_buf + jcp.mmla_pack_buffer_size;
+            // padded rows hold the src zero point, so that the full-filter
+            // zero-point compensation stays exact at the borders
+            std::memset(btc.mmla_pad_row,
+                    mmla_zp_fits ? static_cast<uint8_t>(mmla_zp) : 0,
+                    jcp.mmla_pad_row_size);
+            if (mmla_zp_corr) {
+                const dim_t rows = nstl::max(jcp.M, jcp.M_tail);
+                btc.mmla_zp_corr = true;
+                btc.mmla_wsum = mmla_wsum;
+                btc.mmla_corr_buf = mmla_corr_global + ithr * rows * jcp.LDC;
+            }
+        }
 
         int last_n = -1;
         int last_g = -1;
@@ -1460,7 +1528,7 @@ inline void brgemm_convolution_fwd_t<isa>::call_brgemm_kernel(
     assert(brg_ker != nullptr);
 
     const auto do_only_pass_comp = !do_postops && jcp.src_zero_point
-            && (jcp.req_brg_comp_pad || jcp.max_vpad > 0);
+            && !jcp.use_mmla && (jcp.req_brg_comp_pad || jcp.max_vpad > 0);
     const auto maybe_do_postops
             = one_of(true, do_postops, do_only_comp, do_only_pass_comp);
 
@@ -1954,6 +2022,130 @@ void brgemm_convolution_fwd_t<isa>::ker_trans(
     }
 }
 
+// Packs the A operand of one brgemm call (already described by btc.brg_batch,
+// with real source addresses and w-padding in vvpad) into the mmla layout and
+// redirects the batch A pointers to the packed taps. The packed tile does not
+// depend on the oc block, so it is reused while the tile stays the same.
+template <cpu_isa_t isa>
+void brgemm_convolution_fwd_t<isa>::mmla_pack_src(brgemm_thread_ctx_t &btc,
+        int bs, int rows, bool is_k_tail, int kd_b, int kd_e, int kh_b,
+        int kh_e, int iid, int iih, bool mark_dh_padding) const {
+    using namespace jit_brgemm_conv_mmla_pack_kernel;
+    const int K = mmla_pack_K_[is_k_tail];
+    const auto *pack_ker = mmla_pack_kernels_[is_k_tail].get();
+    assert(pack_ker != nullptr && K > 0);
+    const dim_t tap_sz = jit_brgemm_conv_mmla_pack_kernel_t::tap_size(rows, K);
+    assert(bs * tap_sz <= pd()->jcp_.mmla_pack_buffer_size);
+
+    const std::array<int, 9> key {
+            {btc.n, btc.g, btc.od, btc.oh, btc.owb, btc.icc, kd_b * KH + kh_b,
+                    (kd_e * KH + kh_e) * 2 + is_k_tail, rows}};
+    if (key != btc.mmla_packed_key) {
+        if (mark_dh_padding) {
+            // taps whose input depth/row lies in padding: every row padded
+            const int k_l = (kd_e - kd_b) * (kh_e - kh_b) * KW;
+            for (int b = 0; b < bs; b++) {
+                const int k = b % k_l;
+                const int kd = kd_b + k / ((kh_e - kh_b) * KW);
+                const int kh = kh_b + (k / KW) % (kh_e - kh_b);
+                const int id = iid + kd * DD;
+                const int ih = iih + kh * DH;
+                if (id < 0 || id >= ID || ih < 0 || ih >= IH) {
+                    btc.brg_batch[b].vvpad.top = rows;
+                    btc.brg_batch[b].vvpad.bottom = 0;
+                }
+            }
+        }
+        jit_brgemm_conv_mmla_pack_args_t p;
+        p.batch = btc.brg_batch;
+        p.dst = btc.mmla_pack_buf;
+        p.pad_row = btc.mmla_pad_row;
+        p.bs = bs;
+        p.rows = rows;
+        (*pack_ker)(&p);
+        btc.mmla_packed_key = key;
+    }
+
+    for (int b = 0; b < bs; b++)
+        btc.brg_batch[b].ptr.A = btc.mmla_pack_buf + b * tap_sz;
+}
+
+// wsum[ocb][tap][oc] = sum over ic of the (mmla-layout) weights
+template <cpu_isa_t isa>
+void brgemm_convolution_fwd_t<isa>::mmla_compute_wei_sums(
+        const char *weights, int32_t *wsum) const {
+    const auto &jcp = pd()->jcp_;
+    const int ocb_sz = jcp.oc_block;
+    const int n_ic8 = div_up(jcp.icp, 8);
+    const dim_t kw_stride = pd()->wei_kw_stride; // elements (s8)
+    const dim_t ocb_stride = pd()->wei_ocb_stride;
+    parallel_nd(jcp.nb_oc, KS, [&](dim_t ocb, dim_t t) {
+        const int8_t *w = reinterpret_cast<const int8_t *>(weights)
+                + ocb * ocb_stride + t * kw_stride;
+        int32_t *dst = wsum + (ocb * KS + t) * ocb_sz;
+        for (int oc = 0; oc < ocb_sz; oc++)
+            dst[oc] = 0;
+        for (int c = 0; c < n_ic8; c++)
+            for (int oc = 0; oc < ocb_sz; oc++) {
+                const int8_t *v = w + (static_cast<dim_t>(c) * ocb_sz + oc) * 8;
+                int32_t s = 0;
+                for (int k = 0; k < 8; k++)
+                    s += v[k];
+                dst[oc] += s;
+            }
+    });
+}
+
+// corr[r][n] = zp * sum over taps t padded for output row r of wsum[t][n].
+// Returns false (corr untouched) when no row of the tile touches padding.
+template <cpu_isa_t isa>
+bool brgemm_convolution_fwd_t<isa>::mmla_zp_correction(
+        const brgemm_thread_ctx_t &btc, int rows, int N, int iid, int iih,
+        const dim_t *kw_top_vpads, const dim_t *kw_bottom_vpads, int32_t *corr,
+        dim_t ldc) const {
+    const auto _pd = pd();
+    const auto &jcp = _pd->jcp_;
+    const int32_t *wsum = btc.mmla_wsum + btc.ocb * KS * jcp.oc_block;
+
+    bool any = false;
+    for_(int kd = 0; kd < KD; kd++)
+    for_(int kh = 0; kh < KH; kh++)
+    for (int kw = 0; kw < KW; kw++) {
+        const int id = iid + kd * DD;
+        const int ih = iih + kh * DH;
+        const bool full = id < 0 || id >= ID || ih < 0 || ih >= IH;
+        const int top = full ? rows : static_cast<int>(kw_top_vpads[kw]);
+        const int bot = full ? 0 : static_cast<int>(kw_bottom_vpads[kw]);
+        if (top == 0 && bot == 0) continue;
+        if (!any) {
+            for (int r = 0; r < rows; r++)
+                for (int n = 0; n < N; n++)
+                    corr[r * ldc + n] = 0;
+            any = true;
+        }
+        const int t
+                = (_pd->maybe_invert(kd, KD) * KH + _pd->maybe_invert(kh, KH))
+                        * KW
+                + _pd->maybe_invert(kw, KW);
+        const int32_t *s = wsum + t * jcp.oc_block;
+        const auto add_rows = [&](int r_b, int r_e) {
+            for (int r = r_b; r < r_e; r++)
+                for (int n = 0; n < N; n++)
+                    corr[r * ldc + n] += s[n];
+        };
+        const int top_e = nstl::min(top, rows);
+        add_rows(0, top_e);
+        add_rows(nstl::max(rows - bot, top_e), rows);
+    }
+    if (!any) return false;
+
+    const int32_t zp = btc.src_zp_val;
+    for (int r = 0; r < rows; r++)
+        for (int n = 0; n < N; n++)
+            corr[r * ldc + n] *= zp;
+    return true;
+}
+
 template <cpu_isa_t isa>
 void brgemm_convolution_fwd_t<isa>::ker_vpad(brgemm_thread_ctx_t &btc) const {
 
@@ -1988,61 +2180,105 @@ void brgemm_convolution_fwd_t<isa>::ker_vpad(brgemm_thread_ctx_t &btc) const {
     const dim_t *const __restrict kw_bottom_vpads
             = owb_kw_bottom_vpads.data() + btc.owb * KW;
 
-    const auto call_brgemm = [&](int brg_idx, int ic_block_s, int n_ic_blocks,
-                                     int comp_ker_offs, bool do_postops) {
+    // int8 mmla with a src zero point: do not clip the d/h filter range at
+    // the borders. Taps that fall into d/h padding are packed as zero-point
+    // rows instead, so every output sees the full filter and the full-filter
+    // zero-point compensation is exact.
+    const bool mmla_full_taps = jcp.use_mmla && jcp.src_zero_point;
+    const int kd_sv = mmla_full_taps ? 0 : kd_s;
+    const int kd_fv = mmla_full_taps ? KD : kd_f;
+    const int kh_sv = mmla_full_taps ? 0 : kh_s;
+    const int kh_fv = mmla_full_taps ? KH : kh_f;
+
+    const auto call_brgemm
+            = [&](int brg_idx, int ic_block_s, int n_ic_blocks,
+                      int comp_ker_offs, bool do_postops, bool is_k_tail,
+                      char *ptr_C_override = nullptr) {
         assert(k_l > 0 && "invalid batch range");
         const auto brg_ker = brgemm_kernels_[brg_idx];
+        char *const ptr_C_call = ptr_C_override ? ptr_C_override : ptr_C;
 
         assert(jcp.brg_type != brgemm_static_offs);
         _pd->init_batch(btc.icc, src_base, wei_base, n_ic_blocks, ic_block_s,
                 iid, iih, iiw_b, kw_top_vpads, kw_bottom_vpads, kd_b, kd_e,
                 kh_b, kh_e, 0, KW, k_l, btc.brg_batch);
 
-        call_brgemm_kernel(btc, brg_ker, k_l * n_ic_blocks, ptr_C, ptr_D,
+        if (jcp.use_mmla)
+            mmla_pack_src(btc, k_l * n_ic_blocks, ow_l, is_k_tail, kd_b, kd_e,
+                    kh_b, kh_e, iid, iih, mmla_full_taps);
+
+        call_brgemm_kernel(btc, brg_ker, k_l * n_ic_blocks, ptr_C_call, ptr_D,
                 bias_w, g_oc, do_postops, comp_ker_offs, false);
     };
 
+    // Out-of-range src zero point: on the first call of a tile, start from
+    // C = zp * sum(padded weights) per row (beta = 1 kernel) instead of 0.
+    // C is the accumulation buffer, or the s32 dst, or -- when the tile is
+    // finished in a single call -- a private buffer that is only read (a
+    // tile spans several calls only with use_buffer or an s32 dst w/o sum).
+    const auto maybe_zp_correction = [&](bool do_init, char *&ptr_C_corr) {
+        ptr_C_corr = nullptr;
+        if (!(btc.mmla_zp_corr && do_init)) return false;
+        const int N = is_oc_tail ? jcp.N_tail : jcp.N;
+        int32_t *corr = nullptr;
+        // dst can only be used as C when it is an s32 accumulator whose old
+        // content is not needed (a sum post-op reads it)
+        if (jcp.use_buffer || (jcp.dst_dt == data_type::s32 && !jcp.with_sum))
+            corr = reinterpret_cast<int32_t *>(ptr_C);
+        else
+            corr = btc.mmla_corr_buf;
+        const bool any = mmla_zp_correction(btc, ow_l, N, iid, iih,
+                kw_top_vpads, kw_bottom_vpads, corr, jcp.LDC);
+        if (any) ptr_C_corr = reinterpret_cast<char *>(corr);
+        return any;
+    };
+
     const auto kdhw_loop = [&]() {
-        const auto do_init = btc.icc == 0 && kd_b == kd_s && kh_b == kh_s;
+        const auto do_init = btc.icc == 0 && kd_b == kd_sv && kh_b == kh_sv;
         const auto do_postwork = _pd->need_postwork
-                && btc.icc == (_pd->ic_chunks - 1) && kd_e == kd_f
-                && kh_e == kh_f;
+                && btc.icc == (_pd->ic_chunks - 1) && kd_e == kd_fv
+                && kh_e == kh_fv;
 
         if (ow_e - ow_b <= 0 && !do_init && !do_postwork) return;
 
         k_l = (kd_e - kd_b) * (kh_e - kh_b) * KW;
         int kernel_idx[2][2];
         kernel_idx[false][false] = _pd->get_brg_idx(
-                ker_i, false, is_oc_tail, false, kd_s, kd_f, kh_s, kh_f);
+                ker_i, false, is_oc_tail, false, kd_sv, kd_fv, kh_sv, kh_fv);
         kernel_idx[true][false] = _pd->get_brg_idx(
-                ker_i, true, is_oc_tail, false, kd_s, kd_f, kh_s, kh_f);
+                ker_i, true, is_oc_tail, false, kd_sv, kd_fv, kh_sv, kh_fv);
         kernel_idx[false][true] = _pd->get_brg_idx(
-                ker_i, false, is_oc_tail, true, kd_s, kd_f, kh_s, kh_f);
+                ker_i, false, is_oc_tail, true, kd_sv, kd_fv, kh_sv, kh_fv);
         kernel_idx[true][true] = _pd->get_brg_idx(
-                ker_i, true, is_oc_tail, true, kd_s, kd_f, kh_s, kh_f);
+                ker_i, true, is_oc_tail, true, kd_sv, kd_fv, kh_sv, kh_fv);
 
         const auto comp_offs = get_comp_offset(
                 btc.g, btc.ocb, ow, kd_b, kd_e, kh_b, kh_e, 0, KW);
 
+        char *ptr_C_corr = nullptr;
+        const bool with_corr = maybe_zp_correction(do_init, ptr_C_corr);
+        const bool init_ker = do_init && !with_corr;
+
         if (nb_ic_b > 0) {
-            const auto brg_idx = kernel_idx[do_init][false];
-            call_brgemm(
-                    brg_idx, 0, nb_ic_b, comp_offs, do_postwork && !is_ic_tail);
+            const auto brg_idx = kernel_idx[init_ker][false];
+            call_brgemm(brg_idx, 0, nb_ic_b, comp_offs,
+                    do_postwork && !is_ic_tail, false, ptr_C_corr);
         }
 
         if (is_ic_tail) {
-            const auto use_init_ker = (do_init && nb_ic_b == 0);
+            const auto use_init_ker = (init_ker && nb_ic_b == 0);
             const auto brg_ic_tail_idx = kernel_idx[use_init_ker][true];
-            call_brgemm(brg_ic_tail_idx, nb_ic_b, 1, comp_offs, do_postwork);
+            call_brgemm(brg_ic_tail_idx, nb_ic_b, 1, comp_offs, do_postwork,
+                    true, nb_ic_b == 0 ? ptr_C_corr : nullptr);
         }
     };
 
-    if (kd_f > kd_s && kh_f > kh_s) {
+    if (kd_fv > kd_sv && kh_fv > kh_sv) {
         // kw values covering full ow_block
-        for (kd_b = kd_s; kd_b < kd_f; kd_b += KD_BLOCK) {
-            kd_e = nstl::min(kd_f, kd_b + KD_BLOCK);
-            for (kh_b = kh_s; kh_b < kh_f; kh_b += KH_BLOCK) {
-                kh_e = nstl::min(kh_f, kh_b + KH_BLOCK);
+        for (kd_b = kd_sv; kd_b < kd_fv; kd_b += KD_BLOCK) {
+            kd_e = nstl::min(kd_fv, kd_b + KD_BLOCK);
+            for (kh_b = kh_sv; kh_b < kh_fv; kh_b += KH_BLOCK) {
+                kh_e = nstl::min(kh_fv, kh_b + KH_BLOCK);
                 kdhw_loop();
             }
         }

@@ -362,6 +362,8 @@ status_t brgemm_desc_set_postops(brgemm_desc_t *brg,
     } else if (is_zp_src || brg->is_bf16_emu)
         CHECK(brgemm_blocking(brg));
 
+    CHECK(validate_mmla_zero_points(*brg));
+
     return status::success;
 }
 
@@ -392,6 +394,8 @@ status_t brgemm_desc_set_attr(
     if (brgattr.use_mmla) CHECK(validate_mmla_compute(*brg));
 
     brg->brgattr = brgattr;
+
+    CHECK(validate_mmla_zero_points(*brg));
 
     if (brgattr.fpmath_mode != fpmath_mode::strict) maybe_try_bf32(brg);
 

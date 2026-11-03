@@ -465,7 +465,7 @@ int jit_brgemm_kernel_t::rdb_B_offset(int ld_block2) const noexcept {
 int jit_brgemm_kernel_t::ldb_B_offset(
         int ld_block2, bool is_tail) const noexcept {
     if (use_mmla) {
-        return mmla_rdb_B_offset(ld_block2)
+        return mmla_rdb_B_offset(brgemm_utils::mmla_b_panel_ld_block2(brg))
                 * div_up(brg.reduce_dim, mmla_rd_block());
     }
 
@@ -874,8 +874,13 @@ void jit_brgemm_kernel_t::apply_alpha_beta(
             }
             LD_MUL_VL(ld1w, vmm_c.s, k_mask, x_addr, offset - base_offset, 4);
 
-            if (brg.beta != 1.f) { fmul(vmm_c.s, vmm_c.s, vmm_beta.s); }
-            fadd(vmm.s, vmm.s, vmm_c.s);
+            if (brg.is_int8 && !dq2ps_required) {
+                add(vmm.s, vmm.s, vmm_c.s);
+            } else {
+                if (brg.is_int8) scvtf(vmm_c.s, P_ALL_ONE / T_m, vmm_c.s);
+                if (brg.beta != 1.f) { fmul(vmm_c.s, vmm_c.s, vmm_beta.s); }
+                fadd(vmm.s, vmm.s, vmm_c.s);
+            }
         }
     }
 }
@@ -1605,6 +1610,15 @@ void jit_brgemm_kernel_t::dot_product(
 void jit_brgemm_kernel_t::mmla(ZReg v_acc, ZReg v_a, ZReg v_b) {
     if (brg.is_bf16) {
         bfmmla(v_acc.s, v_a.h, v_b.h);
+    } else if (brg.is_int8) {
+        if (brg.dt_a == data_type::s8 && brg.dt_b == data_type::s8)
+            smmla(v_acc.s, v_a.b, v_b.b);
+        else if (brg.dt_a == data_type::u8 && brg.dt_b == data_type::u8)
+            ummla(v_acc.s, v_a.b, v_b.b);
+        else if (brg.dt_a == data_type::u8 && brg.dt_b == data_type::s8)
+            usmmla(v_acc.s, v_a.b, v_b.b);
+        else
+            assert(!"unsupported int8 mmla data type combination");
     } else {
         assert(!"unsupported");
     }
@@ -1800,8 +1814,12 @@ void jit_brgemm_kernel_t::mmla_load_plain_a(int rd_chunk, int bd_pair,
         }
     };
 
-    if (!is_full_rd_chunk) set_preg(rd_tail_mask.h, valid_rd_elems, X_TMP_0);
-
+    if (!is_full_rd_chunk) {
+        if (brg.typesize_A == 1)
+            set_preg(rd_tail_mask.b, valid_rd_elems, X_TMP_0);
+        else
+            set_preg(rd_tail_mask.h, valid_rd_elems, X_TMP_0);
+    }
     const auto load_a_row = [&](const ZReg &z, bool row_valid, int row) {
         if (!row_valid) {
             eor(z.d, z.d, z.d);
@@ -1816,7 +1834,10 @@ void jit_brgemm_kernel_t::mmla_load_plain_a(int rd_chunk, int bd_pair,
             if (is_full_rd_chunk) {
                 ld1rd(z.d, P_ALL_ONE / T_z, ptr(X_TMP_1));
             } else {
-                ld1h(z.h, rd_tail_mask / T_z, ptr(X_TMP_1));
+                if (brg.typesize_A == 1)
+                    ld1b(z.b, rd_tail_mask / T_z, ptr(X_TMP_1));
+                else
+                    ld1h(z.h, rd_tail_mask / T_z, ptr(X_TMP_1));
                 dup(z.d, z.d[0]);
             }
         }
@@ -2136,7 +2157,7 @@ void jit_brgemm_kernel_t::ldb_loop(int bd_block2, bool is_bdb_tail,
 
     copy_post_ops_stack_values_to_aux(is_reg_tail);
     const int b_panel_ld_block2
-            = use_mmla && is_reg_tail ? brg.ld_block2 : ld_block2;
+            = use_mmla ? brgemm_utils::mmla_b_panel_ld_block2(brg) : ld_block2;
 
     auto ld_loop_body = [=](int vpad) {
         set_A_B_matrices();

@@ -93,12 +93,42 @@ void maybe_try_bf32(brgemm_desc_t *brg) {
     //
 }
 
-// only bf16 mmla is currently supported
+// bf16 (BFMMLA) and int8 (SMMLA / UMMLA / USMMLA) mmla are supported
 status_t validate_mmla_compute(const brgemm_desc_t &brg) {
-    const bool is_valid = brg.is_bf16 && !brg.is_bf16_emu && !brg.is_dgmm
-            && brg.is_row_major()
+    using namespace data_type;
+    const bool common_ok = !brg.is_dgmm && brg.is_row_major()
             && utils::one_of(brg.isa_impl, sve_128, sve_256);
-    return is_valid ? status::success : status::unimplemented;
+    if (!common_ok) return status::unimplemented;
+
+    if (brg.is_bf16)
+        return brg.is_bf16_emu ? status::unimplemented : status::success;
+    if (brg.is_int8) {
+        const bool dt_ok = (brg.dt_a == s8 && brg.dt_b == s8)
+                || (brg.dt_a == u8 && brg.dt_b == u8)
+                || (brg.dt_a == u8 && brg.dt_b == s8);
+        const bool comp_ok
+                = !brg.req_s8s8_compensation && !brg.req_cal_comp_pads;
+        // int8 mmla is currently tested on sve_256 only
+        const bool isa_ok = brg.isa_impl == sve_256;
+        return (dt_ok && comp_ok && isa_ok) ? status::success
+                                            : status::unimplemented;
+    }
+    return status::unimplemented;
+}
+
+status_t validate_mmla_zero_points(const brgemm_desc_t &brg) {
+    if (!brg.brgattr.use_mmla || !brg.is_int8) return status::success;
+    // Weight zero points would need a per-row (A) sum inside the kernel.
+    if (brg.zp_type_b != brgemm_broadcast_t::none) return status::unimplemented;
+    // Rows hidden by virtual padding are fed as zeros, which is only correct
+    // when the src zero point is zero. With a src zero point the caller must
+    // materialize padding itself (e.g. zp-filled packed A) and disable vpad.
+    const bool has_vpad
+            = brg.brgattr.max_top_vpad > 0 || brg.brgattr.max_bottom_vpad > 0;
+    if (brg.zp_type_a != brgemm_broadcast_t::none
+            && (has_vpad || brg.req_cal_comp_pads))
+        return status::unimplemented;
+    return status::success;
 }
 
 status_t set_isa_impl(brgemm_desc_t *brg) {
