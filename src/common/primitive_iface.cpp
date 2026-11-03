@@ -167,7 +167,7 @@ status_t primitive_execute(
         // supports non-blocking device-measured profiling (GPU runtimes and
         // async threadpool CPU).
         const bool block_on_wait = !stream->is_verbose_profiler_enabled()
-                && stream->impl()->is_syncable();
+                && stream->is_syncable();
 
         if (block_on_wait) stream->wait();
         double start_ms = get_msec();
