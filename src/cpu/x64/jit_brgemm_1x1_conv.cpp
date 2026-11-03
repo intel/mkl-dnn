@@ -320,6 +320,43 @@ status_t brgemm_1x1_convolution_fwd_t<isa>::init(engine_t *engine) {
 }
 
 template <cpu_isa_t isa>
+void brgemm_1x1_convolution_fwd_t<isa>::maybe_precvt_fp8(const exec_ctx_t &ctx,
+        const char *__restrict &src, const char *__restrict &wei) const {
+    const auto &jcp = pd()->jcp_;
+
+    if (!jcp.req_precvt_fp8) return;
+
+    const auto &scratchpad = ctx.get_scratchpad_grantor();
+    auto *src_f16 = scratchpad.template get<char>(key_brgemm_conv_fp8_src);
+    auto *wei_f16 = scratchpad.template get<char>(key_brgemm_conv_fp8_wei);
+    const auto src_nelems = memory_desc_wrapper(pd()->src_md()).nelems(true);
+    const auto wei_nelems
+            = memory_desc_wrapper(pd()->weights_md()).nelems(true);
+
+    parallel(jcp.nthr, [&](int ithr, int nthr) {
+        dim_t start = 0, end = 0;
+        balance211(src_nelems, nthr, ithr, start, end);
+        jit_brgemm_conv_fp8_cvt_kernel_t::ctx_t p;
+        p.src = src + start;
+        p.dst = src_f16 + start * jcp.src_dsz;
+        p.nelems = end - start;
+        (*fp8_src_cvt_)(&p);
+    });
+    parallel(jcp.nthr, [&](int ithr, int nthr) {
+        dim_t start = 0, end = 0;
+        balance211(wei_nelems, nthr, ithr, start, end);
+        jit_brgemm_conv_fp8_cvt_kernel_t::ctx_t p;
+        p.src = wei + start;
+        p.dst = wei_f16 + start * jcp.wei_dsz;
+        p.nelems = end - start;
+        (*fp8_weights_cvt_)(&p);
+    });
+
+    src = src_f16;
+    wei = wei_f16;
+}
+
+template <cpu_isa_t isa>
 void brgemm_1x1_convolution_fwd_t<isa>::maybe_rtus(int ithr,
         const char *__restrict src, char *__restrict inp_buffer,
         uint8_t *__restrict inp_buffer_mask, int g, int n, dim_t icc, dim_t od,
@@ -769,30 +806,7 @@ status_t brgemm_1x1_convolution_fwd_t<isa>::execute_forward_all(
     const auto &jcp = pd()->jcp_;
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
-    if (jcp.req_precvt_fp8) {
-        auto *src_f16 = scratchpad.template get<char>(key_brgemm_conv_fp8_src);
-        auto *wei_f16 = scratchpad.template get<char>(key_brgemm_conv_fp8_wei);
-        const auto src_nelems
-                = memory_desc_wrapper(pd()->src_md()).nelems(true);
-        const auto wei_nelems = weights_d.nelems(true);
-        parallel(jcp.nthr, [&](int ithr, int nthr) {
-            dim_t start = 0, end = 0;
-            balance211(src_nelems, nthr, ithr, start, end);
-            jit_brgemm_conv_fp8_cvt_kernel_t::ctx_t p;
-            p.src = brgemm_ctx.src + start;
-            p.dst = src_f16 + start * jcp.src_dsz;
-            p.nelems = end - start;
-            (*fp8_src_cvt_)(&p);
-
-            balance211(wei_nelems, nthr, ithr, start, end);
-            p.src = brgemm_ctx.weights + start;
-            p.dst = wei_f16 + start * jcp.wei_dsz;
-            p.nelems = end - start;
-            (*fp8_weights_cvt_)(&p);
-        });
-        brgemm_ctx.src = src_f16;
-        brgemm_ctx.weights = wei_f16;
-    }
+    maybe_precvt_fp8(ctx, brgemm_ctx.src, brgemm_ctx.weights);
 
     const void *src_scales
             = CTX_IN_MEM(const void *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);

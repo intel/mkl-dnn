@@ -225,6 +225,10 @@ private:
             dim_t last_g, dim_t last_n, dim_t last_icc, dim_t last_odb,
             dim_t last_ohb, dim_t last_owb) const;
 
+    void maybe_precvt_fp8(const exec_ctx_t &ctx,
+            const char *__restrict &diff_dst,
+            const char *__restrict &wei) const;
+
     status_t add_po_kernel(brgemm_desc_t *bcfg, int ker_idx, bool is_init);
     void add_po_kernels(int i_N, dim_t init_bcast_dim, dim_t po_bcast_dim);
     status_t add_brg_kernel(int brg_idx);

@@ -214,6 +214,9 @@ private:
             const char *__restrict input_weights,
             const char *__restrict &wei) const;
 
+    void maybe_precvt_fp8(const exec_ctx_t &ctx, const char *__restrict &src,
+            const char *__restrict &wei) const;
+
     status_t add_po_kernel(brgemm_desc_t *bcfg, int ker_idx, bool is_init);
     status_t add_po_kernels(int i_N, dim_t init_bcast_dim, dim_t po_bcast_dim);
     status_t add_brg_kernel(int brg_idx);

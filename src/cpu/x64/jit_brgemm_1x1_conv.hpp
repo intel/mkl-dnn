@@ -119,6 +119,8 @@ private:
     void maybe_rtus(int ithr, const char *__restrict src,
             char *__restrict inp_buffer, uint8_t *__restrict inp_buffer_mask,
             int g, int n, dim_t icc, dim_t od, dim_t oh, dim_t ow) const;
+    void maybe_precvt_fp8(const exec_ctx_t &ctx, const char *__restrict &src,
+            const char *__restrict &wei) const;
     void exec_ker(const brgemm_exec_ctx_t &brgemm_ctx, int ithr,
             brgemm_batch_element_t *const __restrict brg_batch,
             char *const c_buffer, const char *inp_buffer, int g, int n, int ocb,
