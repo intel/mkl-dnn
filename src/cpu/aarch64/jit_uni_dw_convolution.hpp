@@ -52,7 +52,8 @@ struct jit_uni_dw_convolution_fwd_t : public primitive_t {
                     DNNL_CPU_THREADING_RUNTIME != DNNL_RUNTIME_THREADPOOL,
                     VERBOSE_UNSUPPORTED_THREADPOOL_RUNTIME);
 
-            const auto src_type = this->desc()->src_desc.data_type;
+            const auto src_type = desc()->src_desc.data_type;
+            const auto bias_type = desc()->bias_desc.data_type;
             const auto acc_mode = attr()->acc_mode_;
             const bool use_f16_acc = src_type == data_type::f16
                     && acc_mode == accumulation_mode::any;
@@ -62,9 +63,9 @@ struct jit_uni_dw_convolution_fwd_t : public primitive_t {
                             data_type::f16)
                     && expect_data_types(src_type, src_type, data_type::undef,
                             src_type, data_type::f32)
-                    && IMPLICATION(this->with_bias(),
-                            utils::one_of(this->desc()->bias_desc.data_type,
-                                    data_type::f32, data_type::bf16))
+                    && IMPLICATION(with_bias(),
+                            utils::one_of(bias_type, data_type::f32,
+                                    data_type::bf16, data_type::f16))
                     && utils::one_of(acc_mode, accumulation_mode::strict,
                             accumulation_mode::relaxed, accumulation_mode::any)
                     && IMPLICATION(use_f16_acc,
@@ -91,6 +92,7 @@ struct jit_uni_dw_convolution_fwd_t : public primitive_t {
 
     using f32_data_t = typename prec_traits_t<data_type::f32>::type;
     using bf16_data_t = typename prec_traits_t<data_type::bf16>::type;
+    using f16_data_t = typename prec_traits_t<data_type::f16>::type;
 
     status_t init(engine_t *engine) override {
         CHECK(safe_ptr_assign(
