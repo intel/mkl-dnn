@@ -22,7 +22,6 @@
 #include "common/c_types_map.hpp"
 #include "common/stream_impl.hpp"
 #include "common/utils.hpp"
-#include "common/verbose.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -49,14 +48,14 @@ public:
                 & threadpool_interop::threadpool_iface::ASYNCHRONOUS);
     }
 
-    // Checks and initializes profiler for supported runtime configs
+    // Marks the stream as capable of asynchronous verbose profiling. Whether
+    // profiling is active is checked at runtime against the verbose level, so
+    // dnnl_set_verbose() can enable or disable it for existing streams.
     status_t init_verbose_profiler(engine_kind_t engine_kind) override {
         use_verbose_profiler_ = false;
 
         // The checks are only relevant for a CPU engine
         if (engine_kind != engine_kind::cpu) return status::success;
-
-        if (!get_verbose(verbose_t::exec_profile)) return status::success;
 
         // Profiling relies on events from an asynchronous threadpool.
         if (is_syncable()) return status::success;
