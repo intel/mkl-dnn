@@ -625,51 +625,152 @@ void reorder_impl_t::emit(copy_plan_t &plan, const reorder_operand_t &src,
     }
 }
 
-std::vector<tile_t> reorder_impl_t::tiles() const {
-    auto make_tiles = [](const layout_t &l) {
-        const auto &blocks = l.blocks();
-        tile_t base = l.tile();
-        std::vector<tile_t> tiles = {base};
-        auto it = blocks.rbegin();
-        const auto end = blocks.rend();
-        for (; it != end; ++it) {
-            auto block = it->size;
-            for (int64_t factor = 2; factor <= block; ++factor) {
-                if (tiles.size() >= 8) return tiles;
-                if (block % factor) continue;
-                tile_t tile = base;
-                tile[it->idx] /= factor;
-                tiles.push_back(std::move(tile));
-            }
-            base[it->idx] /= block;
-        }
-        return tiles;
+std::vector<int64_t> valid_dims(
+        const std::vector<layout_t> &layouts, const idx_t &idx) {
+    // Find all tile sizes for the given idx that maps to each of the layouts
+    // Suppose two block layouts for a given index are:
+    //   5a*6a*2a     and    2a*5a*6a*
+    // The cumulative products of the block sizes are
+    //   1, 2, 12, 60    and   1, 6, 30, 60
+    // respectively. A valid dim is an integer d such that
+    //   d is divisible by all cumulative products <= d
+    //     and     divides all cumulative products >= d
+    // The valid dims for these layouts / idx are 1, 2, 6, and 60.
+
+    using iterator_t = std::vector<layout::block_t>::const_iterator;
+    auto advance_iterator = [&](iterator_t &it, const iterator_t &end) {
+        while (it != end && (it->idx != idx || it->size == 1))
+            it++;
     };
 
-    auto src_tiles = make_tiles(src_layout_);
-    auto dst_tiles = make_tiles(dst_layout_);
-    std::vector<tile_t> tiles;
-    if (src_tiles.empty() && dst_tiles.empty()) return tiles;
-    tiles.reserve(src_tiles.size() + dst_tiles.size() - 1);
+    const auto n = layouts.size();
+    std::vector<iterator_t> it, end;
+    std::vector<int64_t> size, curr, next;
+    std::vector<int64_t> dims = {1};
+    if (n == 0) return dims;
+    it.reserve(n);
+    end.reserve(n);
+    size.reserve(n);
+    curr.reserve(n);
+    next.reserve(n);
 
-    auto src_it = src_tiles.begin();
-    auto dst_it = dst_tiles.begin();
-    const auto src_end = src_tiles.end();
-    const auto dst_end = dst_tiles.end();
+    for (auto &l : layouts) {
+        it.push_back(l.blocks().begin());
+        end.push_back(l.blocks().end());
+        advance_iterator(it.back(), end.back());
+        if (it.back() == end.back()) return dims;
 
-    while (src_it != src_end || dst_it != dst_end) {
-        if (dst_it == dst_end)
-            tiles.push_back(*src_it++);
-        else if (src_it == src_end)
-            tiles.push_back(*dst_it++);
-        else if (*src_it == *dst_it)
-            tiles.push_back((dst_it++, *src_it++));
-        else if (src_it->elems() >= dst_it->elems())
-            tiles.push_back(*src_it++);
-        else
-            tiles.push_back(*dst_it++);
+        curr.push_back(1);
+        size.push_back(it.back()->size);
+        next.push_back(size.back() * curr.back());
     }
-    return tiles;
+
+    while (true) {
+        int64_t lower = 1, upper = 0;
+        for (size_t i = 0; i < n; ++i) {
+            // lcm is divisible by all smaller cumulative products
+            lower = lcm(lower, curr[i]);
+            // gcd divides all larger cumulative products
+            upper = gcd(upper, next[i]);
+        }
+
+        if (upper % lower == 0) {
+            auto factor = upper / lower;
+            for (int64_t d = 1; d <= factor; ++d) {
+                if (factor % d == 0 && dims.back() != lower * d)
+                    dims.push_back(lower * d);
+            }
+            for (size_t i = 0; i < n; ++i) {
+                curr[i] *= factor;
+                size[i] /= factor;
+            }
+        }
+
+        auto m = std::numeric_limits<int64_t>::max();
+        for (auto &n : next)
+            m = std::min(m, n);
+        for (size_t i = 0; i < n; ++i) {
+            if (next[i] != m) continue;
+
+            advance_iterator(++it[i], end[i]);
+            if (it[i] == end[i]) return dims;
+
+            curr[i] = next[i];
+            size[i] = it[i]->size;
+            next[i] = size[i] * curr[i];
+        }
+    }
+}
+
+bool less(const layout::block_t &a, const layout::block_t &b) {
+    dsl_assert(!a.stride.is_undefined() && !b.stride.is_undefined());
+    if (a.stride.is_fixed() ^ b.stride.is_fixed()) return a.stride.is_fixed();
+    // Runtime dims are not comparable, so treat them as equal.
+    if (!(a.stride.is_fixed() && b.stride.is_fixed())) return false;
+    return (int64_t)a.stride * a.size < (int64_t)b.stride * b.size;
+}
+
+const layout::block_t &max(const layout::block_t &a, const layout::block_t &b) {
+    return less(a, b) ? b : a;
+}
+
+std::vector<tile_t> reorder_impl_t::tiles() const {
+    using mark_t = std::pair<int64_t, layout::block_t>;
+    constexpr size_t max_num_tiles = 8;
+
+    auto src = src_layout_.make_dense();
+    auto dst = dst_layout_.make_dense();
+    auto keys = src.tile().keys();
+
+    std::vector<layout_t> layouts = {std::move(src), std::move(dst)};
+
+    auto max_offset = [&](const std::vector<layout::block_t> &blocks) {
+        if (blocks.empty()) return layout::block_t();
+        layout::block_t block = blocks[0];
+        for (auto &b : blocks)
+            block = max(block, b);
+        return block;
+    };
+
+    std::vector<mark_t> marks;
+    for (auto &k : keys) {
+        auto dims = valid_dims(layouts, k);
+        marks.reserve(marks.size() + dims.size());
+        for (auto &d : dims) {
+            std::vector<layout::block_t> blocks;
+            tile_t tile;
+            tile[k] = d;
+            for (auto &l : layouts) {
+                auto mapped = l.sub(tile);
+                if (!mapped.nblocks()) continue;
+                blocks.push_back(mapped.blocks().back());
+            }
+            auto block = max_offset(blocks);
+            if (block.stride.is_undefined()) continue;
+            marks.emplace_back(d, block);
+        }
+    }
+
+    auto cmp = [](const mark_t &a, const mark_t &b) {
+        return less(a.second, b.second);
+    };
+    std::sort(marks.begin(), marks.end(), cmp);
+
+    std::vector<tile_t> tiles;
+    tiles.reserve(marks.size() + 1);
+    tile_t tile;
+    tiles.push_back(tile);
+    for (auto &m : marks) {
+        if (m.first == 1) continue;
+        tile[m.second.idx] = m.first;
+        tiles.push_back(tile);
+    }
+
+    // Delete all but the last `max_num_tiles` tiles, which are the largest.
+    if (tiles.size() > max_num_tiles)
+        tiles.erase(tiles.begin(), tiles.end() - max_num_tiles);
+
+    return {tiles.rbegin(), tiles.rend()}; // largest tiles first
 }
 
 bool reorder_impl_t::layouts_compatible(
