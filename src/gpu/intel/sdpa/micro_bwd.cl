@@ -53,6 +53,30 @@ typedef ugemm_ktq_c_type ktq_tile_type; // D*Br tile
             && ugemm_kq_c_type_nblock0 == ugemm_vtdA_c_type_nblock0 \
             && ugemm_kq_c_type_nblock1 == ugemm_vtdA_c_type_nblock1)
 #define dropout_mul(x, y) ((x) * (y))
+/* Keep the shared mask as one bit per element to limit register pressure. */
+#define DROPOUT_MASK_WORDS ((sizeof(s_tile_type) / sizeof(float) + 31) / 32)
+#define DROPOUT_VEC(t) (sizeof((t).x[0]) / sizeof((t).x[0][0]))
+#define dropout_mask_pack(t, bits) \
+    do { \
+        _Pragma("unroll") for (int i = 0; \
+                               i < sizeof((t).x) / sizeof((t).x[0]); i++) { \
+            _Pragma("unroll") for (int s = 0; s < DROPOUT_VEC(t); s++) { \
+                const int b = i * DROPOUT_VEC(t) + s; \
+                (bits)[b >> 5] |= (uint)((t).x[i][s] != 0.f) << (b & 31); \
+            } \
+        } \
+    } while (0)
+#define dropout_mask_apply(t, bits, inv_q) \
+    do { \
+        _Pragma("unroll") for (int i = 0; \
+                               i < sizeof((t).x) / sizeof((t).x[0]); i++) { \
+            _Pragma("unroll") for (int s = 0; s < DROPOUT_VEC(t); s++) { \
+                const int b = i * DROPOUT_VEC(t) + s; \
+                (t).x[i][s] \
+                        *= (((bits)[b >> 5] >> (b & 31)) & 1) ? (inv_q) : 0.f; \
+            } \
+        } \
+    } while (0)
 #define dropout_keep(_ph, _orow, _ocol) \
     (((_orow) < max_r && (_ocol) < max_c) && ((_ph) > threshold) ? inv_q : 0.f)
 
@@ -117,7 +141,7 @@ typedef ugemm_ktq_c_type ktq_tile_type; // D*Br tile
 /*
     Apply inverted dropout in-place to an S tile (s_tile_type = ugemm_kq_c_type
 */
-inline void apply_dropout_s_tile(s_tile_type *tile, s_tile_type *mask_out,
+inline void apply_dropout_s_tile(s_tile_type *tile, uint *mask_bits,
         int tile_offset_r, int tile_offset_c, int max_r, int max_c,
         ulong batch_head_base, int k_stride, int use_dropout_offset, long seed,
         long offset, uint threshold, float inv_q) {
@@ -143,7 +167,7 @@ inline void apply_dropout_s_tile(s_tile_type *tile, s_tile_type *mask_out,
     }
 
 #if DROPOUT_REUSE_MASK
-    tile_copy(scale_tile, (*mask_out));
+    dropout_mask_pack(scale_tile, mask_bits);
 #endif
     s_tile_type tmp = *tile;
     tile_binary(tmp, scale_tile, dropout_mul);
@@ -152,13 +176,13 @@ inline void apply_dropout_s_tile(s_tile_type *tile, s_tile_type *mask_out,
 
 /* Apply inverted dropout in-place to a dP tile (p_tile_type = ugemm_vtdA_c_type).
  * the dropout Jacobian: dP = dP_raw * Z / q. */
-inline void apply_dropout_dP_tile(p_tile_type *tile, s_tile_type *mask,
+inline void apply_dropout_dP_tile(p_tile_type *tile, uint *mask_bits,
         int tile_offset_r, int tile_offset_c, int max_r, int max_c,
         ulong batch_head_base, int k_stride, int use_dropout_offset, long seed,
         long offset, uint threshold, float inv_q) {
 #if DROPOUT_REUSE_MASK
     p_tile_type tmp = *tile;
-    tile_binary(tmp, (*mask), dropout_mul);
+    dropout_mask_apply(tmp, mask_bits, inv_q);
     *tile = tmp;
 #else
 
@@ -196,6 +220,9 @@ inline void apply_dropout_dP_tile(p_tile_type *tile, s_tile_type *mask,
 #undef DROPOUT_GROUPED_RT_OK
 #undef DROPOUT_FILL_GROUPED
 #undef DROPOUT_REUSE_MASK
+#undef DROPOUT_VEC
+#undef dropout_mask_pack
+#undef dropout_mask_apply
 #endif
 
 #ifdef QRY_DT_F16
@@ -962,7 +989,7 @@ micro_sdpa_bwd(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
 
         s_tile_type S_stash;
 #if WITH_DROPOUT
-        s_tile_type dropout_mask;
+        uint dropout_mask[DROPOUT_MASK_WORDS] = {0};
 #endif
         barrier(CLK_LOCAL_MEM_FENCE);
         {
@@ -970,7 +997,7 @@ micro_sdpa_bwd(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
 
 #if WITH_DROPOUT
             /* P_dropped = P (dot) Z, used for dV GEMM */
-            apply_dropout_s_tile(&S_tile, &dropout_mask, k0 + sg_i0_kq,
+            apply_dropout_s_tile(&S_tile, dropout_mask, k0 + sg_i0_kq,
                     q0 + sg_j0_kq, k, q, dropout_batch_head_base, k,
                     use_dropout_offset, dropout_seed, dropout_offset,
                     dropout_threshold, dropout_inv_q);
@@ -1020,7 +1047,7 @@ micro_sdpa_bwd(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
 
 #if WITH_DROPOUT
         /* Backprop through dropout Jacobian: dP = dP_raw * Z / q. */
-        apply_dropout_dP_tile(&dP_tile, &dropout_mask, k0 + sg_i0_kq,
+        apply_dropout_dP_tile(&dP_tile, dropout_mask, k0 + sg_i0_kq,
                 q0 + sg_j0_kq, k, q, dropout_batch_head_base, k,
                 use_dropout_offset, dropout_seed, dropout_offset,
                 dropout_threshold, dropout_inv_q);
