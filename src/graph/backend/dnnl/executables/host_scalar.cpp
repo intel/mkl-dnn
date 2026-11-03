@@ -17,7 +17,7 @@
 #include "graph/backend/dnnl/executables/host_scalar.hpp"
 
 #include "common/dnnl_thread.hpp"
-#include "cpu/cpu_stream.hpp"
+#include "common/stream.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -61,19 +61,7 @@ void host_scalar_executable_t::execute(const stream &stream,
         const std::unordered_map<int, memory> &args) const {
     if (get_verbose(dnnl::impl::verbose_t::exec_profile,
                 dnnl::impl::component_t::graph)) {
-        bool block_on_wait = true;
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-        if (stream.get()->engine()->kind() == engine_kind::cpu) {
-            dnnl::threadpool_interop::threadpool_iface *tp = nullptr;
-            auto *cpu_stream = dnnl::impl::utils::downcast<
-                    dnnl::impl::cpu::cpu_stream_t *>(stream.get());
-            auto st = cpu_stream->get_threadpool(&tp);
-            block_on_wait = st == dnnl::impl::status::success && tp
-                    && !(tp->get_flags()
-                            & dnnl::threadpool_interop::threadpool_iface::
-                                    ASYNCHRONOUS);
-        }
-#endif
+        const bool block_on_wait = stream.get()->is_syncable();
         if (block_on_wait) stream.get()->wait();
         double start_ms = dnnl::impl::get_msec();
         execute_impl(stream, args);
