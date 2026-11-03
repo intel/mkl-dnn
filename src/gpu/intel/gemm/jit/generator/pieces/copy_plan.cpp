@@ -3024,18 +3024,19 @@ void CopyPlan::legalizeSIMD(bool initial)
                 simdMax = std::min(simdMax, grf >> 1);
         }
 
+        bool special = false;
         if (initial) {
-            bool skip = isInt(i.dst.type) && isInt(i.src0.type) && !i.sat;
-            skip |= isSubByteInt(i.dst.type) || isSubByteInt(i.src0.type)
+            special = isInt(i.dst.type) && isInt(i.src0.type) && !i.sat;
+            special |= isSubByteInt(i.dst.type) || isSubByteInt(i.src0.type)
                 || isSubByteInt(i.src1.type) || isSubByteInt(i.src2.type);
-            if (skip) {
-                n++; continue;
-            }
+            special &= (i.op == Opcode::mov);
+            if (special)
+                simdMax = std::max(opSimdMax(i.dst), opSimdMax(i.src0));
         }
 
         // Fracture instruction into legal SIMD lengths.
         const int simd1 = std::min<int>(rounddown_pow2(i.simd), simdMax);
-        int simd0 = simd1;
+        int simd0 = initial && special ? std::min<int>(i.simd, simdMax) : simd1;
 
         if (!initial && forceSIMD1(i))
             simd0 = 1;
@@ -3072,10 +3073,9 @@ void CopyPlan::legalizeSIMD(bool initial)
                     op.offset += (n / op.width) * op.vs;
                     n %= op.width;
                 }
-                op.offset += n * op.stride;
-                int grfOffset = op.offset / ne;
+                int grfOffset = (op.offset + n * op.stride) / ne;
                 op.grf += grfOffset;
-                op.offset -= grfOffset * ne;
+                op.offset += (n * op.stride - grfOffset * ne);
             };
 
             i.simd -= simd0;
