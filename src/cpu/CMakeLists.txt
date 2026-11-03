@@ -153,11 +153,6 @@ if(DNNL_WITH_SYCL)
         PROPERTIES COMPILE_FLAGS "-O0")
 endif()
 
-if(NOT DNNL_CPU_RUNTIME STREQUAL "THREADPOOL")
-    # avoid building and linking empty objects
-    list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cpu_stream_threadpool.cpp")
-endif()
-
 if(DNNL_CPU_RUNTIME STREQUAL "THREADPOOL")
     add_subdirectory(threadpool)
 endif()

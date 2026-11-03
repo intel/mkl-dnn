@@ -26,7 +26,6 @@
 #include "common/engine.hpp"
 #include "common/engine_id.hpp"
 #include "common/impl_list_item.hpp"
-#include "cpu/cpu_engine_impl.hpp"
 
 #include "cpu/platform.hpp"
 
@@ -157,17 +156,7 @@ protected:
 class cpu_engine_factory_t : public engine_factory_t {
 public:
     size_t count() const override { return 1; }
-    status_t engine_create(engine_t **engine, size_t index) const override {
-        assert(index == 0);
-        // Use engine_impl_t to ensure CPU-specific stream creation.
-        *engine = new cpu_engine_t(new cpu::engine_impl_t(
-                engine_kind::cpu, get_cpu_native_runtime(), 0));
-
-#if DNNL_AARCH64 && defined(DNNL_AARCH64_USE_ACL)
-        dnnl::impl::cpu::aarch64::acl_thread_utils::set_acl_threading();
-#endif
-        return status::success;
-    }
+    status_t engine_create(engine_t **engine, size_t index) const override;
 };
 
 engine_t *get_service_engine();

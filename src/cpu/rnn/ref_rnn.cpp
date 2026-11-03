@@ -35,7 +35,12 @@
 #include "common/primitive.hpp"
 #include "common/primitive_desc_iterator.hpp"
 
-#include "cpu/cpu_stream.hpp"
+#include "common/stream.hpp"
+
+#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
+#include "cpu/threadpool/stream.hpp"
+#endif
+
 #include "cpu/simple_q10n.hpp"
 
 #include "cpu/gemm/gemm.hpp"
@@ -2035,17 +2040,10 @@ status_t ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::execute(
     // object before any primitive creation but this is considered as a high
     // obligation put on users to workaorund the implementation complexity.
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    VCONDCHECK(primitive, create, dispatch, rnn,
-            ctx.stream()->engine()->kind() == engine_kind::cpu,
-            status::unimplemented, "%s," VERBOSE_UNSUPPORTED_ISA,
-            pd()->info(ctx.stream()->engine()));
-    dnnl::threadpool_interop::threadpool_iface *tp;
-    auto *cpu_stream
-            = utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(ctx.stream());
-    auto status = cpu_stream->get_threadpool(&tp);
-    bool ok = status == status::success && tp
-            && !(tp->get_flags()
-                    & dnnl::threadpool_interop::threadpool_iface::ASYNCHRONOUS);
+    const auto *tp_stream
+            = utils::downcast<const threadpool::stream_t *>(ctx.stream());
+    bool ok = tp_stream->impl()->get_threadpool()
+            && tp_stream->impl()->is_syncable();
     VCONDCHECK(primitive, create, dispatch, rnn, ok, status::unimplemented,
             "%s," VERBOSE_UNSUPPORTED_THREADPOOL_RUNTIME,
             pd()->info(ctx.stream()->engine()));
