@@ -158,6 +158,10 @@ if(NOT DNNL_CPU_RUNTIME STREQUAL "THREADPOOL")
     list(REMOVE_ITEM SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/cpu_stream_threadpool.cpp")
 endif()
 
+if(DNNL_CPU_RUNTIME STREQUAL "THREADPOOL")
+    add_subdirectory(threadpool)
+endif()
+
 set(OBJ_LIB ${LIB_PACKAGE_NAME}_cpu)
 add_library(${OBJ_LIB} OBJECT ${SOURCES})
 if (DNNL_X64_USE_ZEN)
