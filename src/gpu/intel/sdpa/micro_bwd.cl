@@ -76,16 +76,25 @@ typedef ugemm_ktq_c_type ktq_tile_type; // D*Br tile
                         + (ulong)(tile_offset_r + i0 + (_l & ~3)); \
                 const uint4 _b \
                         = philox_4x32_vec4_w_offset(_idx, seed, offset); \
+                /* 4x4 word transpose over the lane quad: 4 shuffles. */ \
+                const uint _s0 = (_l & 2) ? _b.s0 : _b.s2; \
+                const uint _s1 = (_l & 2) ? _b.s1 : _b.s3; \
+                const uint _r0 = intel_sub_group_shuffle(_s0, _l ^ 2); \
+                const uint _r1 = intel_sub_group_shuffle(_s1, _l ^ 2); \
+                const uint _p0 = (_l & 2) ? _b.s2 : _b.s0; \
+                const uint _p1 = (_l & 2) ? _b.s3 : _b.s1; \
+                const uint _so = (_l & 1) ? _p0 : _p1; \
+                const uint _sq = (_l & 1) ? _r0 : _r1; \
+                const uint _ro = intel_sub_group_shuffle(_so, _l ^ 1); \
+                const uint _rq = intel_sub_group_shuffle(_sq, _l ^ 1); \
+                const uint _ko = (_l & 1) ? _p1 : _p0; \
+                const uint _kq = (_l & 1) ? _r1 : _r0; \
                 for (int jj = 0; jj < 4; jj++) { \
-                    const int _src = (_l & ~3) | jj; \
-                    const uint _w0 = intel_sub_group_shuffle(_b.s0, _src); \
-                    const uint _w1 = intel_sub_group_shuffle(_b.s1, _src); \
-                    const uint _w2 = intel_sub_group_shuffle(_b.s2, _src); \
-                    const uint _w3 = intel_sub_group_shuffle(_b.s3, _src); \
-                    const uint _v = _w == 0 ? _w0 \
-                            : _w == 1       ? _w1 \
-                            : _w == 2       ? _w2 \
-                                            : _w3; \
+                    const int _m = jj ^ _w; \
+                    const uint _v = _m == 0 ? _ko \
+                            : _m == 1       ? _ro \
+                            : _m == 2       ? _kq \
+                                            : _rq; \
                     tile_access( \
                             scale, i0, j0 + jj, SUBGROUP_SIZE, br, bc, nbr) \
                             = dropout_keep(_v, tile_offset_r + i0 + _l, \
