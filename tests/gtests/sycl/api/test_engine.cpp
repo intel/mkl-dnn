@@ -191,14 +191,16 @@ TEST_P(sycl_engine_test_t, SubDevice) {
 
             // Test case when a sub-device is used with the default
             // context.
-            ASSERT_NO_THROW(eng = sycl_interop::make_engine(sub_dev_i,
-                                    sub_dev_i
-                                            .get_platform()
+            const auto get_default_context = [&]() {
 #if defined(SYCL_KHR_DEFAULT_CONTEXT)
-                                            .khr_get_default_context()));
+                return sub_dev_i.get_platform().khr_get_default_context();
 #else
-                                            .ext_oneapi_get_default_context()));
+                return sub_dev_i.get_platform()
+                        .ext_oneapi_get_default_context();
 #endif
+            };
+            ASSERT_NO_THROW(eng = sycl_interop::make_engine(
+                                    sub_dev_i, get_default_context()));
             test_subdevice(eng);
         }
     }, param.expected_status != dnnl_success, param.expected_status);
