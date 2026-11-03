@@ -60,7 +60,7 @@ struct nchw_pooling_fwd_t : public primitive_t {
                 return status::unimplemented;
             }
 
-            VDISPATCH_POOLING(platform::has_data_type_support(d_type),
+            VDISPATCH_POOLING_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_POOLING(
                     !has_zero_dim_memory(), VERBOSE_EMPTY_TENSOR, "src");
@@ -150,7 +150,7 @@ struct nchw_pooling_bwd_t : public primitive_t {
                     utils::everyone_is(d_type, diff_dst_md()->data_type,
                             diff_src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_POOLING(platform::has_data_type_support(d_type),
+            VDISPATCH_POOLING_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_POOLING(
                     !has_zero_dim_memory(), VERBOSE_EMPTY_TENSOR, "src");

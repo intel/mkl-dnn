@@ -48,11 +48,11 @@ struct ref_convolution_fwd_t : public primitive_t {
             VDISPATCH_CONV(is_fwd(), VERBOSE_BAD_PROPKIND);
             VDISPATCH_CONV(set_default_alg_kind(alg_kind::convolution_direct),
                     VERBOSE_BAD_ALGORITHM);
-            VDISPATCH_CONV(platform::has_data_type_support(src_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(src_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_CONV(platform::has_data_type_support(bia_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(bia_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_CONV(platform::has_data_type_support(dst_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(dst_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(
                     utils::one_of(src_type, f32, bf16, f16, f8_e5m2, f8_e4m3),
@@ -134,9 +134,9 @@ struct ref_convolution_bwd_data_t : public primitive_t {
                     VERBOSE_BAD_PROPKIND);
             VDISPATCH_CONV(set_default_alg_kind(alg_kind::convolution_direct),
                     VERBOSE_BAD_ALGORITHM);
-            VDISPATCH_CONV(platform::has_data_type_support(diff_src_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(diff_dst_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_CONV(platform::has_data_type_support(diff_dst_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(diff_src_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(utils::one_of(diff_dst_type, f32, bf16, f16),
                     VERBOSE_UNSUPPORTED_DT);
@@ -194,9 +194,9 @@ struct ref_convolution_bwd_weights_t : public primitive_t {
                     VERBOSE_BAD_PROPKIND);
             VDISPATCH_CONV(set_default_alg_kind(alg_kind::convolution_direct),
                     VERBOSE_BAD_ALGORITHM);
-            VDISPATCH_CONV(platform::has_data_type_support(src_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(src_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_CONV(platform::has_data_type_support(diff_wei_type),
+            VDISPATCH_CONV_SC(platform::data_type_support_status(diff_wei_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(utils::one_of(src_type, f32, bf16, f16),
                     VERBOSE_UNSUPPORTED_DT);

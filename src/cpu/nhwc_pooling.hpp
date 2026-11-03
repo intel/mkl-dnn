@@ -67,7 +67,7 @@ struct nhwc_pooling_fwd_t : public primitive_t {
                 return status::unimplemented;
             }
 
-            VDISPATCH_POOLING(platform::has_data_type_support(d_type),
+            VDISPATCH_POOLING_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_POOLING(!is_dilated(), VERBOSE_UNSUPPORTED_FEATURE,
                     "does not support dilations");
@@ -171,7 +171,7 @@ struct nhwc_pooling_bwd_t : public primitive_t {
                     utils::everyone_is(d_type, diff_dst_md()->data_type,
                             diff_src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_POOLING(platform::has_data_type_support(d_type),
+            VDISPATCH_POOLING_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_POOLING(set_default_params() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);

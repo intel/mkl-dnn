@@ -96,11 +96,11 @@ struct simple_resampling_fwd_t : public primitive_t {
             VDISPATCH_RESAMPLING(utils::one_of(dst_md()->data_type, f32, s32,
                                          bf16, f16, s8, u8),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_RESAMPLING(
-                    platform::has_data_type_support(src_md()->data_type),
+            VDISPATCH_RESAMPLING_SC(
+                    platform::data_type_support_status(src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_RESAMPLING(
-                    platform::has_data_type_support(dst_md()->data_type),
+            VDISPATCH_RESAMPLING_SC(
+                    platform::data_type_support_status(dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_RESAMPLING(set_default_params() == status::success,
                     VERBOSE_BAD_PARAM, "cannot set default parameters");
@@ -161,11 +161,11 @@ struct simple_resampling_bwd_t : public primitive_t {
             VDISPATCH_RESAMPLING(utils::one_of(diff_src_md()->data_type, f32,
                                          s32, bf16, f16, s8, u8),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_RESAMPLING(
-                    platform::has_data_type_support(diff_dst_md()->data_type),
+            VDISPATCH_RESAMPLING_SC(platform::data_type_support_status(
+                                            diff_dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_RESAMPLING(
-                    platform::has_data_type_support(diff_src_md()->data_type),
+            VDISPATCH_RESAMPLING_SC(platform::data_type_support_status(
+                                            diff_src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_RESAMPLING(set_default_params() == status::success,
                     VERBOSE_BAD_PARAM, "cannot set default parameters");

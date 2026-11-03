@@ -51,11 +51,12 @@ struct nspc_batch_normalization_fwd_t : public primitive_t {
             VDISPATCH_BNORM(utils::everyone_is(d_type, src_md()->data_type,
                                     dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_BNORM(platform::has_data_type_support(d_type),
+            VDISPATCH_BNORM_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_BNORM(IMPLICATION(is_training(),
-                                    platform::has_training_support(d_type)),
-                    VERBOSE_UNSUPPORTED_DT);
+            if (is_training()) {
+                VDISPATCH_BNORM_SC(platform::training_support_status(d_type),
+                        VERBOSE_UNSUPPORTED_DT);
+            }
             VDISPATCH_BNORM(check_scale_shift_data_type(),
                     VERBOSE_UNSUPPORTED_FEATURE,
                     "unsupported scale or shift data type");
@@ -144,9 +145,9 @@ struct nspc_batch_normalization_bwd_t : public primitive_t {
                     utils::everyone_is(d_type, src_md()->data_type,
                             diff_dst_md()->data_type, diff_src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_BNORM(platform::has_data_type_support(d_type),
+            VDISPATCH_BNORM_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_BNORM(platform::has_training_support(d_type),
+            VDISPATCH_BNORM_SC(platform::training_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_BNORM(check_scale_shift_data_type(),
                     VERBOSE_UNSUPPORTED_FEATURE,

@@ -170,6 +170,12 @@ bool DNNL_API prefer_ymm_requested();
 // implementations since these require specific code-path updates.
 bool DNNL_API has_data_type_support(data_type_t data_type);
 bool DNNL_API has_training_support(data_type_t data_type);
+// Status-returning counterparts of the checks above for implementation
+// dispatching. Return `unsupported_data_type` when the data type requires an
+// ISA the current CPU lacks, and `unimplemented` when no CPU of this
+// architecture supports it.
+status_t DNNL_API data_type_support_status(data_type_t data_type);
+status_t DNNL_API training_support_status(data_type_t data_type);
 bool DNNL_API has_optimized_gemm();
 float DNNL_API s8s8_weights_scale_factor();
 

@@ -46,9 +46,9 @@ status_t simple_layer_normalization_fwd_t::pd_t::init(const engine_t *engine) {
             VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_LNORM(utils::one_of(dst_md()->data_type, f32, bf16, f16, s8, u8),
             VERBOSE_UNSUPPORTED_DT);
-    VDISPATCH_LNORM(platform::has_data_type_support(src_md()->data_type),
+    VDISPATCH_LNORM_SC(platform::data_type_support_status(src_md()->data_type),
             VERBOSE_UNSUPPORTED_DT);
-    VDISPATCH_LNORM(platform::has_data_type_support(dst_md()->data_type),
+    VDISPATCH_LNORM_SC(platform::data_type_support_status(dst_md()->data_type),
             VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_LNORM(stat_md()->data_type == f32, VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_LNORM(check_scale_shift_data_type(), VERBOSE_UNSUPPORTED_FEATURE,
@@ -262,11 +262,13 @@ status_t simple_layer_normalization_bwd_t::pd_t::init(const engine_t *engine) {
             VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_LNORM(utils::one_of(diff_src_md()->data_type, f32, bf16, f16),
             VERBOSE_UNSUPPORTED_DT);
-    VDISPATCH_LNORM(platform::has_data_type_support(src_md()->data_type),
+    VDISPATCH_LNORM_SC(platform::data_type_support_status(src_md()->data_type),
             VERBOSE_UNSUPPORTED_DT);
-    VDISPATCH_LNORM(platform::has_data_type_support(diff_dst_md()->data_type),
+    VDISPATCH_LNORM_SC(
+            platform::data_type_support_status(diff_dst_md()->data_type),
             VERBOSE_UNSUPPORTED_DT);
-    VDISPATCH_LNORM(platform::has_data_type_support(diff_src_md()->data_type),
+    VDISPATCH_LNORM_SC(
+            platform::data_type_support_status(diff_src_md()->data_type),
             VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_LNORM(stat_md()->data_type == f32, VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_LNORM(check_scale_shift_data_type(), VERBOSE_UNSUPPORTED_FEATURE,

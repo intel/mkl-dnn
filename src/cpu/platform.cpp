@@ -198,6 +198,54 @@ bool has_training_support(data_type_t data_type) {
     }
 }
 
+namespace {
+// Data types for which `has_data_type_support()` depends on the ISA of the
+// current CPU rather than being unsupported on the whole architecture.
+// Keep in sync with `has_data_type_support()`.
+bool is_isa_dependent_data_type(data_type_t data_type) {
+    switch (data_type) {
+        // On PPC64, bf16 support depends on the BLAS used at build time rather
+        // than on the ISA, so it is not listed here.
+        case data_type::bf16:
+        case data_type::f16: return DNNL_X64 || DNNL_AARCH64 || DNNL_RV64;
+        // There are no fp8 code paths for plain C implementations outside of
+        // x64.
+        case data_type::f8_e5m2:
+        case data_type::f8_e4m3:
+        case data_type::e8m0: return DNNL_X64;
+        // f64, s64 and f4_e2m1 are not supported by plain C implementations on
+        // any ISA. Note: JIT implementations may still support f4_e2m1 on
+        // specific ISAs, but they check for it on their own.
+        default: return false;
+    }
+}
+
+// Same as above for `has_training_support()`. Keep in sync with it.
+bool is_isa_dependent_training(data_type_t data_type) {
+    switch (data_type) {
+        case data_type::bf16:
+        case data_type::f16: return DNNL_X64 || DNNL_AARCH64 || DNNL_RV64;
+        case data_type::f8_e5m2:
+        case data_type::f8_e4m3: return DNNL_X64;
+        // e8m0 is not listed as `has_training_support()` doesn't support it on
+        // any ISA.
+        default: return false;
+    }
+}
+} // namespace
+
+status_t data_type_support_status(data_type_t data_type) {
+    if (has_data_type_support(data_type)) return status::success;
+    return is_isa_dependent_data_type(data_type) ? status::unsupported_data_type
+                                                 : status::unimplemented;
+}
+
+status_t training_support_status(data_type_t data_type) {
+    if (has_training_support(data_type)) return status::success;
+    return is_isa_dependent_training(data_type) ? status::unsupported_data_type
+                                                : status::unimplemented;
+}
+
 float s8s8_weights_scale_factor() {
 #if DNNL_X64
     return x64::mayiuse(x64::avx512_core_vnni) || x64::mayiuse(x64::avx2_vnni)

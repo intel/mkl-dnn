@@ -50,7 +50,7 @@ struct ref_lrn_fwd_t : public primitive_t {
             VDISPATCH_LRN(utils::everyone_is(d_type, src_md()->data_type,
                                   dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_LRN(platform::has_data_type_support(d_type),
+            VDISPATCH_LRN_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_LRN(
                     attr()->has_default_values(), VERBOSE_UNSUPPORTED_ATTR);
@@ -108,7 +108,7 @@ struct ref_lrn_bwd_t : public primitive_t {
                     utils::everyone_is(d_type, src_md()->data_type,
                             diff_src_md()->data_type, diff_dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_LRN(platform::has_data_type_support(d_type),
+            VDISPATCH_LRN_SC(platform::data_type_support_status(d_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_LRN(
                     attr()->has_default_values(), VERBOSE_UNSUPPORTED_ATTR);

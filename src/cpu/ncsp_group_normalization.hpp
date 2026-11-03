@@ -49,14 +49,16 @@ struct ncsp_group_normalization_fwd_t : public primitive_t {
             VDISPATCH_GNORM(
                     !has_zero_dim_memory(), VERBOSE_EMPTY_TENSOR, "src");
             VDISPATCH_GNORM(
-                    utils::one_of(src_md()->data_type, f32, bf16, f16, s8, u8)
-                            && platform::has_data_type_support(
-                                    src_md()->data_type),
+                    utils::one_of(src_md()->data_type, f32, bf16, f16, s8, u8),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_GNORM_SC(
+                    platform::data_type_support_status(src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_GNORM(
-                    utils::one_of(dst_md()->data_type, f32, bf16, f16, s8, u8)
-                            && platform::has_data_type_support(
-                                    dst_md()->data_type),
+                    utils::one_of(dst_md()->data_type, f32, bf16, f16, s8, u8),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_GNORM_SC(
+                    platform::data_type_support_status(dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_GNORM(
                     check_scale_shift_data_type(), VERBOSE_UNSUPPORTED_DT);

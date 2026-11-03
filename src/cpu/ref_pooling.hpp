@@ -42,11 +42,11 @@ struct ref_pooling_fwd_t : public primitive_t {
         status_t init(const engine_t *engine) {
             using sm = primitive_attr_t::skip_mask_t;
 
-            VDISPATCH_POOLING(
-                    platform::has_data_type_support(src_md()->data_type),
+            VDISPATCH_POOLING_SC(
+                    platform::data_type_support_status(src_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_POOLING(
-                    platform::has_data_type_support(dst_md()->data_type),
+            VDISPATCH_POOLING_SC(
+                    platform::data_type_support_status(dst_md()->data_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_POOLING(set_default_params() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);
@@ -99,9 +99,11 @@ struct ref_pooling_bwd_t : public primitive_t {
             const auto diff_dst_type = diff_dst_md(0)->data_type;
 
             VDISPATCH_POOLING(!is_fwd(), VERBOSE_BAD_PROPKIND);
-            VDISPATCH_POOLING(platform::has_data_type_support(diff_src_type),
+            VDISPATCH_POOLING_SC(
+                    platform::data_type_support_status(diff_dst_type),
                     VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_POOLING(platform::has_data_type_support(diff_dst_type),
+            VDISPATCH_POOLING_SC(
+                    platform::data_type_support_status(diff_src_type),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_POOLING(utils::one_of(diff_src_type, f32, bf16, f16),
                     VERBOSE_UNSUPPORTED_DT);
