@@ -261,15 +261,11 @@ status_t mqa_decomp_kernel_t<quantized, dt>::execute_impl(stream_t *strm,
 #endif
     };
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
     strm->before_exec_hook();
-#endif
 
     parallel_nd_ext(mqa_cfg_.nthr, MBO, MBI, loop);
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
     strm->after_exec_hook();
-#endif
 
     prolong_scratchpad_lifetime(strm, scratchpad);
 

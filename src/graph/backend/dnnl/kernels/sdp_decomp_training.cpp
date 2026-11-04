@@ -268,15 +268,11 @@ status_t sdp_decomp_training_kernel_t::execute_impl(stream_t *strm,
 #endif
     };
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
     strm->before_exec_hook();
-#endif
 
     parallel_nd_ext(sdp_cfg_.nthr, MBO, MBI, loop);
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
     strm->after_exec_hook();
-#endif
 
     prolong_scratchpad_lifetime(strm, scratchpad);
 
