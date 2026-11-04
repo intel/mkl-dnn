@@ -63,7 +63,7 @@ status_t sdp_decomp_kernel_t<quantized, dt>::compile_impl(
 
     // get subgraph from the deep copied partition
     subgraph_ = std::make_shared<subgraph_t>(
-            part->get_ops(), p_engine_, part->get_fpmath_mode(), false, true);
+            part->get_ops(), p_engine_, part->get_attr(), false, true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     // Check if it's supported by decomposition kernel

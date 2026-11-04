@@ -70,7 +70,7 @@ status_t sdp_bwd_primitive_kernel_t::compile_impl(
     // First, dry run on a deep copy
     subgraph_
             = std::make_shared<subgraph_t>(graph_t::deep_copy(part->get_ops()),
-                    p_engine_, part->get_fpmath_mode(), false, true);
+                    p_engine_, part->get_attr(), false, true);
     CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
     CHECK(initial_check(subgraph_, inputs, outputs));
 

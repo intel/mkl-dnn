@@ -57,7 +57,7 @@ status_t sdp_decomp_training_kernel_t::compile_impl(
     p_engine_ = make_dnnl_engine(*eng);
 
     subgraph_ = std::make_shared<subgraph_t>(
-            part->get_ops(), p_engine_, part->get_fpmath_mode(), false, true);
+            part->get_ops(), p_engine_, part->get_attr(), false, true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     // Check if supported by training decomposition kernel

@@ -23,7 +23,8 @@ namespace dnnl_impl {
 
 eltwise_executable_t::desc_t eltwise_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<dnnl::eltwise_forward::primitive_desc>(
@@ -66,7 +67,8 @@ eltwise_executable_t::desc_t eltwise_executable_t::create_desc(
 
 eltwise_bwd_executable_t::desc_t eltwise_bwd_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
                 dnnl::eltwise_backward::primitive_desc>(pd_cache.at(op.get()));
@@ -205,7 +207,8 @@ ocl_event_t binary_executable_t::execute_ocl(const stream &stream,
 
 binary_executable_t::desc_t binary_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<dnnl::binary::primitive_desc>(
@@ -258,7 +261,8 @@ binary_executable_t::desc_t binary_executable_t::create_desc(
 
 prelu_executable_t::desc_t prelu_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<dnnl::prelu_forward::primitive_desc>(
@@ -290,7 +294,8 @@ prelu_executable_t::desc_t prelu_executable_t::create_desc(
 
 prelu_bwd_executable_t::desc_t prelu_bwd_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<dnnl::prelu_backward::primitive_desc>(

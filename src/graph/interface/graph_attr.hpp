@@ -17,6 +17,8 @@
 #ifndef GRAPH_INTERFACE_GRAPH_ATTR_HPP
 #define GRAPH_INTERFACE_GRAPH_ATTR_HPP
 
+#include "common/utils.hpp"
+
 #include "graph/interface/c_types_map.hpp"
 
 namespace dnnl {
@@ -35,6 +37,29 @@ struct fpmath_t {
 
     fpmath_mode_t mode_ = fpmath_mode::strict;
     bool apply_to_int_ = false;
+};
+
+struct graph_attr_t {
+    graph_attr_t() = default;
+
+    explicit graph_attr_t(const fpmath_t &fpmath) : fpmath_(fpmath) {}
+
+    const fpmath_t &get_fpmath() const { return fpmath_; }
+    void set_fpmath(const fpmath_t &fpmath) { fpmath_ = fpmath; }
+
+    bool operator==(const graph_attr_t &rhs) const {
+        return fpmath_ == rhs.fpmath_;
+    }
+
+    size_t hash() const {
+        size_t seed = 0;
+        seed = hash_combine(seed, static_cast<size_t>(fpmath_.mode_));
+        seed = hash_combine(seed, fpmath_.apply_to_int_);
+        return seed;
+    }
+
+private:
+    fpmath_t fpmath_;
 };
 
 } // namespace graph

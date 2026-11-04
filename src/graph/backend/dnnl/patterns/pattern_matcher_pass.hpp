@@ -63,7 +63,7 @@ inline void pattern_utils_t::init_partition(graph_t &backend_graph,
         std::shared_ptr<dnnl_partition_impl_t> pimpl
                 = std::make_shared<dnnl_partition_impl_t>(
                         backend_graph.get_engine_kind(),
-                        backend_graph.get_fpmath_mode(), pkind);
+                        backend_graph.get_attr(), pkind);
 
         // transfer the matched op's ownership from graph to partition
         for (size_t i = 0; i < pairs.size(); ++i) {

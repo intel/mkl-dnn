@@ -65,7 +65,7 @@ private:
 
 public:
     subgraph_t(const std::vector<op_ptr> &ops, const dnnl::engine &eng,
-            const graph::fpmath_t &fpm_mode, bool can_use_blocked_layout,
+            const graph::graph_attr_t &attr, bool can_use_blocked_layout,
             bool reset_layout);
 
     subgraph_t(const std::vector<op_ptr> &ops, bool reset_layout = true);

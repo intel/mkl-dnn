@@ -36,10 +36,10 @@ struct const_memory_filler_t : public op_executable_t {
 
     const_memory_filler_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout) {
+            const graph_attr_t &graph_attr, bool use_block_layout) {
         UNUSED(p_engine);
         UNUSED(pd_cache);
-        UNUSED(fpmath);
+        UNUSED(graph_attr);
         UNUSED(use_block_layout);
         // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
         attr_data_

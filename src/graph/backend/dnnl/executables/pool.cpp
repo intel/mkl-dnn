@@ -23,7 +23,8 @@ namespace dnnl_impl {
 
 pool_executable_t::desc_t pool_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<dnnl::pooling_forward::primitive_desc>(
@@ -108,7 +109,8 @@ pool_executable_t::desc_t pool_executable_t::create_desc(
 
 pool_bwd_executable_t::desc_t pool_bwd_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<

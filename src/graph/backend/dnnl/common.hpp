@@ -24,6 +24,7 @@
 
 #include "oneapi/dnnl/dnnl.hpp"
 
+#include "graph/interface/graph_attr.hpp"
 #include "graph/interface/logical_tensor.hpp"
 #include "graph/interface/value.hpp"
 
@@ -49,6 +50,13 @@ using algorithm = dnnl::algorithm;
 using exec_args = std::unordered_map<int, memory>;
 
 using pd_cache_t = std::unordered_map<op_t *, graph::utils::any_t>;
+
+inline void set_graph_attributes(
+        dnnl::primitive_attr &attr, const graph_attr_t &graph_attr) {
+    const auto &fpmath = graph_attr.get_fpmath();
+    attr.set_fpmath_mode(
+            static_cast<dnnl::fpmath_mode>(fpmath.mode_), fpmath.apply_to_int_);
+}
 
 format_tag get_ncx_format(size_t ndim);
 

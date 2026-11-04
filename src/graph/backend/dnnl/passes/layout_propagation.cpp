@@ -60,7 +60,7 @@ bool need_prop_once_more(const std::shared_ptr<subgraph_t> &sg) {
 void force_partition_output_plain_layout(std::shared_ptr<subgraph_t> &sg) {
     const auto &p_engine = *(sg->p_engine_);
     auto &pd_cache = sg->pd_cache_;
-    const auto &fpm = sg->get_fpmath_mode();
+    const auto &graph_attr = sg->get_attr();
     bool use_block_layout = sg->can_use_blocked_layout_;
 
     subgraph_rewriter_t rewriter(sg);
@@ -77,7 +77,7 @@ void force_partition_output_plain_layout(std::shared_ptr<subgraph_t> &sg) {
                     const auto strides = expect_mem_desc.get_strides();
                     out_vals[i]->set_strides(strides);
                     insert_reorder_after(out_op_ptr, i, ori_mem_desc, p_engine,
-                            pd_cache, fpm, use_block_layout, rewriter);
+                            pd_cache, graph_attr, use_block_layout, rewriter);
                 }
             }
         }
@@ -107,7 +107,7 @@ void force_partition_output_plain_layout(std::shared_ptr<subgraph_t> &sg) {
 status_t layout_propagation(std::shared_ptr<subgraph_t> &sg) {
     const auto &p_engine = *(sg->p_engine_);
     auto &pd_cache = sg->pd_cache_;
-    auto &fpm = sg->get_fpmath_mode();
+    auto &graph_attr = sg->get_attr();
     bool use_block_layout = sg->can_use_blocked_layout_;
 
     status_t ret;
@@ -129,7 +129,7 @@ status_t layout_propagation(std::shared_ptr<subgraph_t> &sg) {
                     op->get_name().c_str());
 
             auto cur_op = op->shared_from_this();
-            status_t status = propagator(cur_op, p_engine, pd_cache, fpm,
+            status_t status = propagator(cur_op, p_engine, pd_cache, graph_attr,
                     use_block_layout, rewriter);
 
             visited.insert(op);

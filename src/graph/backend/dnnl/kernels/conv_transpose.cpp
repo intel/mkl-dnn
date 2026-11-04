@@ -40,7 +40,7 @@ status_t conv_transpose_fwd_t<quantized>::compile_impl(
 
     // get subgraph from the deep copied partition
     subgraph_ = std::make_shared<subgraph_t>(part->get_ops(), p_engine_,
-            part->get_fpmath_mode(), part->get_use_blocked_layout(), true);
+            part->get_attr(), part->get_use_blocked_layout(), true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     subgraph_visualizer_t vis(part->id(), [this](const value_t *val) {
@@ -133,7 +133,7 @@ status_t conv_transpose_bwd_data_t::compile_impl(
 
     // get subgraph from the deep copied partition
     subgraph_ = std::make_shared<subgraph_t>(part->get_ops(), p_engine_,
-            part->get_fpmath_mode(), part->get_use_blocked_layout(), true);
+            part->get_attr(), part->get_use_blocked_layout(), true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     subgraph_visualizer_t vis(part->id(), [this](const value_t *val) {
@@ -193,7 +193,7 @@ status_t conv_transpose_bwd_weights_t::compile_impl(
 
     // get subgraph from the deep copied partition
     subgraph_ = std::make_shared<subgraph_t>(part->get_ops(), p_engine_,
-            part->get_fpmath_mode(), part->get_use_blocked_layout(), true);
+            part->get_attr(), part->get_use_blocked_layout(), true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     subgraph_visualizer_t vis(part->id(), [this](const value_t *val) {
