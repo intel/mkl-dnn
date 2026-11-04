@@ -48,7 +48,6 @@ if [[ "$ONEDNN_TEST_SET" == "SMOKE" ]]; then
     SKIPPED_TESTS+="|test_graph_unit_dnnl_mqa_decomp_cpu"
     SKIPPED_TESTS+="|test_graph_unit_dnnl_sdp_decomp_cpu"
 elif [[ "$ONEDNN_TEST_SET" == "CI" ]]; then
-    SKIPPED_TESTS+="|test_benchdnn_modeC_matmul_sparse_ci_cpu"
     SKIPPED_TESTS+="|test_benchdnn_modeC_graph_ci_cpu"
     SKIPPED_TESTS+="|test_benchdnn_modeC_matmul_ci_cpu"
     SKIPPED_TESTS+="|test_benchdnn_modeC_ip_ci_cpu"
