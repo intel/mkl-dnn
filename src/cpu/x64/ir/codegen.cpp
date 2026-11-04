@@ -51,8 +51,9 @@ int infer_postops_tail_elems(const ir_t &ir, int vlen_elems) {
 } // namespace
 
 void generate_kernel(
-        jit_generator_t &gen, const ir_t &ir, const postops_config_t &postops) {
+        jit_generator_t &gen, const ir_t &ir, const codegen_config_t &cfg) {
     const cpu_isa_t isa = gen.max_cpu_isa();
+    const postops_config_t &postops = cfg.postops;
     const bool with_postops = postops.post_ops != nullptr;
 
     // AVX-512 opmasks reserved for the post-ops injector, which writes both

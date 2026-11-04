@@ -51,6 +51,14 @@ struct postops_config_t {
     dim_t dst_orig_off = 0;
 };
 
+// The per-kernel inputs of `generate_kernel()`. The ISA is not one of them,
+// because `generate_kernel()` takes it from the generator.
+//
+//   postops - inputs of the post-ops injector
+struct codegen_config_t {
+    postops_config_t postops;
+};
+
 // Generates the complete kernel for `ir` into `gen`.
 //
 // The stages run in this order:
@@ -64,9 +72,9 @@ struct postops_config_t {
 // The register configuration, emitter, and post-ops injector all take the ISA
 // from `gen.max_cpu_isa()`. The kernel argument pointer is `abi_param1`.
 //
-// The post-ops injector is created only when `postops.post_ops` is set.
-void generate_kernel(jit_generator_t &gen, const ir_t &ir,
-        const postops_config_t &postops = {});
+// The post-ops injector is created only when `cfg.postops.post_ops` is set.
+void generate_kernel(
+        jit_generator_t &gen, const ir_t &ir, const codegen_config_t &cfg = {});
 
 } // namespace ir
 } // namespace x64
