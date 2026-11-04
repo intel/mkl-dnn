@@ -16,6 +16,7 @@
 
 #include "common/compiler_workarounds.hpp"
 #include "common/dnnl_thread.hpp"
+#include "common/stream.hpp"
 
 #include "graph/backend/dnnl/kernels/sdp_decomp_training.hpp"
 
@@ -24,10 +25,6 @@
 #include "graph/backend/dnnl/passes/lower.hpp"
 #include "graph/backend/dnnl/passes/transform.hpp"
 #include "graph/backend/dnnl/passes/utils.hpp"
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "cpu/cpu_stream.hpp"
-#endif
 
 #define VCHECK_SDP_DECOMP_TRAIN(cond, status, msg, ...) \
     VCONDCHECK(graph, create, check, sdp_decomp_training_kernel_t, (cond), \
@@ -134,12 +131,6 @@ status_t sdp_decomp_training_kernel_t::execute_impl(stream_t *strm,
         const std::vector<tensor_t> &inputs,
         const std::vector<tensor_t> &outputs, const tensor_t *scratchpad_buf) {
     dnnl::stream p_stream = make_dnnl_stream(*strm);
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    auto *tp_stream
-            = dnnl::impl::utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(
-                    strm);
-#endif
 
     thread_local_cache_t<sdp_args_set_t> res_cache;
     sdp_args_set_t *res = res_cache.get_or_add(
@@ -278,13 +269,13 @@ status_t sdp_decomp_training_kernel_t::execute_impl(stream_t *strm,
     };
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    tp_stream->before_exec_hook();
+    strm->before_exec_hook();
 #endif
 
     parallel_nd_ext(sdp_cfg_.nthr, MBO, MBI, loop);
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    tp_stream->after_exec_hook();
+    strm->after_exec_hook();
 #endif
 
     prolong_scratchpad_lifetime(strm, scratchpad);

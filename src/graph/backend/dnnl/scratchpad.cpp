@@ -19,12 +19,9 @@
 #include "graph/backend/dnnl/dnnl_allocator.hpp"
 #include "graph/backend/dnnl/scratchpad.hpp"
 
+#include "common/dnnl_thread.hpp"
 #include "common/engine.hpp"
 #include "common/stream.hpp"
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "cpu/cpu_stream.hpp"
-#endif
 
 namespace dnnl {
 namespace impl {
@@ -72,14 +69,11 @@ void prolong_scratchpad_lifetime(
         stream_t *strm, const std::shared_ptr<scratchpad_t> &scratchpad) {
     if (scratchpad->is_user_managed()) return;
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    auto *tp_stream
-            = dnnl::impl::utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(
-                    strm);
-    tp_stream->before_exec_hook();
+    strm->before_exec_hook();
 
     parallel(1, [=](int, int) { UNUSED(scratchpad); });
 
-    tp_stream->after_exec_hook();
+    strm->after_exec_hook();
 #endif
 }
 

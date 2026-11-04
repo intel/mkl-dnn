@@ -15,6 +15,8 @@
 *******************************************************************************/
 
 #include "common/compiler_workarounds.hpp"
+#include "common/dnnl_thread.hpp"
+#include "common/stream.hpp"
 
 #include "graph/backend/dnnl/kernels/mqa_decomp.hpp"
 
@@ -28,10 +30,6 @@
 #include "graph/backend/dnnl/passes/utils.hpp"
 
 #include "graph/backend/dnnl/op_executable.hpp"
-
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-#include "cpu/cpu_stream.hpp"
-#endif
 
 namespace dnnl {
 namespace impl {
@@ -157,12 +155,6 @@ status_t mqa_decomp_kernel_t<quantized, dt>::execute_impl(stream_t *strm,
         const std::vector<tensor_t> &outputs, const tensor_t *scratchpad_buf) {
     dnnl::stream p_stream = make_dnnl_stream(*strm);
 
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    auto *tp_stream
-            = dnnl::impl::utils::downcast<dnnl::impl::cpu::cpu_stream_t *>(
-                    strm);
-#endif
-
     // each thread's own local resource
     thread_local_cache_t<mqa_args_set_t> res_cache;
     mqa_args_set_t *res = res_cache.get_or_add(
@@ -270,13 +262,13 @@ status_t mqa_decomp_kernel_t<quantized, dt>::execute_impl(stream_t *strm,
     };
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    tp_stream->before_exec_hook();
+    strm->before_exec_hook();
 #endif
 
     parallel_nd_ext(mqa_cfg_.nthr, MBO, MBI, loop);
 
 #if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-    tp_stream->after_exec_hook();
+    strm->after_exec_hook();
 #endif
 
     prolong_scratchpad_lifetime(strm, scratchpad);
