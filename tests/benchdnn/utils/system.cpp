@@ -342,12 +342,33 @@ struct cpu_group_t {
 // so each type must be verified, but cores of the same type are configured
 // alike and a single representative per type keeps the check cheap.
 //
-// Hybrid systems expose a PMU per core type listing its CPUs. Atom cores
+// Intel hybrid systems expose a PMU per core type listing its CPUs. Atom cores
 // without L3 are LP E-cores, which reside on a separate low-power island with
 // own frequency limits, so the L3 presence tells them from regular E-cores.
-// Non-hybrid systems expose no such PMUs and form a single unnamed group.
+// Without policy or PMU groups, use a single unnamed group.
 static std::vector<cpu_group_t> get_cpu_groups() {
     std::vector<cpu_group_t> groups;
+#if (defined(DNNL_AARCH64) && DNNL_AARCH64 == 1) \
+        || (defined(DNNL_RV64) && DNNL_RV64 == 1)
+    // CPUs in a cpufreq policy share frequency controls. Check one online
+    // representative per policy on AArch64 and RV64.
+    const std::string policy_root = "/sys/devices/system/cpu/cpufreq";
+    for (const auto &policy : list_dir(policy_root)) {
+        if (policy.rfind("policy", 0) != 0) continue;
+        const std::string policy_path
+                = parser::utils::str_join(policy_root, policy, '/');
+        std::ifstream cpus(policy_path + "/affected_cpus");
+        int cpu;
+        if (cpus >> cpu) groups.push_back({policy, cpu});
+    }
+    if (!groups.empty()) {
+        std::sort(groups.begin(), groups.end(),
+                [](const cpu_group_t &a, const cpu_group_t &b) {
+            return a.cpu < b.cpu;
+        });
+        return groups;
+    }
+#endif
     const auto p_cpus
             = parse_cpulist(read_sysfs_str("/sys/devices/cpu_core/cpus"));
     const auto e_cpus
