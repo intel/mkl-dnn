@@ -2864,7 +2864,6 @@ protected:
     * @param zp Vector register containing zero point values
     * @param scale_op Operand containing scales to be applied
     * @param src_dt Source data type of the values being decompressed
-    * @param dst_dt Destination data type for the decompressed values
     */
     template <typename Vmm>
     void decompress_reg(const Vmm &input, const Vmm &zp,
