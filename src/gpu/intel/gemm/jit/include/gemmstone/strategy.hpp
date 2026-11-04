@@ -186,7 +186,7 @@ struct GEMMStrategyPOD : public CommonStrategy {
                                                  //     k alternate is for multi-tile execution with implicit scaling.
     int unroll[3] = {0};                         // Unrolls in each dimension (m/n/k), indexed by LoopType.
     int unrollK_masked = 0;                      // k unroll to use when masking.
-    int extraKAlign = 1;                         // Additional k alignment when blocking (ka).
+    int extraKAlign = 1;                         // Additional k alignment when blocking.
     LoopType loopOrder[3]
         = {LoopM, LoopN, LoopK};                 // Expected order of loops in driver code (in order from innermost to outermost).
     LoopType fusedLoop = LoopM;                  // Direction of fusing if threads fused.

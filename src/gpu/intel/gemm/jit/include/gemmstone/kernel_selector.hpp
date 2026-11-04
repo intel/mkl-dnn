@@ -75,9 +75,12 @@ struct MatchParams : public MatchParamsBase
         static_cast<MatchParamsBase &>(*this) = other;
 
         auto transfer = [&](const char *&value) {
-            auto offset = size_t(value - other.temp.data());
-            if (offset < sizeof(temp))
-                value = temp.data() + offset;
+            for (size_t offset = 0; offset < temp.size(); offset++) {
+                if (value == other.temp.data() + offset) {
+                    value = temp.data() + offset;
+                    break;
+                }
+            }
         };
 
         transfer(selector.precisions[0]);
