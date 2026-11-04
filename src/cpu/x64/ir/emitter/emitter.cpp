@@ -40,7 +40,7 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
 
     // Tile instructions go to a backend of their own, the same for both vector
     // backends.
-    tile_backend_t tbe(gen);
+    tile_backend_t tbe(gen, gen.max_cpu_isa());
 
     // One label per loop, keyed by the `loop_begin` instruction index. A
     // `loop_end` jumps back to `labels[op.match]`. A map, so only loops get an
@@ -380,6 +380,10 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 tbe.tstore(base, op.mem.disp, tile_of(op.s0), stride);
                 break;
             }
+            case op_kind_t::tmma: // reads and writes dst
+                tbe.tmma(tile_of(op.dst), tile_of(op.s0), tile_of(op.s1),
+                        dt_of(op.dst), dt_of(op.s0), dt_of(op.s1));
+                break;
 
             // Control flow. ISA-neutral, emitted directly.
             case op_kind_t::loop_begin: {

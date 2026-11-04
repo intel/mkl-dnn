@@ -170,6 +170,11 @@ enum class op_kind_t {
     // [base + disp + r * s1] = row r of s0 for every row r. s1 is the stride
     // gpr.
     tstore,
+    // dst[m][n] += sum_k s0[m][k] * s1[k][n] (tile matrix multiply). A row of
+    // s0 holds `colsb / sizeof(dt)` elements of K. s1 packs K in groups of 4
+    // bytes: with g = 4 / sizeof(dt), s1[k][n] is element `n * g + k % g` of
+    // row `k / g`.
+    tmma,
 
     // Control flow
     //
@@ -390,6 +395,10 @@ struct DNNL_API ir_t {
     void tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride,
             mem_hint_t hint = mem_hint_t::none);
     void tstore(vreg_t base, dim_t disp, vreg_t src, vreg_t stride);
+    // `dst`, `a`, and `b` are different tiles with matching shapes:
+    // `dst.rows == a.rows`, `dst.colsb == b.colsb`, and `a.colsb == 4 * b.rows`
+    // (each row of `b` holds one 4-byte group of K for each column).
+    void tmma(vreg_t dst, vreg_t a, vreg_t b);
 
     // post-ops
     // Apply post-ops to `acc` in place. `base_ptr` and `out_byte_off` describe

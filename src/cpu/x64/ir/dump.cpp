@@ -59,6 +59,7 @@ const char *kind_name(op_kind_t kind) {
         case op_kind_t::tzero: return "tzero";
         case op_kind_t::tload: return "tload";
         case op_kind_t::tstore: return "tstore";
+        case op_kind_t::tmma: return "tmma";
         case op_kind_t::loop_begin: return "loop_begin";
         case op_kind_t::loop_end: return "loop_end";
         case op_kind_t::if_begin: return "if_begin";
@@ -280,6 +281,7 @@ std::string op_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
         case op_kind_t::vstore:
         case op_kind_t::vstore_scalar: return k + mem(op.s0) + ", " + r(op.s0);
         case op_kind_t::vdot:
+        case op_kind_t::tmma:
             return k + r(op.dst) + ", " + r(op.s0) + ", " + r(op.s1);
         case op_kind_t::inject_postops:
             return k + postops_str(ir, op, isa, alloc, temps);

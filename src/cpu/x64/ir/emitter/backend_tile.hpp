@@ -34,7 +34,7 @@ namespace x64 {
 namespace ir {
 
 struct tile_backend_t {
-    explicit tile_backend_t(jit_generator_t &gen) : gen_(gen) {}
+    tile_backend_t(jit_generator_t &gen, cpu_isa_t isa) : gen_(gen), isa(isa) {}
 
     jit_generator_t &gen() { return gen_; }
 
@@ -59,9 +59,26 @@ struct tile_backend_t {
         gen().tilestored(addr, Xbyak::Tmm(s));
     }
 
+    // dst += a * b. The dtypes of the operands select the instruction.
+    void tmma(int d, int a, int b, data_type_t d_dt, data_type_t a_dt,
+            data_type_t b_dt) {
+        if (a_dt == data_type::bf16) {
+            JIT_ASSERT(
+                    is_superset(isa, amx_bf16) && "tmma: bf16 needs amx_bf16");
+            JIT_ASSERT(b_dt == data_type::bf16 && d_dt == data_type::f32
+                    && "tmma: bf16 needs a bf16 b and an f32 dst");
+            gen().tdpbf16ps(Xbyak::Tmm(d), Xbyak::Tmm(a), Xbyak::Tmm(b));
+        } else {
+            JIT_ASSERT(!"tmma: dtype not implemented");
+        }
+    }
+
 private:
     // The kernel owns `gen_`.
     jit_generator_t &gen_;
+
+    // ISA is used to dispatch ISA-specific instructions (e.g. on amx_bf16).
+    cpu_isa_t isa;
 };
 
 } // namespace ir
