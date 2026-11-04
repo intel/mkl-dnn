@@ -831,7 +831,8 @@ status_t compute_blocking_heuristic(brgemm_matmul_conf_t &bgmmc,
     matmul_brgemm_blocking_params_t best_blocking(matmul, bgmmc.nthr);
 
     float best_imbalance;
-    switch (get_max_cpu_isa()) {
+    // The max ISA is not sme on cores with SME but without SVE
+    switch (bgmmc.isa == sme ? sme : get_max_cpu_isa()) {
         // TODO:
         // *) adjust K_BLK using 'rnd_up(bgmmc.K, bgmmc.required_k_granularity)'
         //    for non-f32 datatypes.
