@@ -45,3 +45,43 @@ TEST(test_interface_partition_hashing, GetOpHash) {
     graph::op_t op {0, graph::op_kind::Wildcard, "wildcard"};
     ASSERT_NO_THROW(graph::partition_hashing::get_op_hash(op));
 }
+
+TEST(test_interface_partition_hashing, GraphAttributesHash) {
+    const graph::graph_attr_t default_attr;
+    const graph::graph_attr_t strict_attr {{graph::fpmath_mode::strict, false}};
+    const graph::graph_attr_t bf16_attr {{graph::fpmath_mode::bf16, false}};
+    const graph::graph_attr_t int_attr {{graph::fpmath_mode::strict, true}};
+
+    EXPECT_TRUE(default_attr == strict_attr);
+    EXPECT_EQ(default_attr.hash(), strict_attr.hash());
+    EXPECT_FALSE(strict_attr == bf16_attr);
+    EXPECT_NE(strict_attr.hash(), bf16_attr.hash());
+    EXPECT_FALSE(strict_attr == int_attr);
+    EXPECT_NE(strict_attr.hash(), int_attr.hash());
+}
+
+TEST(test_interface_partition_hashing, GraphAttributesKey) {
+    graph::engine_t &engine = *get_engine();
+    const graph::graph_attr_t default_attr;
+    const graph::graph_attr_t strict_attr {{graph::fpmath_mode::strict, false}};
+    const graph::graph_attr_t bf16_attr {{graph::fpmath_mode::bf16, false}};
+    const graph::graph_attr_t int_attr {{graph::fpmath_mode::strict, true}};
+    const graph::partition_hashing::key_t default_key {
+            &engine, {}, {}, {}, default_attr};
+    const graph::partition_hashing::key_t strict_key {
+            &engine, {}, {}, {}, strict_attr};
+    const graph::partition_hashing::key_t bf16_key {
+            &engine, {}, {}, {}, bf16_attr};
+    const graph::partition_hashing::key_t int_key {
+            &engine, {}, {}, {}, int_attr};
+    const std::hash<graph::partition_hashing::key_t> hash;
+
+    EXPECT_TRUE(default_key == strict_key);
+    EXPECT_EQ(hash(default_key), hash(strict_key));
+    EXPECT_FALSE(strict_key == bf16_key);
+    EXPECT_NE(hash(strict_key), hash(bf16_key));
+    EXPECT_FALSE(strict_key == int_key);
+    EXPECT_NE(hash(strict_key), hash(int_key));
+    // See: DUMMY_PARALLEL.
+    dnnl::impl::parallel(1, [](int, int) {});
+}

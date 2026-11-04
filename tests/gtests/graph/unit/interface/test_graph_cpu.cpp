@@ -414,12 +414,12 @@ TEST(test_interface_graph, SetFpmathMode) {
     ASSERT_EQ(dnnl::impl::get_fpmath_mode(), fpmath_mode::strict);
 
     graph_t graph;
-    ASSERT_EQ(graph.get_fpmath_mode().mode_, fpmath_mode::strict);
+    ASSERT_EQ(graph.get_attr().get_fpmath().mode_, fpmath_mode::strict);
 
     for (auto m : {fpmath_mode::strict, fpmath_mode::bf16, fpmath_mode::f16,
                  fpmath_mode::any}) {
         graph_t graph2 {engine_kind::cpu, m};
-        ASSERT_EQ(graph2.get_fpmath_mode().mode_, m);
+        ASSERT_EQ(graph2.get_attr().get_fpmath().mode_, m);
     }
 }
 
