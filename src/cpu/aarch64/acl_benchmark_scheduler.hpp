@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2023, 2025 Arm Ltd. and affiliates
+* Copyright 2023, 2025-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ namespace dnnl {
 namespace impl {
 namespace cpu {
 namespace aarch64 {
-// BenchmarkScheduler implement's ACL IScheduler interface and acts as an interceptor scheduler
+// benchmark_scheduler_t implement's ACL IScheduler interface and acts as an interceptor scheduler
 // when DNNL_VERBOSE=profile,profile_externals. It intercepts calls made by the actual scheduler used by ACL and adds
 // timers to benchmark execution time of ACL kernels and store kernel information.
 class benchmark_scheduler_t final : public arm_compute::IScheduler {

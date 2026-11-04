@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2022-2025 Arm Ltd. and affiliates
+* Copyright 2022-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ void acl_thread_bind() {
         arm_compute::Scheduler::get().set_num_threads(max_threads);
     });
 }
-// Swap BenchmarkScheduler for default ACL scheduler builds (i.e. CPPScheduler, OMPScheduler)
+// Swap benchmark_scheduler_t for default ACL scheduler builds (i.e. CPPScheduler, OMPScheduler)
 void acl_set_benchmark_scheduler_default() {
     static std::once_flag flag_once;
     arm_compute::IScheduler *_real_scheduler = &arm_compute::Scheduler::get();
@@ -62,7 +62,7 @@ void acl_set_tp_scheduler() {
     std::call_once(flag_once, [&]() {
         // Create threadpool scheduler
         std::shared_ptr<arm_compute::IScheduler> threadpool_scheduler
-                = std::make_unique<ThreadpoolScheduler>();
+                = std::make_unique<threadpool_scheduler_t>();
         arm_compute::Scheduler::set(threadpool_scheduler);
     });
 }
@@ -81,19 +81,19 @@ void acl_set_threadpool_num_threads() {
         });
     }
 }
-// Swap BenchmarkScheduler for custom scheduler builds (i.e. ThreadPoolScheduler)
+// Swap benchmark_scheduler_t for custom scheduler builds (i.e. ThreadPoolScheduler)
 void acl_set_tp_benchmark_scheduler() {
     static thread_local std::once_flag flag_once;
     std::call_once(flag_once, [&]() {
         // Create threadpool scheduler
         std::unique_ptr<arm_compute::IScheduler> threadpool_scheduler
-                = std::make_unique<ThreadpoolScheduler>();
+                = std::make_unique<threadpool_scheduler_t>();
         arm_compute::IScheduler *_real_scheduler = nullptr;
         _real_scheduler = threadpool_scheduler.release();
 
         // Create benchmark scheduler and set TP as real scheduler
         std::shared_ptr<arm_compute::IScheduler> benchmark_scheduler
-                = std::make_unique<BenchmarkScheduler>(*_real_scheduler);
+                = std::make_unique<benchmark_scheduler_t>(*_real_scheduler);
 
         arm_compute::Scheduler::set(benchmark_scheduler);
     });

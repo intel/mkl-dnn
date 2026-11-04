@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2022, 2025 Arm Ltd. and affiliates
+* Copyright 2022, 2025-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -30,14 +30,14 @@ namespace impl {
 namespace cpu {
 namespace aarch64 {
 
-class ThreadpoolScheduler final : public arm_compute::IScheduler {
+class threadpool_scheduler_t final : public arm_compute::IScheduler {
 public:
-    ThreadpoolScheduler();
-    ~ThreadpoolScheduler() override;
+    threadpool_scheduler_t();
+    ~threadpool_scheduler_t() override;
 
     /// Sets the number of threads the scheduler will use to run the kernels.
     void set_num_threads(unsigned int num_threads) override;
-    /// Returns the number of threads that the ThreadpoolScheduler has in its pool.
+    /// Returns the number of threads that the threadpool_scheduler_t has in its pool.
     unsigned int num_threads() const override;
 
     /// Multithread the execution of the passed kernel if possible.
