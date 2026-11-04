@@ -51,7 +51,8 @@ struct jit_softmax_kernel_base_t;
 //   out = P*V
 // Block over seq_q into q_block tiles. Each tile computes scores for all seq_kv
 // keys, then applies softmax over that axis using the JIT softmax kernel.
-// Parallelize over batch x num_head_q x query-tiles.
+// Parallelize over batch x query heads (one head or one KV-head group per work
+// item, see sdpa_full_softmax_schedule_t) x query-tiles.
 // -----------------------------------------------------------------------------
 
 // One mm1 (QK^T) post-op in chain order, folded into the BRGEMM store: binary
@@ -69,6 +70,16 @@ struct sdpa_mm1_post_op_t {
     dnnl::impl::data_type_t rhs_dt = dnnl::impl::data_type::f32;
     std::vector<dim_t> rhs_dims, rhs_strides;
 };
+
+// Work decomposition. per_head: a work item is one query block of one query
+// head. kv_head_group: a work item is one query block of all query heads that
+// share a KV head, so each K/V tile is read once for the whole group.
+enum class sdpa_full_softmax_schedule_t { any, per_head, kv_head_group };
+
+// Where K and V are packed when BRGEMM needs them packed. ahead: whole tensors
+// are packed into shared scratch before the main loop. per_tile: a work item
+// packs each tile into its own scratch right before using it.
+enum class sdpa_full_softmax_kv_packing_t { any, ahead, per_tile };
 
 struct sdpa_full_softmax_params_t {
     dim_t batch = 0;
@@ -106,6 +117,11 @@ struct sdpa_full_softmax_params_t {
     // shape and folded into the BRGEMM store. Soft-cap is not wired into this path.
     // Empty when mm1 has no post-ops.
     std::vector<sdpa_mm1_post_op_t> mm1_post_ops;
+
+    // Requested strategies; `any` lets configure() choose.
+    sdpa_full_softmax_schedule_t schedule = sdpa_full_softmax_schedule_t::any;
+    sdpa_full_softmax_kv_packing_t kv_packing
+            = sdpa_full_softmax_kv_packing_t::any;
 };
 
 template <typename T>
@@ -147,6 +163,13 @@ struct tensor_copy_desc_t {
     dim_t vnni_factor = 1;
 };
 
+// Byte offsets of the areas in one thread's scratch block. The score tiles
+// start at offset 0; unused areas have zero size.
+struct sdpa_full_softmax_thread_scratch_t {
+    size_t pv = 0, prob = 0, amx_wsp = 0;
+    size_t size = 0;
+};
+
 // Derived compute configuration: the JIT-free arithmetic (query/KV blocking,
 // per-thread + global scratch layout, AMX palette/wsp). Pure scalar config
 // (mirroring brgemm_matmul_conf_t), computed once by configure() and owned by
@@ -154,6 +177,13 @@ struct tensor_copy_desc_t {
 // BRGEMM descriptors live separately in sdpa_full_softmax_descs_t (like brg_descs_).
 struct sdpa_full_softmax_conf_t {
     sdpa_full_softmax_params_t params;
+    // Resolved strategies (never `any`).
+    sdpa_full_softmax_schedule_t schedule
+            = sdpa_full_softmax_schedule_t::per_head;
+    sdpa_full_softmax_kv_packing_t kv_packing
+            = sdpa_full_softmax_kv_packing_t::ahead;
+    // Query heads per work item: 1, or group_head for kv_head_group.
+    dim_t heads_per_item = 1;
     dim_t q_block = 0, q_tail = 0;
     // mm1 writes the score tile in mm1_n_block-wide column blocks,
     // mm2 reduces P in mm2_k_block-deep blocks.
@@ -166,6 +196,8 @@ struct sdpa_full_softmax_conf_t {
     bool mm2_direct = false;
     bool mm1_needs_vnni_b = false;
     bool mm2_needs_vnni_b = false;
+    // K / V are packed for BRGEMM; kv_packing tells where.
+    bool pack_k = false, pack_v = false;
     dim_t ldk = 0, ldv = 0;
     dim_t ld_scores = 0, ld_prob = 0, ld_pv = 0;
     dim_t v_block = 0, v_tail = 0;
@@ -174,13 +206,18 @@ struct sdpa_full_softmax_conf_t {
     // a binary_select post-op; the descriptors are built accordingly.
     bool mm1_select_postop = false;
     size_t amx_wsp_bytes = 0;
+    sdpa_full_softmax_thread_scratch_t thread_scratch;
     size_t scratch_per_thread = 0;
     size_t copy_buffer_bytes = 0;
     int nthr = 0;
 
-    // The optional copy descriptors describe packed representations in scratch.
+    // The optional copy descriptors describe whole tensors packed ahead into
+    // shared scratch.
     utils::optional_t<tensor_copy_desc_t> q_copy_desc, k_copy_desc, v_copy_desc,
             o_copy_desc, cond_copy_desc;
+    // Tile buffers for packing per tile: scratch_offset is relative to the
+    // thread's scratch block, padded_k is that of a full (non-tail) tile.
+    utils::optional_t<tensor_copy_desc_t> k_tile_desc, v_tile_desc;
 
     // AMX cfg per kernel: mm1 indexed [is_q_tail][is_n_tail], mm2 indexed
     // [is_q_tail][is_k_tail][is_v_tail].
@@ -222,7 +259,9 @@ struct sdpa_full_softmax_kernels_t {
     brgemm_kernel_t *mm1_kernels[2][2] = {};
     brgemm_kernel_t *mm2_kernels[2][2][2] = {};
     brgemm_kernel_t *mm2_kernels_beta0[2][2] = {};
-    std::unique_ptr<sdpa_brgemm_copy::b_packer_t> k_packer, v_packer;
+    // K / V packers. Packing ahead uses [0] for the whole tensor; packing per
+    // tile uses [is_tail] for one tile (the copy kernels bake in their shape).
+    std::unique_ptr<sdpa_brgemm_copy::b_packer_t> k_packers[2], v_packers[2];
 
     // Vectorized JIT softmax kernel and its pd. execute() invokes the kernel
     // for each score row.

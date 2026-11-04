@@ -53,6 +53,8 @@ public:
     static dim_t packed_k(dim_t K, data_type_t dt) {
         return utils::rnd_up(K, k_block(dt));
     }
+    // Panel height of this packer's destination.
+    dim_t padded_k() const { return packed_k(K_, dt_); }
     // Element offset of logical B[k, n] in the separate-panel layout, where
     // padded_k = packed_k(K, dt) and v is the VNNI granularity.
     static size_t panel_offset(dim_t k, dim_t n, dim_t padded_k, dim_t v) {

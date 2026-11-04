@@ -230,6 +230,29 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     bp_.softmax_inf_as_zero
             = desc()->softmax_alg == alg_kind::softmax_accurate_inf_as_zero;
 
+    // Debugging/perf overrides of the full-softmax strategies:
+    // ONEDNN_SDPA_SCHEDULE={per_head,kv_head_group,auto} and
+    // ONEDNN_SDPA_KV_PACKING={ahead,per_tile,auto}.
+    const std::string schedule = getenv_string_user("SDPA_SCHEDULE");
+    if (schedule == "per_head")
+        bp_.schedule = sdpa_full_softmax_schedule_t::per_head;
+    else if (schedule == "kv_head_group")
+        bp_.schedule = sdpa_full_softmax_schedule_t::kv_head_group;
+    else
+        VDISPATCH_SDPA(
+                utils::one_of(schedule, std::string(), std::string("auto")),
+                "unknown ONEDNN_SDPA_SCHEDULE value '%s'", schedule.c_str());
+    const std::string kv_packing = getenv_string_user("SDPA_KV_PACKING");
+    if (kv_packing == "ahead")
+        bp_.kv_packing = sdpa_full_softmax_kv_packing_t::ahead;
+    else if (kv_packing == "per_tile")
+        bp_.kv_packing = sdpa_full_softmax_kv_packing_t::per_tile;
+    else
+        VDISPATCH_SDPA(
+                utils::one_of(kv_packing, std::string(), std::string("auto")),
+                "unknown ONEDNN_SDPA_KV_PACKING value '%s'",
+                kv_packing.c_str());
+
     if (with_attn_scale()) {
         sdpa_mm1_post_op_t sc;
         sc.alg = alg_kind::binary_mul;
