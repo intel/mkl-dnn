@@ -210,9 +210,6 @@ int fill_dst(int exec_arg, const prb_t *prb, dnn_mem_t &mem_dt,
 void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
     skip_unimplemented_data_type({prb->sdt, prb->ddt}, prb->dir, res);
-    skip_unimplemented_sum_po(prb->attr, res, dnnl_reduction, prb->sdt);
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_reduction);
 }
 
 void prb_t::skip_invalid(res_t *res) const {

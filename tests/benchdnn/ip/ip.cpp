@@ -248,26 +248,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
     skip_unimplemented_data_type({prb->get_dt(SRC), prb->get_dt(WEI),
                                          prb->get_dt(BIA), prb->get_dt(DST)},
             prb->dir, res);
-    skip_unimplemented_sum_po(prb->attr, res, dnnl_inner_product,
-            prb->get_dt(SRC), prb->get_dt(DST));
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_inner_product);
-
-    if (is_cpu()) {
-        auto is_dt_f16_or_f32 = [&](dnnl_data_type_t dt) {
-            return dt == dnnl_f16 || dt == dnnl_f32;
-        };
-
-        if (!IMPLICATION(prb->get_dt(SRC) == dnnl_f16
-                            || prb->get_dt(WEI) == dnnl_f16
-                            || prb->get_dt(DST) == dnnl_f16,
-                    is_dt_f16_or_f32(prb->get_dt(SRC))
-                            && is_dt_f16_or_f32(prb->get_dt(WEI))
-                            && is_dt_f16_or_f32(prb->get_dt(DST)))) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-        }
-    }
 }
 
 void prb_t::skip_invalid(res_t *res) const {}

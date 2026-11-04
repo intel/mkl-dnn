@@ -81,11 +81,6 @@ struct simple_t : public primitive_t {
             VDISPATCH_BINARY_SC(attr_.set_default_formats(dst_md(0)),
                     VERBOSE_UNSUPPORTED_POSTOP);
 
-            VDISPATCH_BINARY(!(attr()->post_ops_.len() > 0
-                                     && src_md(0)->data_type == bf16
-                                     && src_md(1)->data_type == bf16
-                                     && dst_md()->data_type == u8),
-                    VERBOSE_UNSUPPORTED_POSTOP);
             CHECK(init_conf(engine));
             return status::success;
         }

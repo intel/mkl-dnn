@@ -471,26 +471,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
     skip_unimplemented_data_type(
             {prb->dt[0], prb->dt[1], prb->ss_dt}, prb->dir, res);
-    skip_unimplemented_sum_po(
-            prb->attr, res, dnnl_layer_normalization, prb->dt[0]);
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_layer_normalization);
-
-    if (is_gpu() && prb->attr.post_ops.len() != 0) {
-        // GPU does not support post-ops
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-        return;
-    }
-
-    if ((is_nvidia_gpu() || is_amd_gpu() || is_generic_gpu())
-            && prb->skip_mean()) {
-        // non-intel GPU does not support rms normalization
-        // todo: remove the check once supported
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-        return;
-    }
 }
 
 void prb_t::skip_invalid(res_t *res) const {

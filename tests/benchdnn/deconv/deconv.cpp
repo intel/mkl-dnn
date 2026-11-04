@@ -351,25 +351,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
     skip_unimplemented_data_type({prb->get_dt(SRC), prb->get_dt(WEI),
                                          prb->get_dt(BIA), prb->get_dt(DST)},
             prb->dir, res);
-    skip_unimplemented_sum_po(
-            prb->attr, res, dnnl_deconvolution, prb->get_dt(SRC));
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_deconvolution);
-
-    // GPU supports only post ops and all but x8s8bf16 and f32xf16f32 cfg
-    if (is_gpu()) {
-        const bool is_x8s8bf16_cfg
-                = prb->get_dt(WEI) == dnnl_s8 && prb->get_dt(DST) == dnnl_bf16;
-        const bool is_f32xf16_cfg = (prb->get_dt(WEI) == dnnl_f16
-                                            || prb->get_dt(WEI) == dnnl_bf16)
-                && prb->get_dt(SRC) == dnnl_f32;
-        const bool fwd_ok = !(is_x8s8bf16_cfg || is_f32xf16_cfg);
-        if (!fwd_ok) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-    }
 }
 
 void prb_t::skip_invalid(res_t *res) const {}

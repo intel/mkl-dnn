@@ -468,36 +468,6 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
 void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
     skip_unimplemented_data_type({prb->dt}, prb->dir, res);
-    skip_unimplemented_sum_po(
-            prb->attr, res, dnnl_batch_normalization, prb->dt);
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_batch_normalization);
-
-    // Non-zero alpha is not supported for training in general.
-    const auto &po = prb->attr.post_ops;
-    const auto relu_idx = po.find(attr_t::post_ops_t::kind_t::RELU);
-    if (relu_idx >= 0) {
-        const auto &e = po.entry[relu_idx];
-        float alpha = e.eltwise.alpha;
-        bool alpha_ok = IMPLICATION(alpha != 0.f, (prb->dir & FLAG_INF));
-        if (!alpha_ok) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-        }
-    }
-    // BN+Add+ReLU fusion is not supported on CPU
-    if (is_cpu() && prb->fuse_add_relu()) {
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-    }
-    // int8 only supports forward s8 w/ global stats
-    const bool u8_not_ok = prb->dt == dnnl_u8;
-    const bool s8_not_ok = prb->dt == dnnl_s8
-            && ((prb->dir & FLAG_BWD) || (prb->flags & GLOB_STATS) == 0);
-    if (s8_not_ok || u8_not_ok) {
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-    }
 }
 
 void prb_t::skip_invalid(res_t *res) const {

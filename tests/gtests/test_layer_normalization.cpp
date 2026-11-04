@@ -170,9 +170,8 @@ protected:
                         memory::data_type::s8, memory::data_type::u8);
 
         allows_attr_t aa {};
-        const bool is_cpu = get_test_engine_kind() == engine::kind::cpu;
-        aa.po_eltwise = is_cpu;
-        aa.po_binary = is_cpu;
+        aa.po_eltwise = true;
+        aa.po_binary = true;
 
         if (is_int8) aa.scales = true;
 

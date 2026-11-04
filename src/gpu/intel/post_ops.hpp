@@ -217,8 +217,10 @@ struct relative_md_t {
     static status_t make(relative_md_t &rmd, const memory_desc_t &md,
             const ndim_normalizer_t &ndim_normalizer) {
         memory_desc_wrapper mdw(md);
-        if (!mdw.is_blocking_desc() && !mdw.is_grouped_desc())
-            return status::unimplemented;
+        VCONDCHECK(primitive, create, dispatch, post_ops,
+                mdw.is_blocking_desc() || mdw.is_grouped_desc(),
+                status::unimplemented, "%s,expected format_kind::blocked, got ",
+                dnnl_fmt_kind2str(md.format_kind));
 
         rmd = relative_md_t();
         rmd.dt = md.data_type;

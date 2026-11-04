@@ -144,21 +144,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t *prb = this; // Kept to avoid mass update
     std::vector<dnnl_data_type_t> dts = {prb->sdt[0], prb->sdt[1], prb->ddt};
     skip_unimplemented_data_type(dts, prb->dir, res);
-    skip_unimplemented_arg_scale(prb->attr, res);
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_binary);
-
-    if (is_gpu()) {
-        // N.B: Adding this for gpu as cfg is not supported in POST-OPS
-        bool have_post_ops = !prb->attr.post_ops.is_def();
-        bool is_bf16u8 = (dts[0] == dnnl_bf16 && dts[1] == dnnl_bf16
-                && dts[2] == dnnl_u8);
-        if (is_bf16u8 && have_post_ops) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_data_type;
-            return;
-        }
-    }
 }
 
 void prb_t::skip_invalid(res_t *res) const {

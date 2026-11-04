@@ -163,10 +163,6 @@ status_t ref_fwd_t::execute(const exec_ctx_t &ctx) const {
 status_t ref_bwd_t::pd_t::init(const impl::engine_t *engine) {
     using namespace data_type;
 
-    // TODO: remove me
-    VDISPATCH_GNORM(
-            false, "The implementation doesn't return the correct result");
-
     const data_type_t src_dt = src_md()->data_type;
     const data_type_t diff_dst_dt = diff_dst_md()->data_type;
     const data_type_t diff_src_dt = diff_src_md()->data_type;
@@ -185,8 +181,7 @@ status_t ref_bwd_t::pd_t::init(const impl::engine_t *engine) {
 
     const auto *intel_engine = utils::downcast<const intel::engine_t *>(engine);
     dispatch = intel_engine->create_dispatch(diff_src_md());
-    // put parallelization dimension
-    dispatch.define_dim("CHANNEL", C());
+    dispatch.define_dim("NGROUPS", desc()->groups);
     dispatch.generate();
 
     return status::success;
@@ -227,6 +222,7 @@ status_t ref_bwd_t::execute(const exec_ctx_t &ctx) const {
     arg_list.append(diff_src);
     arg_list.append(diff_scale);
     arg_list.append(diff_shift);
+    arg_list.append(pd()->C() / pd()->G());
     arg_list.append(pd()->desc()->group_norm_epsilon);
 
     const compute::nd_range_t &nd_range_kernel = pd()->dispatch.nd_range();

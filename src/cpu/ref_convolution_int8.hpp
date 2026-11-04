@@ -51,25 +51,25 @@ struct ref_convolution_int8_fwd_t : public primitive_t {
             VDISPATCH_CONV(
                     utils::one_of(src_type, s8, u8), VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(wei_type == s8, VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_CONV(
-                    IMPLICATION(with_bias(),
-                            utils::one_of(bia_type, f32, bf16, s32, s8, u8)),
+            VDISPATCH_CONV(IMPLICATION(with_bias(),
+                                   utils::one_of(bia_type, f32, bf16, f16, s32,
+                                           s8, u8)),
                     VERBOSE_UNSUPPORTED_BIAS_CFG);
-            VDISPATCH_CONV(utils::one_of(dst_type, f32, bf16, s32, s8, u8),
+            VDISPATCH_CONV(utils::one_of(dst_type, f32, bf16, f16, s32, s8, u8),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_CONV(set_default_formats(), VERBOSE_UNSUPPORTED_TAG);
             VDISPATCH_CONV(
-                    attr()->has_default_values(smask_t::scales
-                                    | smask_t::zero_points | smask_t::post_ops
-                                    | smask_t::sum_dt,
+                    attr()->has_default_values(smask_t::scales_data_type
+                                    | smask_t::zero_points_data_type
+                                    | smask_t::post_ops | smask_t::sum_dt,
                             dst_type),
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_CONV(attr()->post_ops_.check_sum_consistency(dst_type,
                                    /* is_int8 */ true),
                     VERBOSE_UNSUPPORTED_POSTOP);
             CHECK(attr_scales_ok());
-            CHECK(attr_zero_points_ok(
-                    {{DNNL_ARG_SRC, {0, 2}}, {DNNL_ARG_DST, {0, 2}}}));
+            CHECK(attr_zero_points_ok({{DNNL_ARG_SRC, {0, 2}},
+                    {DNNL_ARG_WEIGHTS, {0}}, {DNNL_ARG_DST, {0, 2}}}));
             VDISPATCH_CONV(post_ops_ok(), VERBOSE_UNSUPPORTED_POSTOP);
             VDISPATCH_CONV(
                     attr_.set_default_formats(dst_md(0)) == status::success,

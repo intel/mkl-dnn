@@ -183,73 +183,104 @@ __kernel void ref_gnorm_bwd(__global const SRC_DATA_T *src,
         __global AUX_DATA_T *mean, __global AUX_DATA_T *variance,
         __global const DST_DATA_T *diff_dst, __global const AUX_DATA_T *scale,
         __global SRC_DATA_T *out_diff_src, __global AUX_DATA_T *out_diff_scale,
-        __global AUX_DATA_T *out_diff_shift, const AUX_DATA_T eps) {
+        __global AUX_DATA_T *out_diff_shift, dim_t C_PER_G,
+        const AUX_DATA_T eps) {
 
     // get parallel variables IDs
-    const size_t id_channel = GWS_GET_CHANNEL();
-
-    const size_t C_PER_G = C / G;
+    const size_t id_group = GWS_GET_NGROUPS();
 
     // data conversion
     const GNORM_ACC CSP = C_PER_G * D * H * W;
-    // precalculate reciprocal to avoid several divisions
-    const GNORM_ACC CSP_recip = GNORM_ACC_CONST_1 / CSP;
 
-    const size_t id_group = id_channel / C_PER_G;
+    const size_t channel_start = id_group * C_PER_G;
+    const size_t channel_end = channel_start + C_PER_G;
 
-    GNORM_ACC diff_scale = GNORM_ACC_CONST_0;
-    GNORM_ACC diff_shift = GNORM_ACC_CONST_0;
+    // Pass 1: Compute diff_scale and diff_shift for each channel.
+    for (size_t channel = channel_start; channel < channel_end; ++channel) {
+        GNORM_ACC diff_scale = GNORM_ACC_CONST_0;
+        GNORM_ACC diff_shift = GNORM_ACC_CONST_0;
 
-    for (size_t batch = 0; batch < MB; ++batch) {
-        // load statistic (mean/variance) data values
-        const size_t idx_stat = batch * G + id_group;
-        const GNORM_ACC mean_val = mean[idx_stat];
-        const GNORM_ACC variance_val = variance[idx_stat];
-        const GNORM_ACC variance_recip = rsqrt(variance_val + eps);
+        for (size_t batch = 0; batch < MB; ++batch) {
+            const size_t idx_stat = batch * G + id_group;
+            const GNORM_ACC mean_val = mean[idx_stat];
+            const GNORM_ACC variance_val = variance[idx_stat];
+            const GNORM_ACC variance_recip = rsqrt(variance_val + eps);
 
-        for_(size_t depth = 0; depth < D; ++depth)
-        for_(size_t height = 0; height < H; ++height)
-        for (size_t width = 0; width < W; ++width) {
+            for_(size_t depth = 0; depth < D; ++depth)
+            for_(size_t height = 0; height < H; ++height)
+            for (size_t width = 0; width < W; ++width) {
+                const size_t idx
+                        = SRC_OFF(batch, channel, depth, height, width);
+                const GNORM_ACC src_val = SRC_TO_REF(src[idx]);
+                const GNORM_ACC diff_dst_val = DST_TO_REF(diff_dst[idx]);
 
-            // load main data values
-            const size_t idx = SRC_OFF(batch, id_channel, depth, height, width);
-            const GNORM_ACC src_val = SRC_TO_REF(src[idx]);
-            const GNORM_ACC diff_dst_val = DST_TO_REF(diff_dst[idx]);
-
-            diff_scale += (src_val - mean_val) * diff_dst_val * variance_recip;
-            diff_shift += diff_dst_val;
+                diff_scale
+                        += (src_val - mean_val) * diff_dst_val * variance_recip;
+                diff_shift += diff_dst_val;
+            }
         }
+
+        if (out_diff_scale) out_diff_scale[channel] = diff_scale;
+        if (out_diff_shift) out_diff_shift[channel] = diff_shift;
     }
 
-    if (out_diff_scale) out_diff_scale[id_channel] = diff_scale;
-    if (out_diff_shift) out_diff_shift[id_channel] = diff_shift;
-
-    GNORM_ACC scale_val = scale ? scale[id_channel] : GNORM_ACC_CONST_1;
-
+    // Pass 2: Compute diff_src.
     for (size_t batch = 0; batch < MB; ++batch) {
-        // load statistic (mean/variance) data values
         const size_t idx_stat = batch * G + id_group;
-        const GNORM_ACC variance_val = variance[idx_stat];
         const GNORM_ACC mean_val = mean[idx_stat];
+        const GNORM_ACC variance_val = variance[idx_stat];
         const GNORM_ACC variance_recip = rsqrt(variance_val + eps);
 
-        for_(size_t depth = 0; depth < D; ++depth)
-        for_(size_t height = 0; height < H; ++height)
-        for (size_t width = 0; width < W; ++width) {
-            // load main data values
-            const size_t idx = SRC_OFF(batch, id_channel, depth, height, width);
-            const GNORM_ACC src_val = SRC_TO_REF(src[idx]);
-            GNORM_ACC result = DST_TO_REF(diff_dst[idx]);
+        GNORM_ACC sum_dd_scaled = GNORM_ACC_CONST_0;
+        GNORM_ACC sum_dd_snorm = GNORM_ACC_CONST_0;
 
-            if (CALCULATE_STATS) {
-                const GNORM_ACC diff_stat = diff_shift * CSP_recip
-                        + (src_val - mean_val) * diff_scale * variance_recip
-                                * CSP_recip;
-                result -= diff_stat;
+        if (CALCULATE_STATS) {
+            for (size_t channel = channel_start; channel < channel_end;
+                    ++channel) {
+                const GNORM_ACC scale_val
+                        = scale ? scale[channel] : GNORM_ACC_CONST_1;
+
+                for_(size_t depth = 0; depth < D; ++depth)
+                for_(size_t height = 0; height < H; ++height)
+                for (size_t width = 0; width < W; ++width) {
+                    const size_t idx
+                            = SRC_OFF(batch, channel, depth, height, width);
+                    const GNORM_ACC src_val = SRC_TO_REF(src[idx]);
+                    const GNORM_ACC diff_dst_val = DST_TO_REF(diff_dst[idx]);
+
+                    const GNORM_ACC dd_scaled = diff_dst_val * scale_val;
+                    const GNORM_ACC s_norm
+                            = (src_val - mean_val) * variance_recip;
+
+                    sum_dd_scaled += dd_scaled;
+                    sum_dd_snorm += dd_scaled * s_norm;
+                }
             }
-            result *= scale_val * variance_recip;
+        }
 
-            out_diff_src[idx] = TO_SRC(result);
+        const GNORM_ACC mean_dd_scaled = sum_dd_scaled / CSP;
+        const GNORM_ACC mean_dd_snorm = sum_dd_snorm / CSP;
+
+        for (size_t channel = channel_start; channel < channel_end; ++channel) {
+            const GNORM_ACC scale_val
+                    = scale ? scale[channel] : GNORM_ACC_CONST_1;
+
+            for_(size_t depth = 0; depth < D; ++depth)
+            for_(size_t height = 0; height < H; ++height)
+            for (size_t width = 0; width < W; ++width) {
+                const size_t idx
+                        = SRC_OFF(batch, channel, depth, height, width);
+                const GNORM_ACC src_val = SRC_TO_REF(src[idx]);
+                GNORM_ACC dd_scaled = DST_TO_REF(diff_dst[idx]) * scale_val;
+
+                if (CALCULATE_STATS) {
+                    const GNORM_ACC s_norm
+                            = (src_val - mean_val) * variance_recip;
+                    dd_scaled -= mean_dd_scaled + s_norm * mean_dd_snorm;
+                }
+
+                out_diff_src[idx] = TO_SRC(dd_scaled * variance_recip);
+            }
         }
     }
 }

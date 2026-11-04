@@ -48,10 +48,19 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
     const float *dst_scales
             = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
 
-    const int32_t *src_zero_points = CTX_IN_MEM(
-            const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC);
-    const int32_t *dst_zero_points = CTX_IN_MEM(
-            const int32_t *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST);
+    const void *src_zero_points = CTX_IN_MEM(
+            const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC);
+    const void *dst_zero_points = CTX_IN_MEM(
+            const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST);
+    const void *wei_zero_points = CTX_IN_MEM(
+            const void *, DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS);
+
+    const auto src_zp_dt
+            = pd()->attr()->zero_points_.get_data_type(DNNL_ARG_SRC);
+    const auto dst_zp_dt
+            = pd()->attr()->zero_points_.get_data_type(DNNL_ARG_DST);
+    const auto wei_zp_dt
+            = pd()->attr()->zero_points_.get_data_type(DNNL_ARG_WEIGHTS);
 
     const int wei_scale_mask = pd()->attr()->scales_.get_mask(DNNL_ARG_WEIGHTS);
 
@@ -118,12 +127,15 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
 
             const int s = io::load_int_value(src_d.data_type(), src, src_off);
             const int src_zp = src_zero_points
-                    ? io::load_int_value(data_type::s32, src_zero_points,
+                    ? io::load_int_value(src_zp_dt, src_zero_points,
                               src_zp_idx_mult * (g * IC + ic))
                     : 0;
             const int w = io::load_int_value(
                     weights_d.data_type(), weights, wei_off);
-            d += (s - src_zp) * w;
+            const int wei_zp = wei_zero_points
+                    ? io::load_int_value(wei_zp_dt, wei_zero_points, 0)
+                    : 0;
+            d += (s - src_zp) * (w - wei_zp);
         }
         return d;
     };
@@ -177,13 +189,15 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
                     const int s = io::load_int_value(
                             src_d.data_type(), src_loc, src_off + src_loc_off);
                     const int src_zp = src_zero_points
-                            ? io::load_int_value(data_type::s32,
-                                      src_zero_points,
+                            ? io::load_int_value(src_zp_dt, src_zero_points,
                                       src_zp_idx_mult * (g * IC + ic))
                             : 0;
                     const int w = io::load_int_value(weights_d.data_type(),
                             weights_loc, weights_off + weights_loc_off);
-                    d += (s - src_zp) * w;
+                    const int wei_zp = wei_zero_points
+                            ? io::load_int_value(wei_zp_dt, wei_zero_points, 0)
+                            : 0;
+                    d += (s - src_zp) * (w - wei_zp);
                 }
             }
         } else {
@@ -205,12 +219,15 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
                 const int s = io::load_int_value(
                         src_d.data_type(), src_loc, src_off + src_loc_off);
                 const int src_zp = src_zero_points
-                        ? io::load_int_value(data_type::s32, src_zero_points,
+                        ? io::load_int_value(src_zp_dt, src_zero_points,
                                   src_zp_idx_mult * (g * IC + ic))
                         : 0;
                 const int w = io::load_int_value(weights_d.data_type(),
                         weights_loc, weights_off + weights_loc_off);
-                d += (s - src_zp) * w;
+                const int wei_zp = wei_zero_points
+                        ? io::load_int_value(wei_zp_dt, wei_zero_points, 0)
+                        : 0;
+                d += (s - src_zp) * (w - wei_zp);
             }
         }
         return d;
@@ -256,8 +273,8 @@ status_t ref_convolution_int8_fwd_t::execute_forward(
         if (dst_scales) d /= dst_scales[0];
 
         if (dst_zero_points) {
-            const int dst_zp = io::load_int_value(data_type::s32,
-                    dst_zero_points, dst_zp_idx_mult * (g * OC + oc));
+            const int dst_zp = io::load_int_value(dst_zp_dt, dst_zero_points,
+                    dst_zp_idx_mult * (g * OC + oc));
             d += dst_zp;
         }
         io::store_float_value(dst_d.data_type(), d, dst, dst_off);

@@ -46,6 +46,8 @@ struct ref_fwd_t : public primitive_t {
             auto dst_dt = dst_md()->data_type;
 
             using skip_mask_t = primitive_attr_t::skip_mask_t;
+            const auto attr_skip_mask
+                    = skip_mask_t::scales | skip_mask_t::post_ops;
 
             bool uses_f16 = utils::one_of(f16, src_dt, dst_dt);
             bool uses_f64 = utils::one_of(f64, src_dt, dst_dt);
@@ -64,11 +66,16 @@ struct ref_fwd_t : public primitive_t {
                     stat_md()->data_type == f32, VERBOSE_UNSUPPORTED_DT_CFG);
             VDISPATCH_LNORM(check_scale_shift_data_type({f32, bf16, f16}),
                     VERBOSE_UNSUPPORTED_DT_CFG);
-            VDISPATCH_LNORM(attr()->has_default_values(skip_mask_t::scales),
+            VDISPATCH_LNORM(attr()->has_default_values(attr_skip_mask),
                     VERBOSE_UNSUPPORTED_ATTR);
             VDISPATCH_LNORM(attr_scales_ok(), VERBOSE_UNSUPPORTED_SCALES_CFG);
             VDISPATCH_LNORM(
                     set_default_formats_common(), VERBOSE_UNSUPPORTED_TAG);
+            VDISPATCH_LNORM(
+                    post_ops_with_binary_ok(attr(), *dst_md(), dst_md()->ndims),
+                    VERBOSE_UNSUPPORTED_POSTOP);
+            VDISPATCH_LNORM_SC(attr_.set_default_formats(dst_md(0)),
+                    VERBOSE_UNSUPPORTED_POSTOP);
             CHECK(init_conf(engine));
             return status::success;
         }

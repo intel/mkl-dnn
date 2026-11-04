@@ -21,7 +21,7 @@ KERNEL_ATTR
 __kernel void ref_lnorm_fwd(__global DATA_T *src, __global float *mean,
         __global float *variance, __global DST_DATA_T *dst,
         __global WEI_DATA_T *scale, __global WEI_DATA_T *shift, float eps,
-        __global float *src_scale, __global float *dst_scale) {
+        __global float *src_scale, __global float *dst_scale POST_OP_ARGS) {
 
     off_t x[6] = {0};
     x[0] = GWS_GET_X0();
@@ -78,9 +78,14 @@ __kernel void ref_lnorm_fwd(__global DATA_T *src, __global float *mean,
 #if WITH_SRC_SCALES
         d *= src_scale[0];
 #endif
+
+        POST_OP_DATA_T sum_src;
+        APPLY_POST_OPS_SERIAL(d, sum_src, x[0], x[1], x[2], x[3], x[4], x[5]);
+
 #if WITH_DST_SCALES
         d /= dst_scale[0];
 #endif
+
         dst[dst_off] = TO_DST(d);
     }
 

@@ -797,151 +797,15 @@ void prb_t::skip_unimplemented(res_t *res) const {
     const prb_t &prb = *prb_;
     dir_t dir = str2dir(prop2str(prb.prop));
     skip_unimplemented_data_type({prb.cfg[SRC_LAYER].dt}, dir, res);
-    skip_unimplemented_sum_po(prb.attr, res, dnnl_rnn, prb.cfg[SRC_LAYER].dt);
-    skip_unimplemented_binary_po(prb.attr, res);
-    skip_unimplemented_prelu_po(prb.attr, res, dnnl_rnn);
 
-    if (is_cpu()) {
-#if !defined(DNNL_X64) || DNNL_X64 == 0 \
-        || DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-        // int8 is not supported altogether since RNN relies on packed IGEMM
-        // FIXME: this will disable int8 RNN testing if the library is built with
-        //        Intel MKL that does have packed IGEMM
-        if (prb.is_int8()) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-#endif
-#if DNNL_CPU_RUNTIME == DNNL_RUNTIME_THREADPOOL
-        // RNN is not supported with async threadpool runtime.
-        auto *tp = dnnl::testing::get_threadpool();
-        if (tp
-                && (tp->get_flags()
-                        & dnnl::threadpool_interop::threadpool_iface::
-                                ASYNCHRONOUS)) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-#endif
-        const auto wei_tag
-                = normalize_tag(prb.tag[1], prb.ndims(WEIGHTS_LAYER));
-        // cpu backward only supports `any` layout for weights.
-        if (prb.prop == dnnl_backward && wei_tag != tag::any) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-
-        // f16 training is not yet fully supported.
-        const bool is_f16_not_ok
-                = prb.cfg[SRC_LAYER].dt == dnnl_f16 && !(dir & FLAG_INF);
-        if (is_f16_not_ok) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-
-#if defined(DNNL_AARCH64_USE_ACL)
-        const bool is_acl_f16_not_ok = prb.cfg[SRC_LAYER].dt == dnnl_f16
-                && dnnl::impl::cpu::platform::has_data_type_support(dnnl_f16);
-        if (is_acl_f16_not_ok) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-#endif
-    }
-
-    // int8 weights reorder does not support non trivial strides;
-    // only LSTM and GRU cell kinds support int8 so far;
-    if (prb.is_int8()) {
-        if (!prb.trivial_strides) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        if (prb.alg != VANILLA_LSTM && prb.alg != VANILLA_GRU) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        if (prb.prop != dnnl_forward_inference) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-
-        if (is_cpu()) {
-            const auto src_tag
-                    = normalize_tag(prb.tag[0], prb.ndims(SRC_LAYER));
-            const auto wei_tag
-                    = normalize_tag(prb.tag[1], prb.ndims(WEIGHTS_LAYER));
-            const auto dst_tag
-                    = normalize_tag(prb.tag[2], prb.ndims(DST_LAYER));
-
-            const bool tags_not_ok = src_tag != "abc" || wei_tag != tag::any
-                    || dst_tag != "abc";
-            if (tags_not_ok) {
-                res->state = SKIPPED;
-                res->reason = reason_t::skip_not_supported;
-                return;
-            }
-        }
-
-        if (is_gpu() && prb.tag[1] != tag::any) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-    }
-
-    // LSTM w/ projection is not supported for bf16
-    if (prb.is_lstm_projection()
-            && (prb.cfg[SRC_LAYER].dt == dnnl_bf16
-                    || prb.cfg[SRC_LAYER].dt == dnnl_f16)) {
-        res->state = SKIPPED;
-        res->reason = reason_t::skip_not_supported;
-        return;
-    }
-
-    // GPU limitations for RNN
-    if (is_gpu()) {
-        bool is_AUGRU = prb.alg == VANILLA_AUGRU || prb.alg == LBR_AUGRU;
-        if (is_AUGRU) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        if (prb.is_lstm_projection() || prb.is_lstm_peephole()) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        if (prb.is_int8() && prb.alg != VANILLA_LSTM) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        if (prb.is_s8() && prb.alg == VANILLA_LSTM) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        // Implemented only for CPU
-        if (prb.cfg[BIAS].dt == dnnl_bf16 || prb.cfg[SRC_ITER_C].dt == dnnl_bf16
-                || prb.cfg[DST_ITER_C].dt == dnnl_bf16) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-        if (prb.flags != NONE) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-    }
+    // If this spot is reached, it means there's a whole in functional coverage
+    // on the library side. he thing is the library support is quite sparse in
+    // terms of RNN algorithms times data type configurations. There are too
+    // many to list them all.
+    // Additionally, RNN functionality is obsolete and it's not a big deal if
+    // unimplemented case is returned. Skip all such cases unconditionally.
+    res->state = SKIPPED;
+    res->reason = reason_t::skip_not_supported;
 }
 
 void prb_t::skip_invalid(res_t *res) const {

@@ -383,45 +383,6 @@ void prb_t::skip_unimplemented(res_t *res) const {
     skip_unimplemented_data_type({prb->get_dt(SRC), prb->get_dt(WEI),
                                          prb->get_dt(BIA), prb->get_dt(DST)},
             prb->dir, res);
-    skip_unimplemented_sum_po(prb->attr, res, dnnl_convolution,
-            prb->get_dt(SRC), prb->get_dt(DST));
-    skip_unimplemented_binary_po(prb->attr, res);
-    skip_unimplemented_prelu_po(prb->attr, res, dnnl_convolution);
-
-    if (is_cpu()) {
-        // Specific configurations are not supported.
-        const bool is_f32_src = prb->get_dt(SRC) == dnnl_f32;
-        const bool is_f32_wei = prb->get_dt(WEI) == dnnl_f32;
-        const bool is_f16 = prb->get_dt(WEI) == dnnl_f16;
-        const bool is_bf16_src = prb->get_dt(SRC) == dnnl_bf16;
-        const bool is_bf16_wei = prb->get_dt(WEI) == dnnl_bf16;
-        const bool is_int8_dst
-                = prb->get_dt(DST) == dnnl_s8 || prb->get_dt(DST) == dnnl_u8;
-        const bool is_f32f32x8 = is_f32_src && is_f32_wei && is_int8_dst;
-        const bool is_bf16bf16x8 = is_bf16_src && is_bf16_wei && is_int8_dst;
-        const bool is_valid_f16 = IMPLICATION(is_f16,
-                prb->get_dt(DST) == dnnl_f32 || prb->get_dt(DST) == dnnl_f16);
-        const bool is_int8_src
-                = prb->get_dt(SRC) == dnnl_s8 || prb->get_dt(SRC) == dnnl_u8;
-        const bool is_int8_wei
-                = prb->get_dt(WEI) == dnnl_s8 || prb->get_dt(WEI) == dnnl_u8;
-        const bool is_f16_dst = prb->get_dt(DST) == dnnl_f16;
-        const bool is_x8x8f16 = is_int8_src && is_int8_wei && is_f16_dst;
-        const bool is_wei_zp = !prb->attr.zero_points.is_def(DNNL_ARG_WEIGHTS);
-        const bool is_non_s32_src_zp
-                = prb->attr.zero_points.get(DNNL_ARG_SRC).dt != dnnl_s32;
-        const bool is_non_unit_dst_scale
-                = !prb->attr.scales.is_def(DNNL_ARG_DST)
-                && prb->attr.scales.get_mask(DNNL_ARG_DST, dnnl_convolution)
-                        > 0;
-
-        if (is_f32f32x8 || is_bf16bf16x8 || is_x8x8f16 || !is_valid_f16
-                || is_wei_zp || is_non_s32_src_zp || is_non_unit_dst_scale) {
-            res->state = SKIPPED;
-            res->reason = reason_t::skip_not_supported;
-            return;
-        }
-    }
 
     // Winograd implementation has very limited scope and support. It doesn't
     // make sense to list all of them, just convert all unimplemented Winograd
