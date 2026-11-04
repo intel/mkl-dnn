@@ -17,7 +17,7 @@
 # workaround for icx cannot init constexpr with dllimport symbols(detail::handle)
 # also, suppose it's unnecessary for users to link the library with the flag.
 if (DNNL_LIBRARY_TYPE STREQUAL "SHARED")
-    remove_definitions(-DDNNL_DLL)
+    remove_definitions_with_host_compiler(-DDNNL_DLL)
 endif()
 
 include_directories_with_host_compiler(

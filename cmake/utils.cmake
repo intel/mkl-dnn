@@ -130,6 +130,21 @@ macro(add_definitions_with_host_compiler)
     endforeach()
 endmacro()
 
+macro(remove_definitions_with_host_compiler)
+    foreach(def ${ARGV})
+        remove_definitions(${def})
+        if(NOT DNNL_DPCPP_HOST_COMPILER STREQUAL "DEFAULT"
+            AND CMAKE_CXX_FLAGS MATCHES "-fsycl-host-compiler-options=\"([^\"]*)\"")
+            set(_host_opts " ${CMAKE_MATCH_1} ")
+            string(REPLACE " ${def} " " " _host_opts "${_host_opts}")
+            string(STRIP "${_host_opts}" _host_opts)
+            string(REGEX REPLACE
+                "(-fsycl-host-compiler-options=)\"[^\"]*\""
+                "\\1\"${_host_opts}\"" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+        endif()
+    endforeach()
+endmacro()
+
 # Append a path to path_list variable (Windows-only version)
 macro(append_to_windows_path_list path_list path)
     file(TO_NATIVE_PATH "${path}" append_to_windows_path_list_tmp__)
