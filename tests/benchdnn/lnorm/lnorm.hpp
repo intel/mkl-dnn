@@ -205,10 +205,8 @@ struct perf_report_t : public base_perf_report_t {
     perf_report_t(const base_prb_t *base_prb, const char *perf_template)
         : base_perf_report_t(perf_template)
         , p_(prb_t::from(base_prb))
-        , stat_tag_(normalize_tag(p_->stat_tag, p_->ndims - 1)) {
-        for (size_t d = 0; d < p_->tag.size(); d++)
-            stag_.push_back(normalize_tag(p_->tag[d], p_->ndims));
-    }
+        , stag_(normalize_tags(p_->tag, p_->ndims))
+        , stat_tag_(normalize_tag(p_->stat_tag, p_->ndims - 1)) {}
 
     void dump_desc(std::ostream &s) const override {
         s << static_cast<const prb_dims_t &>(*p_);
