@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2022-2023 Arm Ltd. and affiliates
+* Copyright 2022-2023, 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -33,16 +33,16 @@ namespace acl_thread_utils {
 // Number of threads in Compute Library is set by OMP_NUM_THREADS
 // dnnl_get_max_threads() == OMP_NUM_THREADS
 void acl_thread_bind();
-// Swap BenchmarkScheduler for default ACL scheduler builds (i.e. CPPScheduler, OMPScheduler)
+// Swap benchmark_scheduler_t for default ACL scheduler builds (i.e. CPPScheduler, OMPScheduler)
 // for DNNL_VERBOSE=profile,profile_externals
 void acl_set_benchmark_scheduler_default();
 #endif
 
 #if DNNL_CPU_THREADING_RUNTIME == DNNL_RUNTIME_THREADPOOL
-// Retrieve threadpool size during primitive execution and set ThreadpoolScheduler num_threads
+// Retrieve threadpool size during primitive execution and set threadpool_scheduler_t num_threads
 void acl_set_tp_scheduler();
 void acl_set_threadpool_num_threads();
-// Swap BenchmarkScheduler for custom scheduler builds (i.e. ThreadPoolScheduler) for DNNL_VERBOSE=profile,profile_externals
+// Swap benchmark_scheduler_t for custom scheduler builds (i.e. ThreadPoolScheduler) for DNNL_VERBOSE=profile,profile_externals
 void acl_set_tp_benchmark_scheduler();
 #endif
 // Set threading for ACL

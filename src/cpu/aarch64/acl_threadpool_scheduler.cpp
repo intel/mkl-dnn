@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2022-2025 Arm Ltd. and affiliates
+* Copyright 2022-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ namespace aarch64 {
 
 using namespace arm_compute;
 
-class ThreadFeeder {
+class thread_feeder_t {
 public:
-    explicit ThreadFeeder(unsigned int start = 0, unsigned int end = 0)
+    explicit thread_feeder_t(unsigned int start = 0, unsigned int end = 0)
         : _atomic_counter(start), _end(end) {}
 
     /// Function to check the next element in the range if there is one.
@@ -55,7 +55,7 @@ private:
 };
 
 void process_workloads(std::vector<IScheduler::Workload> &workloads,
-        ThreadFeeder &feeder, const ThreadInfo &info) {
+        thread_feeder_t &feeder, const ThreadInfo &info) {
     unsigned int workload_index = info.thread_id;
     do {
         ARM_COMPUTE_ERROR_ON(workload_index >= workloads.size());
@@ -63,35 +63,35 @@ void process_workloads(std::vector<IScheduler::Workload> &workloads,
     } while (feeder.get_next(workload_index));
 }
 
-ThreadpoolScheduler::ThreadpoolScheduler()
+threadpool_scheduler_t::threadpool_scheduler_t()
     : _num_threads(dnnl_get_max_threads()) {}
 
-ThreadpoolScheduler::~ThreadpoolScheduler() = default;
+threadpool_scheduler_t::~threadpool_scheduler_t() = default;
 
-unsigned int ThreadpoolScheduler::num_threads() const {
+unsigned int threadpool_scheduler_t::num_threads() const {
     return _num_threads;
 }
 
-void ThreadpoolScheduler::set_num_threads(unsigned int num_threads) {
+void threadpool_scheduler_t::set_num_threads(unsigned int num_threads) {
     std::lock_guard<std::mutex> lock(this->_mtx);
     _num_threads = num_threads == 0 ? dnnl_get_max_threads() : num_threads;
 }
 
-void ThreadpoolScheduler::schedule(ICPPKernel *kernel, const Hints &hints) {
+void threadpool_scheduler_t::schedule(ICPPKernel *kernel, const Hints &hints) {
     ITensorPack tensors;
-    // Retrieve threadpool size during primitive execution and set ThreadpoolScheduler num_threads
+    // Retrieve threadpool size during primitive execution and set threadpool_scheduler_t num_threads
     acl_thread_utils::acl_set_threadpool_num_threads();
     schedule_common(kernel, hints, kernel->window(), tensors);
 }
 
-void ThreadpoolScheduler::schedule_op(ICPPKernel *kernel, const Hints &hints,
+void threadpool_scheduler_t::schedule_op(ICPPKernel *kernel, const Hints &hints,
         const Window &window, ITensorPack &tensors) {
-    // Retrieve threadpool size during primitive execution and set ThreadpoolScheduler num_threads
+    // Retrieve threadpool size during primitive execution and set threadpool_scheduler_t num_threads
     acl_thread_utils::acl_set_threadpool_num_threads();
     schedule_common(kernel, hints, window, tensors);
 }
 
-void ThreadpoolScheduler::run_workloads(
+void threadpool_scheduler_t::run_workloads(
         std::vector<arm_compute::IScheduler::Workload> &workloads) {
 
     std::lock_guard<std::mutex> lock(this->_mtx);
@@ -100,7 +100,7 @@ void ThreadpoolScheduler::run_workloads(
             = std::min(static_cast<unsigned int>(_num_threads),
                     static_cast<unsigned int>(workloads.size()));
     if (num_threads < 1) { return; }
-    ThreadFeeder feeder(num_threads, workloads.size());
+    thread_feeder_t feeder(num_threads, workloads.size());
     using namespace dnnl::impl::threadpool_utils;
     dnnl::threadpool_interop::threadpool_iface *tp = get_active_threadpool();
     // Non-initialized threadpool can cause a segmentation fault.
