@@ -228,7 +228,9 @@ void jit_pp_ker_t::operator()(void *void_dst, const acc_data_t *acc,
     const dim_t g_oc_offset = g * jcp_.oc;
     const dim_t g_oc_offset_prologue = g_oc_offset + oc_offset;
     args.bias = bias + g_oc_offset_prologue * bias_data_type_size_;
-    args.zp_src = zp.src + (jcp_.zp.src_is_common ? 0 : g_oc_offset_prologue);
+    args.zp_src = zp.src
+            ? zp.src + (jcp_.zp.src_is_common ? 0 : g_oc_offset_prologue)
+            : nullptr;
     args.zp_src_comp
             = zp.src_comp ? zp.src_comp + g_oc_offset_prologue : nullptr;
     args.zp_dst = zp.dst;
