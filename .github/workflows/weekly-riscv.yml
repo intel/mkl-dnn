@@ -110,16 +110,10 @@ jobs:
       max-parallel: 2
       matrix:
         config: [
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 1, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 2, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 3, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 4, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 5, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 6, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 7, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 8, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 9, stride: 10 },
-          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 10, stride: 10 }
+          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 1, stride: 4 },
+          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 2, stride: 4 },
+          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 3, stride: 4 },
+          { name: riscv-test-vlen128, threading: OMP, testset: CI, vlen: 128, build: RelWithAssert, part: 4, stride: 4 }
         ]
 
     name: ${{ matrix.config.name }}, ${{ matrix.config.threading }}, part-${{ matrix.config.part }}
