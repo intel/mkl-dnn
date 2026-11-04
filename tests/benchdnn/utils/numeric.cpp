@@ -354,6 +354,7 @@ void set_element(dnnl_data_type_t dt, int64_t idx, void *ptr, float value) {
         CASE(dnnl_f8_e5m2);
         CASE(dnnl_f8_e4m3);
         case dnnl_f64: ((double *)ptr)[idx] = value; break;
+        case dnnl_boolean: ((bool *)ptr)[idx] = value != 0.f; break;
         case dnnl_s4: {
             auto dst_val = ((dnnl::impl::nibble2_t *)ptr)[idx / 2];
             dst_val.set(dnnl::impl::int4_t(value).raw_bits_, idx % 2);
@@ -370,6 +371,12 @@ void set_element(dnnl_data_type_t dt, int64_t idx, void *ptr, float value) {
             auto dst_val = ((dnnl::impl::nibble2_t *)ptr)[idx / 2];
             dst_val.set(dnnl::impl::float4_e2m1_t(value).raw_bits_, idx % 2);
             ((dnnl::impl::nibble2_t *)ptr)[idx / 2] = dst_val;
+            break;
+        }
+        case dnnl_u2: {
+            auto dst_val = ((dnnl::impl::nibble4_t *)ptr)[idx / 4];
+            dst_val.set(dnnl::impl::uint2_t(value).raw_bits_, idx % 4);
+            ((dnnl::impl::nibble4_t *)ptr)[idx / 4] = dst_val;
             break;
         }
         case dnnl_u3: {

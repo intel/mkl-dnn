@@ -42,6 +42,7 @@
 #include "dnnl_memory.hpp"
 #include "utils/cold_cache.hpp"
 #include "utils/dnnl_query.hpp"
+#include "utils/fill.hpp"
 #include "utils/memory.hpp"
 #include "utils/parallel.hpp"
 #include "utils/stream_kind.hpp"
@@ -615,23 +616,35 @@ void dnn_mem_t::memset(int value, size_t size, int buffer_index) const {
 #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
 extern "C" dnnl_status_t dnnl_impl_gpu_fill_random(dnnl_stream_t stream,
-        size_t size, dnnl_memory_t memory, int buffer_index, uint32_t seed);
+        size_t size, dnnl_memory_t memory, int buffer_index, uint32_t seed,
+        uint32_t mask, uint64_t value);
 
-// Fills buffer with pseudo-random data generated directly on the device.
-// This mitigates GPU driver data compression, which could otherwise yield
+// Fills buffer on the device with (random & mask) | value. Random data
+// mitigates GPU driver data compression, which could otherwise yield
 // unrealistically high bandwidth measurements in mode=F (e.g., via memset).
-int dnn_mem_t::gpu_fill_random(size_t size, int buffer_index) const {
-    if (is_cpu(engine_)) {
-        BENCHDNN_PRINT(0, "%s\n", "gpu_fill_random called with CPU engine");
-        return FAIL;
-    }
+int dnn_mem_t::gpu_fill_random(
+        size_t size, int buffer_index, uint32_t mask, uint64_t value) const {
     static constexpr uint32_t seed = 123456789;
     auto mem = m_padded_ ? m_padded_ : m_;
     stream_t stream(engine_);
-    DNN_SAFE(dnnl_impl_gpu_fill_random(stream, size, mem, buffer_index, seed),
+    DNN_SAFE(dnnl_impl_gpu_fill_random(
+                     stream, size, mem, buffer_index, seed, mask, value),
             WARN);
     DNN_SAFE(dnnl_stream_wait(stream), WARN);
     return OK;
+}
+
+bool dnn_mem_t::can_fill_random() const {
+    return !is_cpu(engine_);
+}
+#else
+int dnn_mem_t::gpu_fill_random(
+        size_t size, int buffer_index, uint32_t mask, uint64_t value) const {
+    return FAIL;
+}
+
+bool dnn_mem_t::can_fill_random() const {
+    return false;
 }
 #endif
 
@@ -1044,9 +1057,14 @@ int dnn_mem_t::initialize(bool prefill, const handle_info_t &handle_info) {
     // this common place.
     // ANCHOR: FILL_SPARSE_METADATA.
     const bool mem_has_indirect_access = is_sparse_md();
-    if (!has_bench_mode_modifier(mode_modifier_t::no_ref_memory)
-            || mem_has_indirect_access)
-        map();
+    const bool no_ref_memory
+            = has_bench_mode_modifier(mode_modifier_t::no_ref_memory);
+    const bool need_map = !no_ref_memory || mem_has_indirect_access;
+    // TODO: consider enabling broadly for perf mode.
+    const bool skip_magic_fill = no_ref_memory
+            || cold_cache_input.cold_cache_mode_
+                    != default_cold_cache_input().cold_cache_mode_;
+    if (need_map && !skip_magic_fill) map();
 
     const int nhandles = query_md_num_handles(md_);
     for (int i = 0; i < nhandles; i++) {
@@ -1059,29 +1077,19 @@ int dnn_mem_t::initialize(bool prefill, const handle_info_t &handle_info) {
 
         // Avoid costy data reorders for cold cache mode when
         // initializing cold cache buffers.
-        // TODO: consider enabling broadly for perf mode.
-        if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)
-                || cold_cache_input.cold_cache_mode_
-                        != default_cold_cache_input().cold_cache_mode_) {
-#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
-        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-            if (!is_cpu(engine_))
-                // Fill memory with pseudo-random data directly on device
-                // to avoid data compression.
-                SAFE(this->gpu_fill_random(sz, i), WARN);
-            else
-                // Fill memory directly with 0x3F3F3F3F (0.747059f).
-                this->memset(dnnl_mem_default_perf_test_value, sz, i);
-#else
-            // Fill memory directly with 0x3F3F3F3F (0.747059f).
-            this->memset(dnnl_mem_default_perf_test_value, sz, i);
-#endif
+        if (skip_magic_fill) {
+            // Skips sparse metadata (i > 0).
+            const bool use_fill = no_ref_memory && i == 0;
+            SAFE(fill_by_input(
+                         *this, use_fill ? fill_input : fill_input_t(), sz, i),
+                    WARN);
         } else {
             // Fill memory with a magic number (NAN for fp data types)
             // to catch possible uninitialized access.
             ::memset(mapped_ptrs_[i], dnnl_mem_default_value, sz);
         }
     }
+    if (need_map && skip_magic_fill) map();
 
     return OK;
 }

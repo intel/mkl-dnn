@@ -180,10 +180,9 @@ struct dnn_mem_t {
     void map() const;
     void unmap() const;
     void memset(int value, size_t size, int buffer_index) const;
-#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
-        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-    int gpu_fill_random(size_t size, int buffer_index) const;
-#endif
+    int gpu_fill_random(
+            size_t size, int buffer_index, uint32_t mask, uint64_t value) const;
+    bool can_fill_random() const;
 
     static dnn_mem_t create_from_host_ptr(const dnnl_memory_desc_t &md,
             const engine_t &engine, void *host_ptr);

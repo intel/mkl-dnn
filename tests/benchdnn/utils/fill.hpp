@@ -101,6 +101,20 @@ int fill_random_real(dnn_mem_t &mem_ref,
 
 extern std::string buffer_prefix;
 
+struct fill_input_t {
+    int value = -1; // -1: random data, otherwise the constant value
+    uint32_t mask = 0xFFFFFFFFu;
+    bool is_const() const { return value >= 0; }
+    bool is_def() const { return !is_const() && mask == 0xFFFFFFFFu; }
+};
+std::ostream &operator<<(std::ostream &s, const fill_input_t &fill);
+
+extern fill_input_t fill_input;
+extern bool fill_input_applied;
+
+int fill_by_input(const dnn_mem_t &mem, const fill_input_t &fill, size_t size,
+        int buffer_index);
+
 bool fill_from_file(
         int exec_arg, dnn_mem_t &mem, dnn_mem_t &ref_mem, res_t *res);
 
