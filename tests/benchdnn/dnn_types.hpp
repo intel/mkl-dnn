@@ -878,6 +878,8 @@ std::string trim_tag_by_mask(const std::string &tag, int mask);
 
 // Converts a tag/meta-tag to abc notation.
 std::string normalize_tag(const std::string &tag, int ndims = -1);
+std::vector<std::string> normalize_tags(
+        const std::vector<std::string> &tags, int ndims);
 
 dnnl_status_t create_dnnl_attr(
         benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> &dnnl_attr,

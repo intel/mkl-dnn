@@ -2020,6 +2020,15 @@ std::string normalize_tag(const std::string &tag_, int ndims) {
     return trimmed_tag;
 }
 
+std::vector<std::string> normalize_tags(
+        const std::vector<std::string> &tags, int ndims) {
+    std::vector<std::string> res;
+    res.reserve(tags.size());
+    for (const auto &tag : tags)
+        res.push_back(normalize_tag(tag, ndims));
+    return res;
+}
+
 int check_tag(const std::string &tag_, bool check_enum_tags_only) {
     auto tag = normalize_tag(tag_);
     if (tag == tag::undef || tag == tag::any) return OK;

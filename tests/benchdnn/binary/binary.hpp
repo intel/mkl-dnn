@@ -110,10 +110,8 @@ struct perf_report_t : public base_perf_report_t {
     perf_report_t(const base_prb_t *base_prb, const char *perf_template)
         : base_perf_report_t(perf_template)
         , p_(prb_t::from(base_prb))
-        , dtag_(normalize_tag(p_->dtag, p_->ndims)) {
-        for (size_t d = 0; d < p_->stag.size(); d++)
-            stag_.push_back(normalize_tag(p_->stag[d], p_->ndims));
-    }
+        , stag_(normalize_tags(p_->stag, p_->ndims))
+        , dtag_(normalize_tag(p_->dtag, p_->ndims)) {}
 
     void dump_alg(std::ostream &s) const override { s << p_->alg; }
 
