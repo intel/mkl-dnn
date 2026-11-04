@@ -321,7 +321,7 @@ TEST(test_interface_compiled_partition, CacheMethod) {
 
 #ifndef DNNL_GRAPH_DISABLE_COMPILED_PARTITION_CACHE
     graph::partition_hashing::key_t key(
-            &eng, {elt}, inputs, outputs, par.get_fpmath_mode());
+            &eng, {elt}, inputs, outputs, par.get_attr());
     auto &cache_mapper = graph::compiled_partition_cache();
     ASSERT_NO_THROW(cache_mapper.get_partition(key));
 

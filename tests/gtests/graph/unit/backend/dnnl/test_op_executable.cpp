@@ -42,11 +42,11 @@ TEST(test_op_executable, DummyArgIndicesGetterDeathTest) {
 TEST(test_op_executable, DummyExecutableCreatorDeathTest) {
     dnnl::engine p_engine;
     dnnl_impl::pd_cache_t pd_cache;
-    const graph::fpmath_t fpm;
+    const graph::graph_attr_t graph_attr;
     bool use_block_layout = false;
     auto op = std::make_shared<graph::op_t>(0, graph::op_kind::Wildcard, "op");
-    EXPECT_DEBUG_DEATH(dnnl_impl::dummy_executable_creator(
-                               op, p_engine, pd_cache, fpm, use_block_layout),
+    EXPECT_DEBUG_DEATH(dnnl_impl::dummy_executable_creator(op, p_engine,
+                               pd_cache, graph_attr, use_block_layout),
             "dummy executable creator should never be called");
 }
 
