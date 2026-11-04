@@ -136,7 +136,8 @@ output with `ir::print_kernel_dump()` (see Debug Output).
   build-time constant displacement, with no index and no scale. Any distance known
   only at run time is folded into the base pointer with an explicit `add`. Every
   memory operation then reads at most one pointer, which lowers register pressure
-  and simplifies spilling.
+  and simplifies spilling. A tile load or store also reads a stride gpr, the
+  byte distance between rows.
 * **Structured control flow.** Loops and conditionals are explicit nested
   nodes. A loop (`loop_begin`/`loop_end`) has a runtime counter. A conditional
   (`if_begin`/`_else`/`if_end`) compares a gpr with a gpr or a build-time

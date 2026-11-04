@@ -32,6 +32,7 @@
 
 #include "common/c_types_map.hpp"
 
+#include "cpu/x64/amx_tile_configure.hpp"
 #include "cpu/x64/ir/dump.hpp"
 #include "cpu/x64/ir/emitter/emitter.hpp"
 #include "cpu/x64/ir/ir.hpp"
@@ -281,6 +282,10 @@ public:
     // to back, so the first gprs the IR defines get them in order.
     void set_gpr_pool(const std::vector<int> &regs) { gpr_pool_ = regs; }
 
+    // Tile configuration the kernel runs with. The test loads the matching
+    // palette before it calls the kernel.
+    void set_tiles(const tile_config_t &tiles) { tiles_ = tiles; }
+
     // Allocation outcome. Becomes valid after `run_ir_pipeline()`.
     //
     // True if the generated kernel has any spills.
@@ -294,7 +299,7 @@ protected:
         const int param_idx = abi_param1.getIdx();
 
         reg_config_t reg_cfg = make_reg_config(max_cpu_isa(), param_idx,
-                rsp_idx, {eltwise_opmask, binary_tail_opmask});
+                rsp_idx, {eltwise_opmask, binary_tail_opmask}, tiles_);
         if (!gpr_pool_.empty()) reg_cfg.pools.files[0].regs = gpr_pool_;
 
         // Shrink the register pools to force spills when requested.
@@ -348,6 +353,7 @@ private:
     int vec_regs_limit_ = 0;
     int gpr_regs_limit_ = 0;
     std::vector<int> gpr_pool_;
+    tile_config_t tiles_;
     bool spilled_ = false;
     size_t stack_size_ = 0;
     postops_cfg_t postops_cfg_ {};
@@ -900,6 +906,41 @@ TEST(AllocatorTests, NeverSpillsAvx512Masks) {
 
     EXPECT_FALSE(res.assignments[(int)m0].spilled);
     EXPECT_TRUE(res.assignments[(int)m1].spilled);
+}
+
+// Checks that a tile takes a register from the file of its shape and that a
+// tile file is never spilled. The configuration has one tile of the small
+// shape, so a second small tile live at the same time is left without a
+// register, and the frame stays empty.
+TEST(AllocatorTests, AllocatesTilesByShapeWithoutSpills) {
+    const tile_shape_t big {16, 64}, small {8, 32};
+    tile_config_t tiles;
+    tiles.shapes = {small, big, big};
+
+    ir_t ir;
+    const vreg_t ptr = ir.new_gpr();
+    const vreg_t stride = ir.new_gpr();
+    ir.load_param(ptr, 0);
+    ir.load_param(stride, 8);
+
+    const vreg_t t[] = {ir.new_tile(data_type::u8, big),
+            ir.new_tile(data_type::u8, small), ir.new_tile(data_type::u8, big),
+            ir.new_tile(data_type::u8, small)};
+    for (vreg_t v : t)
+        ir.tzero(v);
+    for (vreg_t v : t)
+        ir.tstore(ptr, 0, v, stride);
+
+    const reg_pools_t pools = make_reg_config(avx512_core_amx, /*param_reg=*/0,
+            /*rsp_reg=*/Xbyak::Operand::RSP, /*reserved_masks=*/ {}, tiles)
+                                      .pools;
+    const reg_alloc_result_t res = allocate_registers(ir, pools);
+
+    EXPECT_EQ(res.assignments[(int)t[0]].phys, 1);
+    EXPECT_EQ(res.assignments[(int)t[1]].phys, 0);
+    EXPECT_EQ(res.assignments[(int)t[2]].phys, 2);
+    EXPECT_TRUE(res.assignments[(int)t[3]].spilled);
+    EXPECT_EQ(res.frame_bytes, 0u);
 }
 
 // Checks that allocation depends only on its inputs. The same IR and register
@@ -1596,6 +1637,96 @@ TEST(IntegrationTests, InjectPostopsWorksWithAnyRegisterLayout) {
     }
     EXPECT_FALSE(full.spilled());
     EXPECT_TRUE(spilling.spilled());
+}
+
+// Arguments of the tile kernel below.
+struct tile_args_t {
+    const uint8_t *src;
+    uint8_t *dst_big;
+    uint8_t *dst_small;
+    uint8_t *dst_zero;
+};
+
+// Runs tiles of two shapes through `tload` and `tstore`, and a third tile
+// through `tzero` and `tstore`. Both loads read the same source with a stride
+// larger than their rows, at different offsets, so a wrong stride, offset, or
+// shape changes the output.
+TEST(IntegrationTests, TilesOfTwoShapesLoadAndStore) {
+    if (!mayiuse(avx512_core_amx)) GTEST_SKIP() << "tiles require AMX";
+
+    const tile_shape_t big {16, 64}, small {8, 32};
+    const int src_stride = 128;
+
+    ir_t ir;
+    const vreg_t src = ir.new_gpr();
+    const vreg_t dst_big = ir.new_gpr();
+    const vreg_t dst_small = ir.new_gpr();
+    const vreg_t dst_zero = ir.new_gpr();
+    ir.load_param(src, offsetof(tile_args_t, src));
+    ir.load_param(dst_big, offsetof(tile_args_t, dst_big));
+    ir.load_param(dst_small, offsetof(tile_args_t, dst_small));
+    ir.load_param(dst_zero, offsetof(tile_args_t, dst_zero));
+
+    const vreg_t s_src = ir.new_gpr();
+    const vreg_t s_big = ir.new_gpr();
+    const vreg_t s_small = ir.new_gpr();
+    ir.mov_imm(s_src, src_stride);
+    ir.mov_imm(s_big, big.colsb);
+    ir.mov_imm(s_small, small.colsb);
+
+    const vreg_t t_big = ir.new_tile(data_type::u8, big);
+    const vreg_t t_small = ir.new_tile(data_type::u8, small);
+    const vreg_t t_zero = ir.new_tile(data_type::u8, small);
+    ir.tload(t_big, src, 0, s_src);
+    ir.tload(t_small, src, big.colsb, s_src);
+    ir.tzero(t_zero);
+    ir.tstore(dst_big, 0, t_big, s_big);
+    ir.tstore(dst_small, 0, t_small, s_small);
+    ir.tstore(dst_zero, 0, t_zero, s_small);
+
+    tile_config_t tiles;
+    tiles.shapes = {big, small, small};
+
+    ir_kernel_t kernel(
+            ir, /*vec_regs_limit=*/-1, /*gpr_regs_limit=*/-1, avx512_core_amx);
+    kernel.set_tiles(tiles);
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<uint8_t> src_buf(big.rows * src_stride);
+    for (size_t i = 0; i < src_buf.size(); i++)
+        src_buf[i] = (uint8_t)(i % 251);
+    std::vector<uint8_t> big_buf(big.rows * big.colsb, 0xff);
+    std::vector<uint8_t> small_buf(small.rows * small.colsb, 0xff);
+    std::vector<uint8_t> zero_buf(small.rows * small.colsb, 0xff);
+
+    palette_config_t palette = {};
+    palette.palette_id = amx_palette_tmul;
+    for (int t = 0; t < (int)tiles.shapes.size(); t++) {
+        palette.rows[t] = (uint8_t)tiles.shapes[t].rows;
+        palette.cols[t] = (uint16_t)tiles.shapes[t].colsb;
+    }
+    ASSERT_EQ(amx_tile_configure((const char *)&palette), dnnl_success);
+
+    tile_args_t args {
+            src_buf.data(), big_buf.data(), small_buf.data(), zero_buf.data()};
+    kernel.run(&args);
+    amx_tile_release();
+
+    for (int r = 0; r < big.rows; r++) {
+        for (int c = 0; c < big.colsb; c++) {
+            ASSERT_EQ(big_buf[r * big.colsb + c], src_buf[r * src_stride + c])
+                    << "row " << r << ", byte " << c;
+        }
+    }
+    for (int r = 0; r < small.rows; r++) {
+        for (int c = 0; c < small.colsb; c++) {
+            ASSERT_EQ(small_buf[r * small.colsb + c],
+                    src_buf[r * src_stride + big.colsb + c])
+                    << "row " << r << ", byte " << c;
+        }
+    }
+    for (uint8_t v : zero_buf)
+        ASSERT_EQ(v, 0);
 }
 
 // Debug output tests

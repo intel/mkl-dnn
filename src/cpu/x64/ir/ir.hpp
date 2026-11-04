@@ -49,6 +49,7 @@
 // running pointer that is advanced each iteration instead of recomputing an
 // index). Restricting addresses to one register keeps every memory op reading
 // at most one pointer, which lowers register pressure and simplifies spilling.
+// A tile load or store also reads a stride gpr, the byte distance between rows.
 //
 // Loops are explicit structured nodes with a runtime counter register
 // (loop_begin/loop_end). Compile-time loops are unrolled by the builder.
@@ -163,6 +164,12 @@ enum class op_kind_t {
     //
     // dst = 0 (clear tile)
     tzero,
+    // row r of dst = [base + disp + r * s1] for every row r. s1 is the stride
+    // gpr.
+    tload,
+    // [base + disp + r * s1] = row r of s0 for every row r. s1 is the stride
+    // gpr.
+    tstore,
 
     // Control flow
     //
@@ -357,6 +364,9 @@ struct DNNL_API ir_t {
 
     // tile
     void tzero(vreg_t dst);
+    // `stride` is a gpr that holds the byte distance between rows in memory.
+    void tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride);
+    void tstore(vreg_t base, dim_t disp, vreg_t src, vreg_t stride);
 
     // post-ops
     // Apply post-ops to `acc` in place. `base_ptr` and `out_byte_off` describe
