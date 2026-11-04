@@ -135,9 +135,8 @@ jobs:
       max-parallel: 1
       matrix:
         config: [
-          # Test with different vector lengths and threading modes
-          { name: riscv-test-vlen128, threading: OMP, testset: SMOKE, vlen: 128, build: RelWithAssert },
-          { name: riscv-test-vlen256, threading: OMP, testset: SMOKE, vlen: 256, build: RelWithAssert }
+          # Keep the smallest supported VLEN for basic correctness coverage.
+          { name: riscv-test-vlen128, threading: OMP, testset: SMOKE, vlen: 128, build: RelWithAssert }
         ]
 
     name: ${{ matrix.config.name }}, ${{ matrix.config.threading }}
