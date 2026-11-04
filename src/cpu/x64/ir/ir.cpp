@@ -266,6 +266,28 @@ void ir_t::tstore(vreg_t base, dim_t disp, vreg_t src, vreg_t stride) {
     ops_.push_back(op);
 }
 
+void ir_t::tmma(vreg_t dst, vreg_t a, vreg_t b) {
+    // `tmma` needs three different tiles with matching shapes (see its
+    // declaration). Checking that the vregs differ is enough, because the
+    // allocator gives different registers to the vregs that one operation reads.
+    assert(dst != a && dst != b && a != b && "tmma: operands must differ");
+    const tile_shape_t &ds = vreg_info_[(int)dst].shape;
+    const tile_shape_t &as = vreg_info_[(int)a].shape;
+    const tile_shape_t &bs = vreg_info_[(int)b].shape;
+    assert(ds.rows == as.rows && as.colsb == 4 * bs.rows && ds.colsb == bs.colsb
+            && "tmma: shapes do not fit");
+    MAYBE_UNUSED(ds);
+    MAYBE_UNUSED(as);
+    MAYBE_UNUSED(bs);
+
+    op_t op;
+    op.kind = op_kind_t::tmma;
+    op.dst = dst;
+    op.s0 = a;
+    op.s1 = b;
+    ops_.push_back(op);
+}
+
 void ir_t::inject_postops(const std::vector<vreg_t> &acc, vreg_t base_ptr,
         const std::vector<dim_t> &out_byte_off, int n_elems) {
     assert(n_elems > 0 && "inject_postops: no valid elements");
@@ -448,6 +470,7 @@ void ir_t::def_use(
             u(op.mem.base);
             break;
         case op_kind_t::vdot:
+        case op_kind_t::tmma:
             u(op.dst);
             u(op.s0);
             u(op.s1);
