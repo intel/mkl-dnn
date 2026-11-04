@@ -36,5 +36,9 @@
 --attr-post-ops=,add:f32:per_oc
 --batch=shapes_ci
 
+# padded blocked layout with low-precision dst
+--reset --impl=jit:avx2 --dir=FWD_I --sdt=f32 --ddt=s8,u8 --stag=aBx8b --dtag=any --axis=1 --alg=SOFTMAX,LOGSOFTMAX 2x19x5x5
+--reset --impl=jit:avx10_1_512 --dir=FWD_I --sdt=f32 --ddt=s8,u8,f8_e5m2,f8_e4m3 --stag=aBx16b --dtag=any --axis=1 --alg=SOFTMAX,LOGSOFTMAX 2x19x5x5
+
 # Dropout
 --batch=harness_softmax_dropout
