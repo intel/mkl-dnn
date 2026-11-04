@@ -27,7 +27,7 @@ using ltw = logical_tensor_wrapper_t;
 
 sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
         const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout)
+        const graph_attr_t &graph_attr, bool use_block_layout)
     : with_scale_(op->get_attr<bool>(op_attr::with_scale))
     , is_training_(op->get_attr<bool>(op_attr::is_training))
     , mask_type_(static_cast<attn_mask_type_t>(
@@ -51,7 +51,9 @@ sdpa_executable_t::sdpa_executable_t(std::shared_ptr<op_t> &op,
 
     dnnl::primitive_attr attr, qk_attr, vs_attr;
     attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    attr.set_fpmath_mode(static_cast<dnnl::fpmath_mode>(fpmath.mode_));
+    // sdpa primitive does not accept non-default apply_to_int.
+    attr.set_fpmath_mode(
+            static_cast<dnnl::fpmath_mode>(graph_attr.get_fpmath().mode_));
     if (with_dropout_) {
         dnnl::memory::desc dropout_mask_desc;
         auto prop_type
@@ -223,7 +225,7 @@ arg_indices_t sdpa_executable_t::get_arg_indices(const op_t *op) {
 
 sdpa_bwd_executable_t::sdpa_bwd_executable_t(std::shared_ptr<op_t> &op,
         const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout)
+        const graph_attr_t &graph_attr, bool use_block_layout)
     : with_scale_(op->get_attr<bool>(op_attr::with_scale))
     , mask_type_(static_cast<attn_mask_type_t>(
               op->get_attr<int64_t>(op_attr::mask_type)))
@@ -276,7 +278,9 @@ sdpa_bwd_executable_t::sdpa_bwd_executable_t(std::shared_ptr<op_t> &op,
     vs_attr.set_accumulation_mode(str2accumulation_mode(
             op->get_attr<std::string>(op_attr::vs_acc_mode)));
     attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    attr.set_fpmath_mode(static_cast<dnnl::fpmath_mode>(fpmath.mode_));
+    // sdpa primitive does not accept non-default apply_to_int.
+    attr.set_fpmath_mode(
+            static_cast<dnnl::fpmath_mode>(graph_attr.get_fpmath().mode_));
 
     if (with_dropout_) {
         dnnl::memory::desc dropout_mask_desc;

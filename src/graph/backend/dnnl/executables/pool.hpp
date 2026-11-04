@@ -28,10 +28,10 @@ struct pool_executable_t : public op_executable_t {
     DECLARE_ARG_INDICES_GETTER;
 
     pool_executable_t(std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-            pd_cache_t &pd_cache, const fpmath_t &fpmath,
+            pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
             bool use_block_layout) {
-        auto desc
-                = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+        auto desc = create_desc(
+                op, p_engine, pd_cache, graph_attr, use_block_layout);
         prim_ = dnnl::pooling_forward(desc);
     }
 
@@ -72,9 +72,9 @@ struct pool_bwd_executable_t : public op_executable_t {
 
     pool_bwd_executable_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout) {
-        auto desc
-                = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+            const graph_attr_t &graph_attr, bool use_block_layout) {
+        auto desc = create_desc(
+                op, p_engine, pd_cache, graph_attr, use_block_layout);
         prim_ = dnnl::pooling_backward(desc);
     }
 

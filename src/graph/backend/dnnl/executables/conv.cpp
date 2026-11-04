@@ -183,7 +183,8 @@ ocl_event_t conv_fwd_executable_t::execute_ocl(const stream &stream,
 
 conv_fwd_executable_t::desc_t conv_fwd_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
@@ -206,8 +207,7 @@ conv_fwd_executable_t::desc_t conv_fwd_executable_t::create_desc(
         prm_attr = make_dnnl_primitive_attr(op, fusion_info);
     }
     prm_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    prm_attr.set_fpmath_mode(
-            static_cast<dnnl::fpmath_mode>(fpmath.mode_), fpmath.apply_to_int_);
+    set_graph_attributes(prm_attr, graph_attr);
 
     auto src = make_dnnl_memory_desc(op->get_input_logical_tensor(0));
 
@@ -298,7 +298,8 @@ arg_indices_t conv_fwd_executable_t::get_arg_indices(const op_t *op) {
 // conv_bwd_data_executable_t implementations
 conv_bwd_data_executable_t::desc_t conv_bwd_data_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
@@ -321,8 +322,7 @@ conv_bwd_data_executable_t::desc_t conv_bwd_data_executable_t::create_desc(
         prm_attr = make_dnnl_primitive_attr(op, fusion_info);
     }
     prm_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    prm_attr.set_fpmath_mode(
-            static_cast<dnnl::fpmath_mode>(fpmath.mode_), fpmath.apply_to_int_);
+    set_graph_attributes(prm_attr, graph_attr);
 
     auto diff_dst = make_dnnl_memory_desc(op->get_input_logical_tensor(0));
     if (!use_block_layout)
@@ -370,7 +370,7 @@ arg_indices_t conv_bwd_data_executable_t::get_arg_indices(const op_t *op) {
 conv_bwd_weights_executable_t::desc_t
 conv_bwd_weights_executable_t::create_desc(std::shared_ptr<op_t> &op,
         const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout) {
+        const graph_attr_t &graph_attr, bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
@@ -393,8 +393,7 @@ conv_bwd_weights_executable_t::create_desc(std::shared_ptr<op_t> &op,
         prm_attr = make_dnnl_primitive_attr(op, fusion_info);
     }
     prm_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    prm_attr.set_fpmath_mode(
-            static_cast<dnnl::fpmath_mode>(fpmath.mode_), fpmath.apply_to_int_);
+    set_graph_attributes(prm_attr, graph_attr);
 
     auto src = make_dnnl_memory_desc(op->get_input_logical_tensor(0));
     if (!use_block_layout)

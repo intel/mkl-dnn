@@ -59,10 +59,10 @@ struct bn_folding_t : public op_executable_t {
 
     static desc_t create_desc(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout);
+            const graph_attr_t &graph_attr, bool use_block_layout);
 
     bn_folding_t(std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-            pd_cache_t &pd_cache, const fpmath_t &fpmath,
+            pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
             bool use_block_layout);
 
     void execute(const stream &stream,
@@ -108,14 +108,14 @@ struct batchnorm_executable_t : public op_executable_t {
 
     batchnorm_executable_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout)
+            const graph_attr_t &graph_attr, bool use_block_layout)
         : is_training_(op->get_attr<bool>(op_attr::is_training)) {
         float momentum = 0.5;
         if (op->has_attr(op_attr::momentum))
             momentum = op->get_attr<float>(op_attr::momentum);
         scales_ = {momentum, 1 - momentum};
-        auto desc
-                = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+        auto desc = create_desc(
+                op, p_engine, pd_cache, graph_attr, use_block_layout);
         prim_ = dnnl::batch_normalization_forward(desc);
     }
 
@@ -149,9 +149,9 @@ struct batchnorm_bwd_executable_t : public op_executable_t {
 
     batchnorm_bwd_executable_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout) {
-        auto desc
-                = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+            const graph_attr_t &graph_attr, bool use_block_layout) {
+        auto desc = create_desc(
+                op, p_engine, pd_cache, graph_attr, use_block_layout);
         prim_ = dnnl::batch_normalization_backward(desc);
     }
 

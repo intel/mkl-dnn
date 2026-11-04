@@ -203,7 +203,7 @@ status_t dnnl_graph_graph::analyze() {
 }
 
 status_t dnnl_graph_graph::serialize(const std::string &filename) const {
-    const auto &fpmath = get_fpmath_mode();
+    const auto &fpmath = get_attr().get_fpmath();
     dnnl::impl::verbose_printf(
             "graph,info,serialize graph to a json file %s\n", filename.c_str());
     std::ofstream of(filename);
@@ -336,7 +336,7 @@ status_t dnnl_graph_graph_get_fpmath_mode(
     if (graph == nullptr) { return status::invalid_arguments; }
     if (graph->is_finalized()) { return status::invalid_graph; }
 
-    const auto &fpmath = graph->get_fpmath_mode();
+    const auto &fpmath = graph->get_attr().get_fpmath();
     if (mode) *mode = fpmath.mode_;
     if (apply_to_int) *apply_to_int = fpmath.apply_to_int_;
 

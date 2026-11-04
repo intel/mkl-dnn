@@ -90,7 +90,8 @@ ocl_event_t resampling_executable_t::execute_ocl(const stream &stream,
 
 resampling_executable_t::desc_t resampling_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
@@ -132,7 +133,8 @@ resampling_executable_t::desc_t resampling_executable_t::create_desc(
 
 resampling_bwd_executable_t::desc_t resampling_bwd_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
                 dnnl::resampling_backward::primitive_desc>(

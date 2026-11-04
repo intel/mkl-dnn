@@ -30,9 +30,9 @@ struct reduction_executable_t : public op_executable_t {
 
     reduction_executable_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout) {
-        auto desc
-                = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+            const graph_attr_t &graph_attr, bool use_block_layout) {
+        auto desc = create_desc(
+                op, p_engine, pd_cache, graph_attr, use_block_layout);
         prim_ = dnnl::reduction(desc);
 
         if (op->has_attr(op_attr::with_sum))

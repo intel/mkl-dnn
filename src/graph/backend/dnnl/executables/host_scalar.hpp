@@ -29,9 +29,9 @@ struct host_scalar_executable_t : public op_executable_t {
 
     host_scalar_executable_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout) {
+            const graph_attr_t &graph_attr, bool use_block_layout) {
         UNUSED(pd_cache);
-        UNUSED(fpmath);
+        UNUSED(graph_attr);
         UNUSED(use_block_layout);
         info_ = std::string(dnnl_engine_kind2str(
                         static_cast<dnnl_engine_kind_t>(p_engine.get_kind())))

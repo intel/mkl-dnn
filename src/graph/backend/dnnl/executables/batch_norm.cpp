@@ -23,8 +23,8 @@ namespace dnnl_impl {
 
 bn_folding_t::bn_folding_t(std::shared_ptr<op_t> &op,
         const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout) {
-    desc_ = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+        const graph_attr_t &graph_attr, bool use_block_layout) {
+    desc_ = create_desc(op, p_engine, pd_cache, graph_attr, use_block_layout);
     add_prim_ = dnnl::binary(desc_.add_pd_);
 #if DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_NVIDIA
@@ -369,9 +369,9 @@ ocl_event_t bn_folding_t::execute_ocl(const stream &stream,
 
 bn_folding_t::desc_t bn_folding_t::create_desc(std::shared_ptr<op_t> &op,
         const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout) {
+        const graph_attr_t &graph_attr, bool use_block_layout) {
     UNUSED(pd_cache);
-    UNUSED(fpmath);
+    UNUSED(graph_attr);
     UNUSED(use_block_layout);
 
     desc_t desc;
@@ -543,7 +543,8 @@ arg_indices_t bn_folding_t::get_arg_indices(const op_t *op) {
 
 batchnorm_executable_t::desc_t batchnorm_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<
@@ -759,7 +760,8 @@ ocl_event_t batchnorm_executable_t::execute_ocl(const stream &stream,
 
 batchnorm_bwd_executable_t::desc_t batchnorm_bwd_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     // first look up the cache
     if (pd_cache.find(op.get()) != pd_cache.end()) {
         auto pd = graph::utils::any_cast<

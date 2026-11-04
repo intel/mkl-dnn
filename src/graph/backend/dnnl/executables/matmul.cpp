@@ -29,7 +29,7 @@ arg_indices_t matmul_executable_t::get_arg_indices(const op_t *op) {
 
 matmul_executable_t::matmul_executable_t(std::shared_ptr<op_t> &op,
         const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-        const fpmath_t &fpmath, bool use_block_layout) {
+        const graph_attr_t &graph_attr, bool use_block_layout) {
     using ltw = logical_tensor_wrapper_t;
     // if with zero dimension, the matmul op will take no effect, we
     // construct a dummy kernel
@@ -39,7 +39,8 @@ matmul_executable_t::matmul_executable_t(std::shared_ptr<op_t> &op,
         return;
     }
 
-    auto desc = create_desc(op, p_engine, pd_cache, fpmath, use_block_layout);
+    auto desc
+            = create_desc(op, p_engine, pd_cache, graph_attr, use_block_layout);
     prim_ = dnnl::matmul(desc);
 
     // The scratchpad size of pd created by using any format tag may be
@@ -153,7 +154,8 @@ ocl_event_t matmul_executable_t::execute_ocl(const stream &stream,
 
 matmul_executable_t::desc_t matmul_executable_t::create_desc(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     using ltw = logical_tensor_wrapper_t;
 
     // first look up the cache
@@ -169,8 +171,7 @@ matmul_executable_t::desc_t matmul_executable_t::create_desc(
         prm_attr = make_dnnl_primitive_attr(op, fusion_info);
     }
     prm_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-    prm_attr.set_fpmath_mode(
-            static_cast<dnnl::fpmath_mode>(fpmath.mode_), fpmath.apply_to_int_);
+    set_graph_attributes(prm_attr, graph_attr);
 
     if (op->has_attr(op_attr::accumulation_mode)) {
         const auto acc_mode

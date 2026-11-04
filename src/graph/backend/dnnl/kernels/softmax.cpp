@@ -38,7 +38,7 @@ status_t softmax_fwd_t::compile_impl(const dnnl_partition_impl_t *part,
     p_engine_ = make_dnnl_engine(*eng);
 
     subgraph_ = std::make_shared<subgraph_t>(part->get_ops(), p_engine_,
-            part->get_fpmath_mode(), part->get_use_blocked_layout(), true);
+            part->get_attr(), part->get_use_blocked_layout(), true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     subgraph_visualizer_t vis(part->id(), [this](const value_t *val) {
@@ -334,7 +334,7 @@ status_t softmax_bwd_t::compile_impl(const dnnl_partition_impl_t *part,
     p_engine_ = make_dnnl_engine(*eng);
 
     subgraph_ = std::make_shared<subgraph_t>(part->get_ops(), p_engine_,
-            part->get_fpmath_mode(), part->get_use_blocked_layout(), true);
+            part->get_attr(), part->get_use_blocked_layout(), true);
     BACKEND_DNNL_CHECK(set_given_inputs_outputs(subgraph_, inputs, outputs));
 
     subgraph_visualizer_t vis(part->id(), [this](const value_t *val) {

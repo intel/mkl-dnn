@@ -101,7 +101,7 @@ FCreateKernel dnnl_partition_impl_t::get_kernel_creator() const {
 
 std::shared_ptr<partition_impl_t> dnnl_partition_impl_t::clone() const {
     auto ret = std::make_shared<dnnl_partition_impl_t>(
-            get_engine_kind(), get_fpmath_mode(), get_kind());
+            get_engine_kind(), get_attr(), get_kind());
     ret->ops_ = graph_t::deep_copy(ops_);
     ret->inputs_ = inputs_;
     ret->outputs_ = outputs_;
@@ -135,9 +135,7 @@ status_t dnnl_partition_impl_t::compile(
 
     // Dispatch to fake kernel if one of the output dimensions is zero.
     const std::vector<std::shared_ptr<op_t>> &fused_op = part->get_ops();
-    auto fpm = get_fpmath_mode();
-    auto agraph = graph_t(fused_op, get_engine_kind());
-    agraph.set_fpmath_mode(fpm.mode_, fpm.apply_to_int_);
+    auto agraph = graph_t(fused_op, get_engine_kind(), get_attr());
     agraph.set_user_inputs_outputs(inputs, outputs);
     agraph.infer_shape();
     for (const auto &val : agraph.get_output_values()) {

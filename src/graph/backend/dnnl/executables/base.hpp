@@ -156,18 +156,19 @@ struct op_executable_t {
 
 using executable_creator_func = std::function<std::shared_ptr<op_executable_t>(
         std::shared_ptr<op_t> &, const dnnl::engine &, pd_cache_t &,
-        const fpmath_t &, bool)>;
+        const graph_attr_t &, bool)>;
 
 // A dummy executable creator which is only used for those internal ops that are
 // only for fusion purpose, like dnnl_add_zps and dnnl_sub_zps. The dummy
 // creator should never be called.
 inline std::shared_ptr<op_executable_t> dummy_executable_creator(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     UNUSED(op);
     UNUSED(p_engine);
     UNUSED(pd_cache);
-    UNUSED(fpmath);
+    UNUSED(graph_attr);
     UNUSED(use_block_layout);
     assertm(false, "dummy executable creator should never be called");
     return {};
@@ -178,9 +179,10 @@ inline std::shared_ptr<op_executable_t> dummy_executable_creator(
 template <typename T>
 inline std::shared_ptr<op_executable_t> executable_creator(
         std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-        pd_cache_t &pd_cache, const fpmath_t &fpmath, bool use_block_layout) {
+        pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
+        bool use_block_layout) {
     return std::make_shared<T>(
-            op, p_engine, pd_cache, fpmath, use_block_layout);
+            op, p_engine, pd_cache, graph_attr, use_block_layout);
 }
 
 // Used to declare the desc_t class and the static create_desc method inside an
@@ -199,7 +201,7 @@ inline std::shared_ptr<op_executable_t> executable_creator(
     }; \
     static desc_t create_desc(std::shared_ptr<op_t> &op, \
             const dnnl::engine &p_engine, pd_cache_t &pd_cache, \
-            const fpmath_t &fpmath, bool use_block_layout);
+            const graph_attr_t &graph_attr, bool use_block_layout);
 
 // This class is a dummy executable which doesn't do any actual computation.
 // This dummy executable can be used to:

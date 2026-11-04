@@ -31,7 +31,7 @@ struct sdpa_executable_t : public op_executable_t {
     DECLARE_ARG_INDICES_GETTER;
 
     sdpa_executable_t(std::shared_ptr<op_t> &op, const dnnl::engine &p_engine,
-            pd_cache_t &pd_cache, const fpmath_t &fpmath,
+            pd_cache_t &pd_cache, const graph_attr_t &graph_attr,
             bool use_block_layout);
 
     void execute(const stream &stream,
@@ -68,7 +68,7 @@ struct sdpa_bwd_executable_t : public op_executable_t {
 
     sdpa_bwd_executable_t(std::shared_ptr<op_t> &op,
             const dnnl::engine &p_engine, pd_cache_t &pd_cache,
-            const fpmath_t &fpmath, bool use_block_layout);
+            const graph_attr_t &graph_attr, bool use_block_layout);
 
     void execute(const stream &stream,
             const std::unordered_map<int, memory> &args) const override;

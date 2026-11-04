@@ -58,7 +58,7 @@ struct key_t {
             const std::vector<std::shared_ptr<op_t>> &ops,
             const std::vector<const logical_tensor_t *> &ins,
             const std::vector<const logical_tensor_t *> &outs,
-            const impl::graph::fpmath_t &fpmath);
+            const impl::graph::graph_attr_t &attr);
     key_t(const partition_t *partition, const impl::engine_t *engine,
             const std::vector<const logical_tensor_t *> &ins,
             const std::vector<const logical_tensor_t *> &outs);
@@ -75,7 +75,7 @@ struct key_t {
     mutable std::vector<logical_tensor_t> outs_;
     int nthread_;
     const impl::engine_t *engine_;
-    const impl::graph::fpmath_t fpmath_;
+    const impl::graph::graph_attr_t attr_;
 
 private:
     // Thread ID is not used as part of the key, it's only used to get
@@ -162,11 +162,8 @@ struct hash<dnnl::impl::graph::partition_hashing::key_t> {
         seed = get_array_hash(seed, key.ins_.data(), key.ins_.size());
         seed = get_array_hash(seed, key.outs_.data(), key.outs_.size());
 
-        // Combine hash for fpmath_t
-        seed = dnnl::impl::hash_combine(
-                seed, static_cast<size_t>(key.fpmath_.mode_));
-        seed = dnnl::impl::hash_combine(
-                seed, static_cast<size_t>(key.fpmath_.apply_to_int_));
+        // Combine hash for graph attributes
+        seed = dnnl::impl::hash_combine(seed, key.attr_.hash());
 
         return seed;
     }
