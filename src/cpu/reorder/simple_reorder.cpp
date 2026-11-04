@@ -414,10 +414,6 @@ status_t simple_reorder_t::execute_direct_copy(const exec_ctx_t &ctx) const {
     const auto src_dt = input_d.data_type();
     const auto dst_dt = output_d.data_type();
 
-    // Advance each base to its logical element 0.
-    input += input_d.blk_off(0) * input_d.data_type_size();
-    output += output_d.blk_off(0) * output_d.data_type_size();
-
     // This kernel can be used for tensors with multiple inner blocks for
     // which generic zero padding must be used.
     ctx.zero_pad_output(DNNL_ARG_TO);
@@ -445,6 +441,10 @@ status_t simple_reorder_t::execute_direct_copy(const exec_ctx_t &ctx) const {
     const dim_t nelems_no_d0 = input_d.nelems(false, 1);
     const dim_t work_amount = N * nelems_no_d0;
     if (work_amount == 0) return status::success;
+
+    // Advance each base to its logical element 0.
+    input += input_d.blk_off(0) * input_d.data_type_size();
+    output += output_d.blk_off(0) * output_d.data_type_size();
 
     // Pure copy (identical src/dst data type, no scales, no sum): the inner
     // `nelems_no_d0` elements of every dim-0 slab are contiguous and bitwise
@@ -556,11 +556,6 @@ status_t simple_reorder_t::execute_plain_to_blocked(
             bs1 *= blk.inner_blks[i];
     }
 
-    // Offsets below are computed from strides only, so each base is advanced to
-    // its own logical element 0 here.
-    input += input_d.offset0() * input_d.data_type_size();
-    output += output_d.offset0() * output_d.data_type_size();
-
     // The blocked dst holds zero padding in the inner block tail; let the common
     // infrastructure handle it generically.
     ctx.zero_pad_output(DNNL_ARG_TO);
@@ -604,6 +599,12 @@ status_t simple_reorder_t::execute_plain_to_blocked(
             outer_dims[d] = dims[d];
         outer_work *= outer_dims[d];
     }
+    if (outer_work * L == 0) return status::success;
+
+    // Offsets below are computed from strides only, so each base is advanced to
+    // its own logical element 0 here.
+    input += input_d.offset0() * input_d.data_type_size();
+    output += output_d.offset0() * output_d.data_type_size();
 
     parallel(0, [=](const int ithr, const int nthr) {
         const float src_scale = with_src_scales
@@ -727,11 +728,6 @@ status_t simple_reorder_t::execute_blocked_to_blocked(
     const dim_t bs_dst = oblk.inner_blks[0];
     const int ndims = input_d.ndims();
 
-    // Offsets below are computed from strides only, so each base is advanced to
-    // its own logical element 0 here.
-    input += input_d.offset0() * input_d.data_type_size();
-    output += output_d.offset0() * output_d.data_type_size();
-
     // The blocked dst holds zero padding in the channel block tail; let the
     // common infrastructure handle it generically.
     ctx.zero_pad_output(DNNL_ARG_TO);
@@ -765,6 +761,12 @@ status_t simple_reorder_t::execute_blocked_to_blocked(
         outer_dims[d] = d == cdim ? 1 : dims[d];
         outer_work *= outer_dims[d];
     }
+    if (outer_work * C == 0) return status::success;
+
+    // Offsets below are computed from strides only, so each base is advanced to
+    // its own logical element 0 here.
+    input += input_d.offset0() * input_d.data_type_size();
+    output += output_d.offset0() * output_d.data_type_size();
 
     parallel(0, [=](const int ithr, const int nthr) {
         const float src_scale = with_src_scales
@@ -1186,6 +1188,11 @@ status_t simple_reorder_t::execute_plain_to_dense_comp(
     const float adj_scale = (extra.flags & memory_extra_flags::scale_adjust)
             ? extra.scale_adjust
             : 1.f;
+
+    // A zero-dim memory has no storage at all, compensation buffers included
+    // (`size()` is 0), while `additional_buffer_size()` still counts the masked
+    // dims, so the offsets below would point outside of the allocation.
+    if (output_d.has_zero_dim()) return status::success;
 
     // Compensation buffer(s) are appended right after the main data blob; the
     // s8s8 buffer (when present) precedes the zero-point one.
