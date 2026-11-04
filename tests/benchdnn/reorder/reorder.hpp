@@ -155,9 +155,6 @@ struct perf_report_t : public base_perf_report_t {
         , stag_({normalize_tag(p_->stag, p_->ndims)})
         , dtag_(normalize_tag(p_->dtag, p_->ndims)) {}
 
-    void dump_desc(std::ostream &s) const override {
-        s << static_cast<const prb_dims_t &>(*p_);
-    }
     void dump_engine(std::ostream &s) const override {
         if (p_->cross_engine == CPU2GPU)
             s << "cpu2gpu";
@@ -167,17 +164,21 @@ struct perf_report_t : public base_perf_report_t {
             base_perf_report_t::dump_engine(s);
     }
 
+    void dump_desc(std::ostream &s) const override {
+        s << static_cast<const prb_dims_t &>(*p_);
+    }
+
     void dump_flags(std::ostream &s) const override { s << p_->oflag; }
 
     const attr_t *attr() const override { return &p_->attr; }
-    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
-    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
     const std::string *name() const override { return &p_->name; }
     const std::vector<dnnl_data_type_t> *sdt() const override {
         return &p_->dt;
     }
     const std::vector<std::string> *stag() const override { return &stag_; }
     const std::string *dtag() const override { return &dtag_; }
+    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
+    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
 
 private:
     const prb_t *p_;

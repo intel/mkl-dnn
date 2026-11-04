@@ -87,6 +87,7 @@ std::string case_to_str(const std::string &json_file,
 struct perf_report_t : public base_perf_report_t {
     perf_report_t(const std::string &case_str, const char *perf_template)
         : base_perf_report_t(perf_template), case_str_(case_str) {}
+
     void dump_desc(std::ostream &s) const override { s << case_str_; }
 
 private:

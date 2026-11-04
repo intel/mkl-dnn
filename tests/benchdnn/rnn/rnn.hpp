@@ -573,13 +573,13 @@ struct perf_report_t : public base_perf_report_t {
     }
 
     double ops() const override { return p_->ops; }
-    const int64_t *user_mb() const override { return &p_->user_mb; }
     const attr_t *attr() const override { return &p_->attr; }
+    const std::string *name() const override { return &p_->name; }
+    const std::vector<std::string> *stag() const override { return &p_->tag; }
+    const dnnl_prop_kind_t *prop() const override { return &p_->prop; }
+    const int64_t *user_mb() const override { return &p_->user_mb; }
     const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
     const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
-    const std::string *name() const override { return &p_->name; }
-    const dnnl_prop_kind_t *prop() const override { return &p_->prop; }
-    const std::vector<std::string> *stag() const override { return &p_->tag; }
 
 private:
     const prb_t *p_;

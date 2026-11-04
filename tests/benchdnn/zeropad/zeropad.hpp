@@ -84,6 +84,7 @@ struct perf_report_t : public base_perf_report_t {
     void dump_desc(std::ostream &s) const override {
         s << static_cast<const prb_dims_t &>(*p_);
     }
+
     const std::string *name() const override { return &p_->name; }
     const dnnl_data_type_t *dt() const override { return &p_->dt; }
     const std::string *tag() const override { return &tag_; }

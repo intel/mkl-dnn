@@ -92,28 +92,27 @@ private:
 
 struct perf_report_t : public base_perf_report_t {
     perf_report_t(const base_prb_t *base_prb, const char *perf_template)
-        : base_perf_report_t(perf_template)
-        , prb_(prb_t::from(base_prb))
-        , stag_({}) {
-        for (size_t d = 0; d < prb_->stag.size(); d++)
-            stag_.push_back(normalize_tag(prb_->stag[d], prb_->ndims));
+        : base_perf_report_t(perf_template), p_(prb_t::from(base_prb)) {
+        for (size_t d = 0; d < p_->stag.size(); d++)
+            stag_.push_back(normalize_tag(p_->stag[d], p_->ndims));
     }
 
     void dump_desc(std::ostream &s) const override {
-        s << static_cast<const prb_vdims_t &>(*prb_);
+        s << static_cast<const prb_vdims_t &>(*p_);
     }
-    const attr_t *attr() const override { return &prb_->attr; }
-    const thr_ctx_t *ctx_init() const override { return &prb_->ctx_init; }
-    const thr_ctx_t *ctx_exe() const override { return &prb_->ctx_exe; }
-    const std::string *name() const override { return &prb_->name; }
-    const dir_t *dir() const override { return &prb_->dir; }
+
+    const attr_t *attr() const override { return &p_->attr; }
+    const std::string *name() const override { return &p_->name; }
+    const dir_t *dir() const override { return &p_->dir; }
     const std::vector<dnnl_data_type_t> *sdt() const override {
-        return &prb_->sdt;
+        return &p_->sdt;
     }
     const std::vector<std::string> *stag() const override { return &stag_; }
+    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
+    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
 
 private:
-    const prb_t *prb_;
+    const prb_t *p_;
     std::vector<std::string> stag_;
 };
 

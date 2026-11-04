@@ -177,16 +177,16 @@ struct perf_report_t : public base_perf_report_t {
         s << static_cast<const desc_t &>(*p_);
     }
 
-    const int64_t *user_mb() const override { return &p_->user_mb; }
+    const attr_t *attr() const override { return &p_->attr; }
+    const std::string *name() const override { return &p_->name; }
+    const dir_t *dir() const override { return &p_->dir; }
     const std::vector<dnnl_data_type_t> *sdt() const override {
         return &p_->dt;
     }
-    const attr_t *attr() const override { return &p_->attr; }
+    const std::string *tag() const override { return &tag_; }
+    const int64_t *user_mb() const override { return &p_->user_mb; }
     const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
     const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
-    const std::string *name() const override { return &p_->name; }
-    const dir_t *dir() const override { return &p_->dir; }
-    const std::string *tag() const override { return &tag_; }
 
 private:
     const prb_t *p_;

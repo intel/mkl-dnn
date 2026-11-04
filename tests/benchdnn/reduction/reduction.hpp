@@ -126,27 +126,28 @@ private:
 struct perf_report_t : public base_perf_report_t {
     perf_report_t(const base_prb_t *base_prb, const char *perf_template)
         : base_perf_report_t(perf_template)
-        , prb_(prb_t::from(base_prb))
-        , sdt_({prb_->sdt})
-        , stag_({normalize_tag(prb_->stag, prb_->ndims)})
-        , dtag_(normalize_tag(prb_->dtag, prb_->ndims)) {}
+        , p_(prb_t::from(base_prb))
+        , sdt_({p_->sdt})
+        , stag_({normalize_tag(p_->stag, p_->ndims)})
+        , dtag_(normalize_tag(p_->dtag, p_->ndims)) {}
 
-    void dump_alg(std::ostream &s) const override { s << alg2str(prb_->alg); }
+    void dump_alg(std::ostream &s) const override { s << alg2str(p_->alg); }
 
     void dump_desc(std::ostream &s) const override {
-        s << static_cast<const prb_vdims_t &>(*prb_);
+        s << static_cast<const prb_vdims_t &>(*p_);
     }
-    const attr_t *attr() const override { return &prb_->attr; }
-    const thr_ctx_t *ctx_init() const override { return &prb_->ctx_init; }
-    const thr_ctx_t *ctx_exe() const override { return &prb_->ctx_exe; }
-    const std::string *name() const override { return &prb_->name; }
+
+    const attr_t *attr() const override { return &p_->attr; }
+    const std::string *name() const override { return &p_->name; }
     const std::vector<dnnl_data_type_t> *sdt() const override { return &sdt_; }
-    const dnnl_data_type_t *ddt() const override { return &prb_->ddt; }
+    const dnnl_data_type_t *ddt() const override { return &p_->ddt; }
     const std::vector<std::string> *stag() const override { return &stag_; }
     const std::string *dtag() const override { return &dtag_; }
+    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
+    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
 
 private:
-    const prb_t *prb_;
+    const prb_t *p_;
     std::vector<dnnl_data_type_t> sdt_;
     std::vector<std::string> stag_;
     std::string dtag_;

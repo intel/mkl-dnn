@@ -199,19 +199,19 @@ struct perf_report_t : public base_perf_report_t {
     }
 
     double ops() const override { return p_->ops; }
+    const attr_t *attr() const override { return &p_->attr; }
+    const std::string *name() const override { return &p_->name; }
+    const dir_t *dir() const override { return &p_->dir; }
     const std::vector<dnnl_data_type_t> *sdt() const override {
         return &p_->dt;
     }
     const dnnl_data_type_t *bia_dt() const override { return &p_->bia_dt_; }
-    const attr_t *attr() const override { return &p_->attr; }
+    const std::vector<std::string> *stag() const override { return &stag_; }
+    const std::string *dtag() const override { return &dtag_; }
+    const std::string *wtag() const override { return &wtag_; }
+    const int64_t *user_mb() const override { return &p_->user_mb; }
     const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
     const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
-    const int64_t *user_mb() const override { return &p_->user_mb; }
-    const std::string *name() const override { return &p_->name; }
-    const dir_t *dir() const override { return &p_->dir; }
-    const std::vector<std::string> *stag() const override { return &stag_; }
-    const std::string *wtag() const override { return &wtag_; }
-    const std::string *dtag() const override { return &dtag_; }
 
 private:
     const prb_t *p_;
