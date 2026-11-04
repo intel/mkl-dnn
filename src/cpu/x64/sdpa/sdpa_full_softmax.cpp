@@ -358,25 +358,45 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     CHECK(uses_amx_tiles(p_.mm_dt, is_amx));
     conf.nthr = dnnl_get_max_threads();
 
-    // Choose the query block so the [q_block x seq_kv] fp32 score tile fits
-    // within its L2 budget across mm1 -> softmax -> mm2, while leaving capacity
-    // for each matmul's weight panel alongside it.
-    const dim_t score_tile_budget_bytes = l2_budget_bytes / 2;
-    const dim_t row_bytes = p_.seq_kv * sizeof(float); // one score row
-    dim_t q_block = score_tile_budget_bytes / row_bytes;
-    if (is_amx) {
-        // AMX computes whole 16-row tiles. Use at least amx_min_q_block rows
-        // even though the score tile then outgrows L2.
-        // Shrink back while that leaves fewer work items than threads.
-        constexpr dim_t amx_rows = 16;
-        constexpr dim_t amx_min_q_block = 64;
-        q_block = nstl::max(utils::rnd_dn(q_block, amx_rows), amx_min_q_block);
-        q_block = nstl::min(q_block, p_.seq_q);
-        const dim_t heads = p_.batch * p_.num_head_q;
-        while (q_block > amx_rows
-                && heads * utils::div_up(p_.seq_q, q_block) < conf.nthr)
-            q_block = utils::rnd_dn(q_block - 1, amx_rows);
-    }
+    // Choose the query block by trading K/V streaming against score-tile
+    // traffic. Each work item streams all of K and V once, so their traffic per
+    // score element falls as 1/q_block, while the live [q_block x seq_kv] score
+    // tile (f32 scores plus the bf16/f16 P tile) grows with q_block and moves
+    // from L2 to L3/memory. Larger heads amortize more K/V bytes per score, so
+    // the score-tile target grows with the head size. Fitted on a q_block x
+    // seq_kv x head-size sweep (2 MiB L2, notes section 10.11): AMX computes
+    // ~3x faster than f32 FMA, so it is more sensitive to score traffic and
+    // prefers a smaller tile.
+    const dim_t q_granule = is_amx ? 16 : 8; // AMX computes 16-row tiles
+    const dim_t q_block_max = is_amx ? 96 : 192;
+    const float score_tile_l2_ratio = is_amx ? 0.75f : 1.5f;
+    const dim_t score_bytes_per_elem = sizeof(float)
+            + (p_.mm_dt == data_type::f32 ? 0 : mm_dt_sz); // scores + P
+    const float head_scale = std::sqrt((p_.hs_qk + p_.hs_v) / 128.f);
+    const float score_tile_target_bytes = score_tile_l2_ratio * head_scale
+            * platform::get_per_core_cache_size(2);
+    const float q_rows = score_tile_target_bytes
+            / static_cast<float>(p_.seq_kv * score_bytes_per_elem);
+    // A long seq_kv shrinks the tile-based q_block until K/V streaming
+    // dominates. Bound it so the K/V bytes per score element,
+    // (hs_qk + hs_v) * mm_dt_sz / q_block, stay below the ~16..24 bytes of
+    // score-tile traffic per element. Threads working on the same KV head at
+    // the same time share its K/V through L3, which halves the bound once more
+    // than two threads do.
+    const dim_t kv_heads_total
+            = p_.batch * (p_.num_head_q / nstl::max<dim_t>(p_.group_head, 1));
+    const bool kv_shared_in_l3 = 2 * kv_heads_total < conf.nthr;
+    const float q_rows_min
+            = (p_.hs_qk + p_.hs_v) / (kv_shared_in_l3 ? 16.f : 8.f);
+    dim_t q_block = q_granule
+            * std::lround(nstl::max(q_rows, q_rows_min) / q_granule);
+    q_block = utils::saturate(q_granule, q_block_max, q_block);
+    q_block = nstl::min(q_block, p_.seq_q);
+    // Shrink while that leaves fewer work items than threads.
+    const dim_t heads = p_.batch * p_.num_head_q;
+    while (q_block > q_granule
+            && heads * utils::div_up(p_.seq_q, q_block) < conf.nthr)
+        q_block = utils::rnd_dn(q_block - 1, q_granule);
     q_block = utils::saturate((dim_t)1, p_.seq_q, q_block);
     conf.q_block = q_block;
     const dim_t q_tail = p_.seq_q % q_block;
@@ -424,14 +444,18 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     // Packed K is laid out in independent 64-column panels, which limits mm1's
     // N block. mm2 only reduces over seq_kv after the softmax is complete, so
-    // it keeps the budget-sized block: a 64-deep reduction would split the
-    // reduction into many short calls, each re-reading and re-writing the f32
-    // [m x hs_v] partial output. On AMX a 256-deep block measured fastest for
-    // head sizes 64..256; deeper blocks were no faster or slower.
+    // its K block is chosen independently and kept deep: a 64-deep reduction
+    // would split the reduction into many short calls, each re-reading and
+    // re-writing the f32 [m x hs_v] partial output. On AMX a 256-deep block
+    // (capped by the budget block) measured fastest for head sizes 64..256;
+    // deeper blocks were no faster or slower. Without AMX 512..1024-deep blocks
+    // measured fastest for the same head sizes (notes section 10.11).
     constexpr dim_t amx_mm2_k_block = 256;
+    constexpr dim_t mm2_k_block = 512;
     conf.mm1_n_block = need_copy_k ? nstl::min<dim_t>(kv_block, 64) : kv_block;
     conf.mm1_n_tail = p_.seq_kv % conf.mm1_n_block;
-    conf.mm2_k_block = is_amx ? nstl::min(kv_block, amx_mm2_k_block) : kv_block;
+    conf.mm2_k_block = is_amx ? nstl::min(kv_block, amx_mm2_k_block)
+                              : nstl::min(p_.seq_kv, mm2_k_block);
     conf.mm2_k_tail = p_.seq_kv % conf.mm2_k_block;
     // >1 block -> mm2 accumulates across blocks: the first block uses a beta = 0
     // kernel (fresh C) and the rest beta = 1, so no destination pre-zeroing is
