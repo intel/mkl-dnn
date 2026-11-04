@@ -865,15 +865,16 @@ struct jit_brgemm_ir_kernel_t : public brgemm_kernel_t {
         ir::ir_t ir;
         build_brgemm(conf_, *cp, ir);
 
-        ir::postops_config_t postops;
+        ir::codegen_config_t codegen_cfg;
         if (conf_.output.has_stage(output_stage_t::injector_postops)) {
+            ir::postops_config_t &postops = codegen_cfg.postops;
             postops.post_ops = &conf_.output.post_ops;
             postops.dst_md = &conf_.output.dst_md;
             postops.rhs_arg_offset = GET_OFF(post_ops_binary_rhs_arg_vec);
             postops.dst_orig_off = GET_OFF(data_C_ptr_);
         }
 
-        ir::generate_kernel(*this, ir, postops);
+        ir::generate_kernel(*this, ir, codegen_cfg);
     }
 
 private:

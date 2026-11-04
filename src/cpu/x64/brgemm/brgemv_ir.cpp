@@ -747,8 +747,9 @@ struct jit_brgemv_ir_kernel_t : public brgemm_kernel_t {
         ir::ir_t ir;
         build_gemv(brg_, ir);
 
-        ir::postops_config_t postops;
+        ir::codegen_config_t codegen_cfg;
         if (brg_.with_eltwise || brg_.with_binary || brg_.with_sum) {
+            ir::postops_config_t &postops = codegen_cfg.postops;
             postops.post_ops = &brg_.attr()->post_ops_;
             postops.dst_md = brg_.dst_md();
             // The transA accumulators run along M, the channel dimension of 3D
@@ -763,7 +764,7 @@ struct jit_brgemv_ir_kernel_t : public brgemm_kernel_t {
             postops.dst_orig_off = GET_OFF(data_C_ptr_);
         }
 
-        ir::generate_kernel(*this, ir, postops);
+        ir::generate_kernel(*this, ir, codegen_cfg);
     }
 
 private:
