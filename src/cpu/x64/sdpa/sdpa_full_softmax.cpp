@@ -147,13 +147,8 @@ size_t get_tile_offset_in_elements(
                 + static_cast<size_t>(n0) * mdw.strides()[col_dim];
     }
 
-    const auto *copy_desc = td.copy_desc;
-    return static_cast<size_t>(n0 / 64) * copy_desc->padded_k
-            * copy_desc->packed_ld
-            + static_cast<size_t>(k0 / copy_desc->vnni_factor)
-            * copy_desc->packed_ld * copy_desc->vnni_factor
-            + static_cast<size_t>(n0 % 64) * copy_desc->vnni_factor
-            + k0 % copy_desc->vnni_factor;
+    return sdpa_brgemm_copy::b_packer_t::panel_offset(
+            k0, n0, td.copy_desc->padded_k, td.copy_desc->vnni_factor);
 }
 
 // Build a BRGEMM descriptor. Fills `brg` and, when the AMX out-params
@@ -265,7 +260,7 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
     if (amx_need_config) {
         // brgemm_init_tiles fills the palette and returns non-success
         // for non-AMX ISAs
-        char pal[64] = {};
+        char pal[AMX_PALETTE_SIZE] = {};
         *amx_need_config = brgemm_init_tiles(brg, pal) == status::success;
         if (amx_palette) std::memcpy(amx_palette, pal, sizeof(pal));
         if (amx_wsp) *amx_wsp = static_cast<size_t>(brg.get_wsp_buffer_size());
@@ -350,6 +345,9 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const bool need_copy_v = conf.mm2_needs_vnni_b || transpose_v;
 
     const dim_t mm_wei_k_blk = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
+    // Width of one packed K/V panel. A packed B operand is read by BRGEMM with
+    // ldb = b_panel_n and an N block of at most b_panel_n (see b_packer_t).
+    constexpr dim_t b_panel_n = sdpa_brgemm_copy::b_packer_t::panel_n;
 
     const dim_t l2_budget_bytes
             = static_cast<dim_t>(3 * platform::get_per_core_cache_size(2) / 4);
@@ -406,27 +404,36 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // (mm1's K slice [hs_qk x kv_block], mm2's V slice [kv_block x hs_v]) stays
     // L2-resident; an untiled matmul re-streams its whole panel per M-chunk and
     // turns memory-bound once that panel exceeds ~L2. Size kv_block so the wider
-    // panel fits within its L2 budget, then round DOWN to a column granule: a
-    // 64-wide block (clean VNNI sub-panels, AMX-K-friendly) when the budget
-    // allows, else 32, else a 16-column floor (still a multiple of the bf16/f16
-    // VNNI pack factor). A large head or a small L2 thus shrinks the block
-    // rather than collapsing it to the whole (untiled) axis. Clamp to seq_kv:
-    // short context runs as one untiled block (no tail, mm2 keeps beta = 0).
+    // panel fits within its L2 budget, then round DOWN to a column granule:
+    // kv_granule_large when the budget allows, else kv_granule_medium, else a
+    // kv_granule_min floor (also a multiple of the packer's K block, so whole
+    // VNNI rows of V). A large head or a small L2 thus shrinks the block rather
+    // than collapsing it to the whole (untiled) axis. Clamp to seq_kv: short
+    // context runs as one untiled block (no tail, mm2 keeps beta = 0).
+    // The granules are a blocking heuristic, not a layout requirement: packed
+    // K/V accept any block (panel_offset() handles n % b_panel_n), and mm1
+    // splits kv_block into b_panel_n-wide calls on its own. A large granule of
+    // b_panel_n keeps mm1's packed-K calls free of N tails.
+    constexpr dim_t kv_granule_large = b_panel_n;
+    constexpr dim_t kv_granule_medium = 32;
+    constexpr dim_t kv_granule_min = 16;
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t hs_max = nstl::max(p_.hs_qk, p_.hs_v);
     dim_t kv_block = b_panel_budget_bytes / (hs_max * mm_dt_sz);
     const dim_t vt_k_pad = need_copy_v ? mm_wei_k_blk : dim_t(1);
-    const dim_t min_granule = nstl::max<dim_t>(16, vt_k_pad);
-    const dim_t granule
-            = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
-    kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
+    const dim_t min_granule = nstl::max<dim_t>(kv_granule_min, vt_k_pad);
+    const dim_t granule = kv_block >= kv_granule_large
+            ? kv_granule_large
+            : (kv_block >= kv_granule_medium ? kv_granule_medium : min_granule);
+    kv_block = nstl::max<dim_t>(
+            utils::rnd_dn(kv_block, granule), kv_granule_min);
     kv_block = nstl::min<dim_t>(kv_block, p_.seq_kv);
 
     // An f32 K already laid out as [hs_qk, seq_kv] is read in place by mm1 as
     // [hs_qk x kv_block] B panels. If the K row stride maps many panel rows to
     // the same L2 sets, the panel is evicted between re-reads, so it is packed
-    // into dense 64-wide panels instead. The panel shares L2 with the score
-    // tile, Q, the V panel and prefetched lines, so it starts thrashing well
+    // into dense b_panel_n-wide panels instead. The panel shares L2 with the
+    // score tile, Q, the V panel and prefetched lines, so it starts thrashing well
     // before it alone fills a set. Packing costs one extra pass over K per KV
     // head and only pays off when the panel is re-read by enough query rows
     // (seq_q * group_head): moderate aliasing needs more reuse to amortize it
@@ -442,17 +449,19 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             = mm1_transpose_k || conf.mm1_needs_vnni_b || pack_k_for_aliasing;
     conf.pack_k_for_aliasing = pack_k_for_aliasing;
 
-    // Packed K is laid out in independent 64-column panels, which limits mm1's
-    // N block. mm2 only reduces over seq_kv after the softmax is complete, so
-    // its K block is chosen independently and kept deep: a 64-deep reduction
-    // would split the reduction into many short calls, each re-reading and
-    // re-writing the f32 [m x hs_v] partial output. On AMX a 256-deep block
+    // Packed K is laid out in independent b_panel_n-column panels, which limits
+    // mm1's N block to one panel. mm2 only reduces over seq_kv after the
+    // softmax is complete, so its K block is chosen independently and kept
+    // deep: a reduction as shallow as mm1's N block would split it into many
+    // short calls, each re-reading and re-writing the f32 [m x hs_v] partial
+    // output. On AMX a 256-deep block
     // (capped by the budget block) measured fastest for head sizes 64..256;
     // deeper blocks were no faster or slower. Without AMX 512..1024-deep blocks
     // measured fastest for the same head sizes (notes section 10.11).
     constexpr dim_t amx_mm2_k_block = 256;
     constexpr dim_t mm2_k_block = 512;
-    conf.mm1_n_block = need_copy_k ? nstl::min<dim_t>(kv_block, 64) : kv_block;
+    conf.mm1_n_block
+            = need_copy_k ? nstl::min<dim_t>(kv_block, b_panel_n) : kv_block;
     conf.mm1_n_tail = p_.seq_kv % conf.mm1_n_block;
     conf.mm2_k_block = is_amx ? nstl::min(kv_block, amx_mm2_k_block)
                               : nstl::min(p_.seq_kv, mm2_k_block);
@@ -489,11 +498,13 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // logically pre-transposed but physically stored with hs_qk contiguous
     // therefore still gets transposed here.
     // mm1 materialises a dense (and, for bf16/f16, VNNI-packed) [hs_qk, seq_kv]
-    // B tile whenever it must transpose K or pack it; its ldb is then the dense
-    // seq_kv. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in place.
-    conf.ldk = need_copy_k ? 64 : p_.k_strides[row_dim];
-    conf.ldv = need_copy_v ? 64 : p_.v_strides[row_dim];
-    conf.v_block = need_copy_v ? nstl::min<dim_t>(p_.hs_v, 64) : p_.hs_v;
+    // B operand whenever it must transpose K or pack it, laid out in
+    // b_panel_n-wide panels: ldb is then b_panel_n and one call covers at most
+    // one panel. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in
+    // place. V is handled the same way, so v_block is one panel when packed.
+    conf.ldk = need_copy_k ? b_panel_n : p_.k_strides[row_dim];
+    conf.ldv = need_copy_v ? b_panel_n : p_.v_strides[row_dim];
+    conf.v_block = need_copy_v ? nstl::min<dim_t>(p_.hs_v, b_panel_n) : p_.hs_v;
     conf.v_tail = p_.hs_v % conf.v_block;
 
     // Build the mm1/mm2 BRGEMM descriptors, plus each kernel's AMX palette +
@@ -639,13 +650,11 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     // Packed K and V are placed consecutively after the per-thread scratch.
     const dim_t num_head_kv = p_.num_head_q / p_.group_head;
-    auto make_b_copy_desc
-            = [&](size_t scratch_offset, dim_t padded_k, dim_t packed_cols,
-                      dim_t packed_ld, dim_t vnni_factor) {
+    auto make_b_copy_desc = [&](size_t scratch_offset, dim_t padded_k,
+                                    dim_t packed_cols, dim_t vnni_factor) {
         tensor_copy_desc_t copy_desc;
         copy_desc.scratch_offset = scratch_offset;
         copy_desc.padded_k = padded_k;
-        copy_desc.packed_ld = packed_ld;
         copy_desc.vnni_factor = vnni_factor;
         copy_desc.head_stride
                 = static_cast<size_t>(padded_k) * packed_cols * mm_dt_sz;
@@ -660,7 +669,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 : 1;
         conf.k_copy_desc = make_b_copy_desc(copy_offset,
                 sdpa_brgemm_copy::b_packer_t::packed_k(p_.hs_qk, p_.mm_dt),
-                sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv), conf.ldk,
+                sdpa_brgemm_copy::b_packer_t::packed_ld(p_.seq_kv),
                 k_vnni_factor);
         copy_offset += static_cast<size_t>(p_.batch)
                 * conf.k_copy_desc->batch_stride;
@@ -671,7 +680,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 : 1;
         conf.v_copy_desc = make_b_copy_desc(copy_offset,
                 sdpa_brgemm_copy::b_packer_t::packed_k(p_.seq_kv, p_.mm_dt),
-                sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v), conf.ldv,
+                sdpa_brgemm_copy::b_packer_t::packed_ld(p_.hs_v),
                 v_vnni_factor);
         copy_offset += static_cast<size_t>(p_.batch)
                 * conf.v_copy_desc->batch_stride;

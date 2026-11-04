@@ -31,24 +31,40 @@ namespace cpu {
 namespace x64 {
 namespace sdpa_brgemm_copy {
 
+// Packs a BRGEMM B operand [K x N] with the BRGEMM matmul copy-B kernels.
 // For VNNI granularity v (1 for f32, 2 for xf16), the destination element
 // offset is (k / v) * dst_ld * v + n * v + k % v in global-matrix mode.
-// Separate-panel mode replaces n with n % 64 and adds
-// (n / 64) * packed_k(K, dt) * 64. Each panel has 64 N columns and requires
-// dst_ld == 64; the caller must allocate packed_k(K, dt) rows per panel.
-// execute positions panels explicitly; the copy kernels use LDB2 == 0.
+// Separate-panel mode splits N into panel_n-wide panels, each stored as an
+// independent [packed_k(K, dt) x panel_n] matrix with dst_ld == panel_n; see
+// panel_offset(). A BRGEMM reading a packed panel uses ldb = panel_n and an N
+// block of at most panel_n. execute positions panels explicitly; the copy
+// kernels use LDB2 == 0.
 class b_packer_t {
 public:
-    static dim_t packed_ld(dim_t N) { return utils::rnd_up(N, dim_t(64)); }
+    // N width of one packed panel: the copy kernel's wei_n_blk and N_blk, so
+    // the kernel writes one panel per N iteration. 64 matches the BRGEMM
+    // matmul default B block (get_default_n_block()); the copy kernels also
+    // support 16, 32 and 48. This is the single source of the panel width for
+    // all users of the packed layout.
+    static constexpr dim_t panel_n = 64;
+
+    static dim_t packed_ld(dim_t N) { return utils::rnd_up(N, panel_n); }
     static dim_t k_block(data_type_t dt) { return matmul::get_wei_k_blk(dt); }
     static dim_t packed_k(dim_t K, data_type_t dt) {
         return utils::rnd_up(K, k_block(dt));
+    }
+    // Element offset of logical B[k, n] in the separate-panel layout, where
+    // padded_k = packed_k(K, dt) and v is the VNNI granularity.
+    static size_t panel_offset(dim_t k, dim_t n, dim_t padded_k, dim_t v) {
+        return static_cast<size_t>(n / panel_n) * padded_k * panel_n
+                + static_cast<size_t>(k / v) * panel_n * v
+                + static_cast<size_t>(n % panel_n) * v + k % v;
     }
 
     status_t init(dim_t K, dim_t N, dim_t src_k_stride, dim_t src_n_stride,
             dim_t dst_ld, data_type_t dt, bool separate_panels = false) {
         if (K <= 0 || N <= 0 || src_k_stride <= 0 || src_n_stride <= 0
-                || (separate_panels ? dst_ld != n_block_
+                || (separate_panels ? dst_ld != panel_n
                                     : dst_ld < packed_ld(N)))
             return status::invalid_arguments;
         if (src_k_stride != 1 && src_n_stride != 1)
@@ -70,7 +86,7 @@ public:
         if (k_vnni_ <= 0) return status::invalid_arguments;
 
         CHECK(matmul::init_conf(
-                conf_, 1, 0, K_, N_, src_ld_, n_block_, dt_, dt_, src_tag_));
+                conf_, 1, 0, K_, N_, src_ld_, panel_n, dt_, dt_, src_tag_));
         k_pad_block_ = k_block(dt_);
         if (!separate_panels_) {
             const dim_t max_dst_elements
@@ -88,8 +104,8 @@ public:
         const auto *src_bytes = static_cast<const char *>(src);
         auto *dst_bytes = static_cast<char *>(dst);
 
-        for (dim_t n0 = 0; n0 < N_; n0 += n_block_) {
-            const dim_t n = N_ - n0 < n_block_ ? N_ - n0 : n_block_;
+        for (dim_t n0 = 0; n0 < N_; n0 += panel_n) {
+            const dim_t n = N_ - n0 < panel_n ? N_ - n0 : panel_n;
             for (dim_t k0 = 0; k0 < K_; k0 += conf_.K_blk) {
                 const dim_t k_iters = nstl::min(conf_.K_blk, K_ - k0);
                 const dim_t k_remainder = k_iters % k_pad_block_;
@@ -101,7 +117,7 @@ public:
                         : n0 * src_ld_ + k0;
                 const dim_t dst_offset
                         = (k0 / k_vnni_ * dst_ld_ * k_vnni_
-                                  + (separate_panels_ ? n0 / n_block_
+                                  + (separate_panels_ ? n0 / panel_n
                                                           * packed_k(K_, dt_)
                                                           * dst_ld_
                                                       : n0 * k_vnni_))
@@ -120,8 +136,6 @@ public:
     }
 
 private:
-    static constexpr dim_t n_block_ = 64;
-
     matmul::brgemm_matmul_conf_t conf_;
     std::unique_ptr<matmul::jit_brgemm_matmul_copy_b_t> kernel_;
     dim_t K_ = 0;

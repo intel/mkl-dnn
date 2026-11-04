@@ -25,6 +25,7 @@
 #include "common/optional.hpp"
 #include "common/sdpa_pd.hpp"
 
+#include "cpu/x64/amx_tile_configure.hpp"
 #include "cpu/x64/brgemm/brgemm_types.hpp"
 
 namespace dnnl {
@@ -135,7 +136,7 @@ struct sdpa_full_softmax_run_args_t {
 struct sdpa_amx_cfg_t {
     bool need_config = false;
     size_t wsp_size = 0;
-    char palette[64] = {};
+    char palette[AMX_PALETTE_SIZE] = {};
 };
 
 struct tensor_copy_desc_t {
@@ -143,7 +144,6 @@ struct tensor_copy_desc_t {
     size_t batch_stride = 0;
     size_t head_stride = 0;
     dim_t padded_k = 0;
-    dim_t packed_ld = 0;
     dim_t vnni_factor = 1;
 };
 
@@ -166,7 +166,6 @@ struct sdpa_full_softmax_conf_t {
     bool mm2_direct = false;
     bool mm1_needs_vnni_b = false;
     bool mm2_needs_vnni_b = false;
-    // Materialized B operands use independent 64-column panels.
     dim_t ldk = 0, ldv = 0;
     dim_t v_block = 0, v_tail = 0;
     bool pack_k_for_aliasing = false;
