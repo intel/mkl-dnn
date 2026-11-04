@@ -203,7 +203,7 @@ struct perf_report_t : public base_perf_report_t {
     perf_report_t(const base_prb_t *base_prb, const char *perf_template)
         : base_perf_report_t(perf_template), p_(prb_t::from(base_prb)) {
         for (size_t d = 0; d < p_->tag.size(); d++)
-            tag_.push_back(normalize_tag(p_->tag[d], p_->ndims));
+            stag_.push_back(normalize_tag(p_->tag[d], p_->ndims));
     }
 
     void dump_desc(std::ostream &s) const override {
@@ -215,19 +215,19 @@ struct perf_report_t : public base_perf_report_t {
     }
 
     const attr_t *attr() const override { return &p_->attr; }
-    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
-    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
-    const int64_t *user_mb() const override { return &p_->user_mb; }
     const std::string *name() const override { return &p_->name; }
     const dir_t *dir() const override { return &p_->dir; }
     const std::vector<dnnl_data_type_t> *sdt() const override {
         return &p_->dt;
     }
-    const std::vector<std::string> *stag() const override { return &tag_; }
+    const std::vector<std::string> *stag() const override { return &stag_; }
+    const int64_t *user_mb() const override { return &p_->user_mb; }
+    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
+    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
 
 private:
     const prb_t *p_;
-    std::vector<std::string> tag_;
+    std::vector<std::string> stag_;
 };
 
 /* some extra control parameters which shouldn't be placed in prb_t */

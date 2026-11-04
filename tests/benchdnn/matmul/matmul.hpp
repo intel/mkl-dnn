@@ -238,18 +238,19 @@ struct perf_report_t : public base_perf_report_t {
     void dump_desc(std::ostream &s) const override {
         s << static_cast<const prb_vdims_t &>(*p_);
     }
+
     double ops() const override { return p_->ops; }
+    const attr_t *attr() const override { return &p_->attr; }
+    const std::string *name() const override { return &p_->name; }
     const std::vector<dnnl_data_type_t> *sdt() const override {
         return &p_->dt;
     }
     const dnnl_data_type_t *bia_dt() const override { return &p_->bia_dt; }
-    const attr_t *attr() const override { return &p_->attr; }
+    const std::vector<std::string> *stag() const override { return &stag_; }
+    const std::string *dtag() const override { return &dtag_; }
+    const std::string *wtag() const override { return &wtag_; }
     const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
     const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
-    const std::string *name() const override { return &p_->name; }
-    const std::vector<std::string> *stag() const override { return &stag_; }
-    const std::string *wtag() const override { return &wtag_; }
-    const std::string *dtag() const override { return &dtag_; }
 
 private:
     const prb_t *p_;

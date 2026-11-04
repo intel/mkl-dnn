@@ -126,7 +126,6 @@ struct perf_report_t : public base_perf_report_t {
         : base_perf_report_t(perf_template)
         , p_(prb_t::from(base_prb))
         , sdt_({p_->sdt})
-        , ddt_(p_->ddt)
         , stag_({normalize_tag(p_->stag, p_->ndims)})
         , dtag_(normalize_tag(p_->dtag, p_->ndims)) {}
 
@@ -135,22 +134,22 @@ struct perf_report_t : public base_perf_report_t {
     void dump_desc(std::ostream &s) const override {
         s << static_cast<const prb_dims_t &>(*p_);
     }
+
     const attr_t *attr() const override { return &p_->attr; }
-    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
-    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
-    const std::string *name() const override { return &p_->name; }
     const int *axis() const override { return &p_->axis; }
+    const std::string *name() const override { return &p_->name; }
     const dir_t *dir() const override { return &p_->dir; }
     const std::vector<dnnl_data_type_t> *sdt() const override { return &sdt_; }
-    const dnnl_data_type_t *ddt() const override { return &ddt_; }
-    const int64_t *user_mb() const override { return &p_->user_mb; }
+    const dnnl_data_type_t *ddt() const override { return &p_->ddt; }
     const std::vector<std::string> *stag() const override { return &stag_; }
     const std::string *dtag() const override { return &dtag_; }
+    const int64_t *user_mb() const override { return &p_->user_mb; }
+    const thr_ctx_t *ctx_init() const override { return &p_->ctx_init; }
+    const thr_ctx_t *ctx_exe() const override { return &p_->ctx_exe; }
 
 private:
     const prb_t *p_;
     std::vector<dnnl_data_type_t> sdt_;
-    dnnl_data_type_t ddt_;
     std::vector<std::string> stag_;
     std::string dtag_;
 };
