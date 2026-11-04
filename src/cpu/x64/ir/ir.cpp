@@ -240,6 +240,30 @@ void ir_t::tzero(vreg_t dst) {
     ops_.push_back(op);
 }
 
+void ir_t::tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride) {
+    assert(stride != vreg_t::none && "tload: stride is required");
+
+    op_t op;
+    op.kind = op_kind_t::tload;
+    op.dst = dst;
+    op.s1 = stride;
+    op.mem.base = base;
+    op.mem.disp = disp;
+    ops_.push_back(op);
+}
+
+void ir_t::tstore(vreg_t base, dim_t disp, vreg_t src, vreg_t stride) {
+    assert(stride != vreg_t::none && "tstore: stride is required");
+
+    op_t op;
+    op.kind = op_kind_t::tstore;
+    op.s0 = src;
+    op.s1 = stride;
+    op.mem.base = base;
+    op.mem.disp = disp;
+    ops_.push_back(op);
+}
+
 void ir_t::inject_postops(const std::vector<vreg_t> &acc, vreg_t base_ptr,
         const std::vector<dim_t> &out_byte_off, int n_elems) {
     assert(n_elems > 0 && "inject_postops: no valid elements");
@@ -463,6 +487,16 @@ void ir_t::def_use(
             break;
         case op_kind_t::prefetch: u(op.mem.base); break;
         case op_kind_t::tzero: d(op.dst); break;
+        case op_kind_t::tload:
+            u(op.mem.base);
+            u(op.s1); // stride
+            d(op.dst);
+            break;
+        case op_kind_t::tstore:
+            u(op.s0);
+            u(op.s1); // stride
+            u(op.mem.base);
+            break;
         case op_kind_t::loop_begin:
             if (op.init_is_reg) u(op.s0);
             d(op.dst);

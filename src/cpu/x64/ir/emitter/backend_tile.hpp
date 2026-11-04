@@ -41,6 +41,20 @@ struct tile_backend_t {
         gen().tilezero(Xbyak::Tmm(d));
     }
 
+    // Load and store a tile, one row every `stride` bytes. The stride is the
+    // index register of the address.
+    void tload(int d, int base, dim_t disp, int stride) {
+        const auto addr = gen().ptr[Xbyak::Reg64(base) + Xbyak::Reg64(stride)
+                + (int)disp];
+        gen().tileloadd(Xbyak::Tmm(d), addr);
+    }
+
+    void tstore(int base, dim_t disp, int s, int stride) {
+        const auto addr = gen().ptr[Xbyak::Reg64(base) + Xbyak::Reg64(stride)
+                + (int)disp];
+        gen().tilestored(addr, Xbyak::Tmm(s));
+    }
+
 private:
     // The kernel owns `gen_`.
     jit_generator_t &gen_;

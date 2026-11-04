@@ -368,6 +368,18 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
 
             // Tile ops. Emitting the instruction is the tile backend's job.
             case op_kind_t::tzero: tbe.tzero(tile_of(op.dst)); break;
+            case op_kind_t::tload: {
+                int base = gpr_use(op.mem.base).getIdx();
+                int stride = gpr_use(op.s1).getIdx();
+                tbe.tload(tile_of(op.dst), base, op.mem.disp, stride);
+                break;
+            }
+            case op_kind_t::tstore: {
+                int base = gpr_use(op.mem.base).getIdx();
+                int stride = gpr_use(op.s1).getIdx();
+                tbe.tstore(base, op.mem.disp, tile_of(op.s0), stride);
+                break;
+            }
 
             // Control flow. ISA-neutral, emitted directly.
             case op_kind_t::loop_begin: {
