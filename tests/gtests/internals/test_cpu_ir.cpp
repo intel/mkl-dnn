@@ -1650,7 +1650,7 @@ struct tile_args_t {
 // Runs tiles of two shapes through `tload` and `tstore`, and a third tile
 // through `tzero` and `tstore`. Both loads read the same source with a stride
 // larger than their rows, at different offsets, so a wrong stride, offset, or
-// shape changes the output.
+// shape changes the output. One load is non-temporal.
 TEST(IntegrationTests, TilesOfTwoShapesLoadAndStore) {
     if (!mayiuse(avx512_core_amx)) GTEST_SKIP() << "tiles require AMX";
 
@@ -1677,7 +1677,7 @@ TEST(IntegrationTests, TilesOfTwoShapesLoadAndStore) {
     const vreg_t t_big = ir.new_tile(data_type::u8, big);
     const vreg_t t_small = ir.new_tile(data_type::u8, small);
     const vreg_t t_zero = ir.new_tile(data_type::u8, small);
-    ir.tload(t_big, src, 0, s_src);
+    ir.tload(t_big, src, 0, s_src, mem_hint_t::non_temporal);
     ir.tload(t_small, src, big.colsb, s_src);
     ir.tzero(t_zero);
     ir.tstore(dst_big, 0, t_big, s_big);

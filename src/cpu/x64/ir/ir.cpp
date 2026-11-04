@@ -240,7 +240,8 @@ void ir_t::tzero(vreg_t dst) {
     ops_.push_back(op);
 }
 
-void ir_t::tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride) {
+void ir_t::tload(
+        vreg_t dst, vreg_t base, dim_t disp, vreg_t stride, mem_hint_t hint) {
     assert(stride != vreg_t::none && "tload: stride is required");
 
     op_t op;
@@ -249,6 +250,7 @@ void ir_t::tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride) {
     op.s1 = stride;
     op.mem.base = base;
     op.mem.disp = disp;
+    op.hint = hint;
     ops_.push_back(op);
 }
 

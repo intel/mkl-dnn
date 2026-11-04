@@ -206,6 +206,26 @@ struct mem_t {
     bool is_param = false;
 };
 
+// Hints of a memory access, combined with `|`. A hint never changes the result
+// or the legality of an operation. The emitter uses the hinted instruction
+// where the target has it and the plain instruction otherwise.
+//
+//   non_temporal - the data is not reused soon
+enum class mem_hint_t : unsigned {
+    none = 0,
+    non_temporal = 1u << 0,
+};
+
+inline mem_hint_t operator|(mem_hint_t a, mem_hint_t b) {
+    return static_cast<mem_hint_t>(
+            static_cast<unsigned>(a) | static_cast<unsigned>(b));
+}
+
+inline mem_hint_t operator&(mem_hint_t a, mem_hint_t b) {
+    return static_cast<mem_hint_t>(
+            static_cast<unsigned>(a) & static_cast<unsigned>(b));
+}
+
 // An `op_t` is a single IR operation. One fixed struct represents every
 // operation and works like a tagged union, where the `kind` field decides which
 // operation it is. Each operation only uses the fields it needs and ignores the
@@ -230,6 +250,7 @@ struct mem_t {
 // mem_dt - element data type in memory, set by every vector load and store. It
 //        is the data type of the vreg when the access moves the value as it
 //        is, and a different one when the access converts.
+// hint  - for tload, the hints of the access (see `mem_hint_t`).
 // match - for loop_end, index of matching loop_begin operation. For _else and
 //         if_end, index of matching if_begin operation.
 // cmp   - for if_begin, how s0 is compared with s1 or imm.
@@ -242,6 +263,7 @@ struct op_t {
     dim_t imm = 0;
     mem_t mem;
     data_type_t mem_dt = data_type::undef;
+    mem_hint_t hint = mem_hint_t::none;
     int match = -1;
     cmp_t cmp = cmp_t::eq;
     bool init_is_reg = false;
@@ -365,7 +387,8 @@ struct DNNL_API ir_t {
     // tile
     void tzero(vreg_t dst);
     // `stride` is a gpr that holds the byte distance between rows in memory.
-    void tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride);
+    void tload(vreg_t dst, vreg_t base, dim_t disp, vreg_t stride,
+            mem_hint_t hint = mem_hint_t::none);
     void tstore(vreg_t base, dim_t disp, vreg_t src, vreg_t stride);
 
     // post-ops

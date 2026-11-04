@@ -371,7 +371,7 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
             case op_kind_t::tload: {
                 int base = gpr_use(op.mem.base).getIdx();
                 int stride = gpr_use(op.s1).getIdx();
-                tbe.tload(tile_of(op.dst), base, op.mem.disp, stride);
+                tbe.tload(tile_of(op.dst), base, op.mem.disp, stride, op.hint);
                 break;
             }
             case op_kind_t::tstore: {
