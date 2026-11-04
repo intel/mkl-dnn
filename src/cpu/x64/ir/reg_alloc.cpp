@@ -410,7 +410,7 @@ void alloc_file(const ir_t &ir, int file_idx, const reg_pools_t &pools,
     auto kind_of = [&](int v) { return ir.vreg_info()[v].kind; };
 
     auto in_file = [&](int v) {
-        return pools.kind_to_file[(int)kind_of(v)] == file_idx;
+        return pools.file_of(ir.vreg_info()[v]) == file_idx;
     };
 
     // For each operation, the intervals of this file that start there, by vreg

@@ -22,13 +22,16 @@
 // An `ir_t` is a flat list of operations. Each operation reads and writes
 // virtual registers: integer-named placeholders for the values a kernel works
 // with, used instead of physical registers until the allocator assigns them.
-// Every virtual register belongs to one of three kinds (gpr/vec/mask), which
-// defines the kind of physical register it can later land in. Operations are
-// target-neutral. The concrete instructions are chosen later by the emitter.
+// Every virtual register belongs to one of four kinds (gpr/vec/mask/tile),
+// which defines the kind of physical register it can later land in. Operations
+// are target-neutral. The concrete instructions are chosen later by the
+// emitter.
 //
 // A vec vreg also carries the element data type of the values it holds. The
 // operations stay data-type generic. The builder tags each vec vreg with a
 // dtype and the emitter lowers each op to the instruction for that dtype.
+//
+// A tile vreg carries a data type and its physical shape (see `tile_shape_t`).
 //
 // The virtual registers are mutable. A virtual register is a named value that
 // may be written more than once. In this IR we deliberately allow reassignment,
@@ -65,8 +68,22 @@ namespace ir {
 // vec  - Vector register
 // mask - Mask register (emitter decides whether lower it to k or vector
 //        register)
+// tile - Tile register, `rows` rows of `colsb` bytes (see `tile_shape_t`)
 
-enum class reg_kind_t { gpr, vec, mask };
+enum class reg_kind_t { gpr, vec, mask, tile };
+
+// Shape of a tile register: `rows` rows of `colsb` bytes each, as the tile
+// configuration sets it. A row holds `colsb / sizeof(dt)` elements of the data
+// type of the vreg. Tiles with the same shape share a register file whatever
+// their data type, and a tile allocates only from the file of its shape.
+struct tile_shape_t {
+    int rows;
+    int colsb;
+
+    bool operator==(const tile_shape_t &other) const {
+        return rows == other.rows && colsb == other.colsb;
+    }
+};
 
 // vreg_t is a strong alias for `int`. It does not implicitly convert to or from
 // `int`, so a vreg and a raw int cannot be mixed up by accident. `none` marks
@@ -141,6 +158,11 @@ enum class op_kind_t {
 
     // prefetch [base + disp] into cache. Reads base, writes nothing.
     prefetch,
+
+    // Tile operations
+    //
+    // dst = 0 (clear tile)
+    tzero,
 
     // Control flow
     //
@@ -219,10 +241,12 @@ struct op_t {
 };
 
 // Metadata for virtual registers that contains the register kind and the
-// data type of the values it holds. `dt` is `undef` for gpr and mask.
+// data type of the values it holds. `dt` is `undef` for gpr and mask. `shape`
+// is the shape of a tile and empty for the other kinds.
 struct vreg_info_t {
     reg_kind_t kind;
     data_type_t dt = data_type::undef;
+    tile_shape_t shape = {};
 };
 
 // Arguments of an `inject_postops` operation. They live in a side table in
@@ -278,6 +302,8 @@ struct DNNL_API ir_t {
     vreg_t new_gpr() { return new_vreg(reg_kind_t::gpr); }
     vreg_t new_vec(data_type_t dt) { return new_vreg(reg_kind_t::vec, dt); }
     vreg_t new_mask() { return new_vreg(reg_kind_t::mask); }
+    // `shape` must not be empty.
+    vreg_t new_tile(data_type_t dt, tile_shape_t shape);
 
     int n_vregs() const { return (int)vreg_info_.size(); }
     int n_ops() const { return (int)ops_.size(); }
@@ -328,6 +354,9 @@ struct DNNL_API ir_t {
 
     // mask
     void set_mask_imm(vreg_t mask, int n_elems);
+
+    // tile
+    void tzero(vreg_t dst);
 
     // post-ops
     // Apply post-ops to `acc` in place. `base_ptr` and `out_byte_off` describe

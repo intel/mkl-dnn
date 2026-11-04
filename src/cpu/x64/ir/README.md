@@ -32,7 +32,7 @@ generate()
 |   +-------------+
 |
 +-> +-------------+
-|   | Reg alloc   |  liveness and linear scan over gpr/vec/mask
+|   | Reg alloc   |  liveness and linear scan over gpr/vec/mask/tile
 |   +-------------+
 |
 +-> +-------------+
@@ -52,23 +52,28 @@ step. They are omitted above for clarity.
 * **Builder.** The only kernel-specific part. It loads parameters, builds the
   loop nest, and expresses the math in target-neutral operations. It is data-type
   agnostic (the type is only a tag on vector values) and ISA agnostic (masks,
-  vector, and general-purpose registers are abstract).
+  vector, tile, and general-purpose registers are abstract).
 * **IR.** A linear list of operations over *virtual registers*. One fixed
   struct represents every operation, and an `op` kind selects which fields it
-  uses. Every virtual register has a kind (`gpr`, `vec`, or `mask`), and a `vec`
-  register also carries the element data type it holds. A vector load or store
+  uses. Every virtual register has a kind (`gpr`, `vec`, `mask`, or `tile`), and
+  a `vec` register also carries the element data type it holds. A `tile`
+  register carries a data type and its physical shape, the rows and the bytes
+  per row that the tile configuration gives it. A vector load or store
   carries a second data type, `mem_dt`, for what memory holds. The two differ
   when the access converts.
 * **Register configuration.** An ISA-aware step that produces ISA-agnostic
-  register pools (integer indices per register kind) plus the reserved registers:
-  the stack pointer and the kernel-argument pointer. It encodes per-ISA facts
-  such as register counts and whether the target has dedicated mask (k)
-  registers.
+  register files (integer indices of physical registers) plus the reserved
+  registers: the stack pointer and the kernel-argument pointer. It encodes
+  per-ISA facts such as register counts and whether the target has dedicated
+  mask (k) registers. Each register kind maps to its files. `gpr`, `vec`, and
+  `mask` have one file each, and on AVX2\* masks use the vector file. `tile` has
+  one file per tile shape in the tile configuration of the kernel, so one kind
+  can have several files and the number of files depends on the kernel.
 * **Register allocator.** Maps unlimited virtual registers onto physical ones,
-  spilling to the stack under pressure. It knows only register kinds and control
-  flow. Liveness analysis (which values are still needed at each operation) is
-  backward data-flow over the IR's trivial control-flow graph, iterated to a fixed
-  point so loop back-edges propagate. Linear scan then
+  spilling to the stack under pressure. It knows only register files, register
+  kinds, and control flow. Liveness analysis (which values are still needed at
+  each operation) is backward data-flow over the IR's trivial control-flow graph,
+  iterated to a fixed point so loop back-edges propagate. Linear scan then
   reduces each value to a single live interval and spills to the stack when the
   active set outgrows the register file. A spilled value still needs a register
   while an operation reads or writes it, so the scan also gives each operation a
@@ -76,12 +81,15 @@ step. They are omitted above for clarity.
   1 mask) match the widest operation of that kind, so only `inject_postops`,
   which takes any number of accumulators, can run out. On AVX2\* a mask is a
   vector register and spills like one. AVX-512 k-registers are never spilled.
+  Tiles are never spilled either, and a tile allocates only from the file of
+  its shape.
 * **Emitter.** The only part aware of the ISA and data types, because it produces
   the code. It walks the allocated IR once and lowers each operation to
   instructions using the physical registers the allocator chose. Spilled values
   are loaded into their temps around each use. There is one backend per ISA
   family (for example, AVX2\* and AVX-512\*), and a dispatch step selects the
-  matching backend.
+  matching backend. Tile instructions have a backend of their own, which the
+  emitter uses next to either of them.
 * **Static data.** Some lowerings need constants, such as the AVX2 mask tables,
   that must live after the ABI postamble, though the references to them are
   emitted during lowering. The emitter fills a data-section structure with the
@@ -136,7 +144,8 @@ output with `ir::print_kernel_dump()` (see Debug Output).
   no labels or jumps.
 * **Separation of concerns is the invariant to protect.** The builder is
   target-neutral, ISA and data-type knowledge lives only in the emitter and the
-  register configuration, and the allocator knows only kinds and control flow.
+  register configuration, and the allocator knows only register files, kinds,
+  and control flow.
 
 * **The debug output computes its own statistics.** `dump.cpp` computes what
   it prints from the IR and the register allocation. The IR infrastructure is
@@ -162,6 +171,7 @@ output with `ir::print_kernel_dump()` (see Debug Output).
 * `emitter/backend_avx2.hpp`, `emitter/backend_avx512.hpp`: the per-ISA-family
   backends, which do the per-operation instruction selection. They are peers,
   each self-contained.
+* `emitter/backend_tile.hpp`: the backend for the tile instructions.
 * `postops_injector.hpp`, `postops_injector.cpp`: the driver for the JIT post-ops
   injector, which lowers the `inject_postops` operation.
 * `codegen.hpp`, `codegen.cpp`: `generate_kernel()`, which runs every stage
@@ -341,11 +351,12 @@ The lines mean the following:
   `ONEDNN_JIT_DUMP` writes. It is split into the instructions and the static
   data.
 * `alloc <file>:` is one line per register file. On AVX2, masks are vector
-  registers, so they are in the `vec` file. `pool` is the number of registers
-  that the allocator can assign. `peak` is the largest register pressure of
-  the file and the first operation with it. A peak above the pool means that
-  the file must spill. `spilled` is the number of virtual registers in stack
-  slots.
+  registers, so they are in the `vec` file. A tile file is named after its
+  shape, for example `tile16x64` for 16 rows of 64 bytes. `pool` is the number
+  of registers that the allocator can assign. `peak` is the largest register
+  pressure of the file and the first operation with it. A peak above the pool
+  means that the file must spill. `spilled` is the number of virtual registers
+  in stack slots.
 * `spill g1@[rsp+0]: ops 1, 29` is a spilled virtual register, its stack slot,
   and the operations that load or store the slot.
 * Each line of the IR dump has the operation index, the register pressure of

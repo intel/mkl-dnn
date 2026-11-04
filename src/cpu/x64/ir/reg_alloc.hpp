@@ -42,6 +42,9 @@ namespace ir {
 //   `slot` in the spill area. In this case, `phys` is not used.
 //   The emitter moves the value through a temp register at each operation
 //   that reads or writes it (see `temp_reg_t`).
+//
+// - A vreg that no operation references, and a tile whose shape has no file,
+//   have no location. `spilled` is false and `phys` is -1.
 struct assignment_t {
     bool spilled = false;
     int phys = -1;
@@ -53,8 +56,9 @@ struct assignment_t {
 // 3 vec and 1 mask operands, so these caps cover every spilled operand. The
 // caps are upper bounds that come from the IR alone, the same on every target.
 // Whether a value can spill is up to its file (see `reg_file_t::spillable`), so
-// AVX-512 masks stay in k-registers despite the mask cap.
-constexpr int max_temps_per_op[] = {2, 3, 1};
+// AVX-512 masks stay in k-registers despite the mask cap. Tiles are never
+// spilled on any target, so they get no temps.
+constexpr int max_temps_per_op[] = {2, 3, 1, 0};
 
 // A register that holds a spilled value while one operation executes.
 //
@@ -103,24 +107,60 @@ struct reg_alloc_result_t {
 // AVX-512 k-registers. The allocator never spills such a value to make room.
 // If one still finds no free register, it is marked `spilled` only to record
 // the failure, and the emitter fails the kernel.
+//
+// `tile_shape` is the shape of every register in a tile file, and empty in the
+// other files.
 struct reg_file_t {
     std::vector<int> regs;
     size_t slot_size = 0;
     bool spillable = true;
+    tile_shape_t tile_shape = {};
 };
 
-// The register files plus a map from each register kind to the file it
-// allocates from. Two kinds may share one file, e.g. on AVX2* a mask is a
-// vector register, so `vec` and `mask` kinds map to the same file and compete
-// for the same pool. On AVX-512 a mask is a k-register and has its own file.
+// `n` files of `reg_pools_t::files` starting at `first`.
+struct file_range_t {
+    int first;
+    int n;
+
+    bool operator==(const file_range_t &other) const {
+        return first == other.first && n == other.n;
+    }
+};
+
+// The register files and the files each register kind allocates from.
 //
-// `kind_to_file` is indexed by `(int)reg_kind_t`.
+// A file is a set of physical registers, and any of them can hold any vreg
+// that allocates from the file. `gpr`, `vec`, and `mask` have one file each.
+// Two kinds may share one, e.g. on AVX2* a mask is a vector register, so `vec`
+// and `mask` map to the same file and compete for the same pool. On AVX-512 a
+// mask is a k-register and has its own file. A tile has one file per tile shape
+// in the tile configuration of the kernel, so one kind can have several files
+// and the number of files depends on the kernel.
+//
+// `kind_to_file` holds the files of each kind as a range of `files`, indexed by
+// `(int)reg_kind_t`. The files are ordered gpr, vec, mask (AVX-512 only), then
+// the tile files in the order their shapes first appear in the tile
+// configuration. A kind with no file, such as tile in a kernel without tiles,
+// has an empty range.
 //
 // This structure is created and filled by make_reg_config() based on the target
-// ISA and later used by allocate_registers() during allocation.
+// ISA and the tile configuration, and later used by allocate_registers() during
+// allocation.
 struct reg_pools_t {
     std::vector<reg_file_t> files;
-    std::vector<int> kind_to_file;
+    std::vector<file_range_t> kind_to_file;
+
+    // Returns the file a vreg with `info` allocates from: the file of its kind
+    // whose `tile_shape` is the shape of the vreg, or -1 when there is none.
+    // gpr, vec, and mask vregs and their files have the empty shape. The shape
+    // is compared in a range of one file too, so a tile of a shape the tile
+    // configuration lacks does not land in the only tile file.
+    int file_of(const vreg_info_t &info) const {
+        const file_range_t &r = kind_to_file[(int)info.kind];
+        for (int f = r.first; f < r.first + r.n; f++)
+            if (files[f].tile_shape == info.shape) return f;
+        return -1;
+    }
 };
 
 // Compute liveness for each operation `i`.

@@ -40,6 +40,16 @@ struct reg_config_t {
     int param_reg = 0;
 };
 
+// The tile configuration the kernel runs with. The IR does not configure the
+// tiles. The kernel or its caller does.
+//
+//   shapes - shape of each tile register, indexed by its number. A tile that
+//            the configuration leaves unused has the empty shape. A kernel
+//            without tiles has no shapes.
+struct tile_config_t {
+    std::vector<tile_shape_t> shapes;
+};
+
 // Creates the register config for the given ISA.
 //
 // The number of vector registers and their spill-slot size are inferred
@@ -53,6 +63,10 @@ struct reg_config_t {
 // A mask allocates from the vector file on AVX2*, where a mask is a vector
 // register and spills like one, and from a dedicated k-register file on
 // AVX-512, which is not spillable.
+//
+// A tile allocates from the file of the tile registers that `tiles` configures
+// with its shape. There is one such file per distinct shape, and it is not
+// spillable.
 //
 // Some registers are reserved and are not included in the allocatable pools:
 // - `rsp_reg` (stack pointer)
@@ -70,7 +84,8 @@ struct reg_config_t {
 //
 // Export for testing.
 reg_config_t DNNL_API make_reg_config(cpu_isa_t isa, int param_reg, int rsp_reg,
-        const std::vector<int> &reserved_masks);
+        const std::vector<int> &reserved_masks,
+        const tile_config_t &tiles = {});
 
 } // namespace ir
 } // namespace x64
