@@ -733,6 +733,17 @@ status_t init_output_conf(output_conf_t &output, const brgemm_desc_t &brg) {
                         binary_injector::
                                 get_all_strategies_supported_by_injector()}),
                 VERBOSE_UNSUPPORTED_POSTOP);
+
+        // The binary injector loads an fp8 argument through fp8 converters,
+        // which `ir::postops_injector_t` does not create.
+        const post_ops_t &post_ops = brg.attr()->post_ops_;
+        for (int i = 0; i < post_ops.len(); i++) {
+            const auto &e = post_ops.entry_[i];
+            VCONDCHECK_BRGEMM_IR(!e.is_binary()
+                            || !one_of(e.binary.src1_desc.data_type, f8_e5m2,
+                                    f8_e4m3),
+                    VERBOSE_UNSUPPORTED_POSTOP);
+        }
     }
 
     // Scales are f32 values the kernel broadcasts or loads per N register:

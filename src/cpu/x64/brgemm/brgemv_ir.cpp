@@ -820,6 +820,17 @@ status_t brgemv_ir_supported(const brgemm_desc_t &brg) {
                         binary_injector::
                                 get_all_strategies_supported_by_injector()}),
                 VERBOSE_UNSUPPORTED_POSTOP);
+
+        // The binary injector loads an fp8 argument through fp8 converters,
+        // which `ir::postops_injector_t` does not create.
+        const post_ops_t &post_ops = brg.attr()->post_ops_;
+        for (int i = 0; i < post_ops.len(); i++) {
+            const auto &e = post_ops.entry_[i];
+            VCONDCHECK_BRGEMV_IR(!e.is_binary()
+                            || !utils::one_of(e.binary.src1_desc.data_type,
+                                    f8_e5m2, f8_e4m3),
+                    VERBOSE_UNSUPPORTED_POSTOP);
+        }
     }
     VCONDCHECK_BRGEMV_IR(!brg.with_dst_scales, VERBOSE_UNSUPPORTED_SCALES_CFG);
     VCONDCHECK_BRGEMV_IR(!brg.is_per_k_src_scales && !brg.is_per_k_wei_scales,
