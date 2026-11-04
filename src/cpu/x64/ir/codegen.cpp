@@ -56,6 +56,13 @@ void generate_kernel(
     const postops_config_t &postops = cfg.postops;
     const bool with_postops = postops.post_ops != nullptr;
 
+    if (!cfg.tiles.shapes.empty()) {
+        JIT_ASSERT(is_superset(isa, amx_tile)
+                && "generate_kernel: tiles need amx_tile");
+        JIT_ASSERT((int)cfg.tiles.shapes.size() <= amx::get_max_palette_size()
+                && "generate_kernel: more tiles than the palette has");
+    }
+
     // AVX-512 opmasks reserved for the post-ops injector, which writes both
     // and restores neither (see `postops_injector_t`).
     const int eltwise_opmask = 6, binary_tail_opmask = 7;
@@ -64,8 +71,8 @@ void generate_kernel(
             : std::vector<int> {};
 
     // Build the register configuration for code emission.
-    const reg_config_t reg_cfg = make_reg_config(
-            isa, abi_param1.getIdx(), Xbyak::Operand::RSP, reserved_masks);
+    const reg_config_t reg_cfg = make_reg_config(isa, abi_param1.getIdx(),
+            Xbyak::Operand::RSP, reserved_masks, cfg.tiles);
 
     // Allocate registers.
     const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);

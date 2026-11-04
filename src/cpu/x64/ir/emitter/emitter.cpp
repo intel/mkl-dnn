@@ -19,6 +19,7 @@
 
 #include "cpu/x64/ir/emitter/backend_avx2.hpp"
 #include "cpu/x64/ir/emitter/backend_avx512.hpp"
+#include "cpu/x64/ir/emitter/backend_tile.hpp"
 #include "cpu/x64/ir/emitter/emitter.hpp"
 #include "cpu/x64/ir/postops_injector.hpp"
 #include "cpu/x64/utils/jit_regops.hpp"
@@ -36,6 +37,10 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
 
     // The backend holds the generator.
     jit_generator_t &gen = be.gen();
+
+    // Tile instructions go to a backend of their own, the same for both vector
+    // backends.
+    tile_backend_t tbe(gen);
 
     // One label per loop, keyed by the `loop_begin` instruction index. A
     // `loop_end` jumps back to `labels[op.match]`. A map, so only loops get an
@@ -100,6 +105,17 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
     // a reload. It is the temp when `vr` is spilled.
     auto reg_of
             = [&](vreg_t vr) { return spilled(vr) ? temp_of(vr) : phys(vr); };
+
+    // Physical register of the tile `vr`. Tiles are never spilled. A tile has
+    // no register when the tile configuration has no tile of its shape, or
+    // when more tiles of that shape are live at once than the configuration
+    // has. The kernel then cannot be emitted.
+    auto tile_of = [&](vreg_t vr) -> int {
+        JIT_ASSERT_RET(
+                !spilled(vr) && phys(vr) >= 0 && "emit: tile has no register",
+                0);
+        return phys(vr);
+    };
 
     // Move a spilled vec value between its stack slot and a register, as a
     // vector load/store against the stack frame (`rsp`).
@@ -349,6 +365,9 @@ void emit(backend_t &be, const ir_t &ir, const reg_alloc_result_t &alloc,
                 gen.prefetcht0(gen.ptr[base + (int)op.mem.disp]);
                 break;
             }
+
+            // Tile ops. Emitting the instruction is the tile backend's job.
+            case op_kind_t::tzero: tbe.tzero(tile_of(op.dst)); break;
 
             // Control flow. ISA-neutral, emitted directly.
             case op_kind_t::loop_begin: {

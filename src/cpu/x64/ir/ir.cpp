@@ -35,6 +35,14 @@ vreg_t ir_t::new_vreg(reg_kind_t k, data_type_t dt) {
     return static_cast<vreg_t>((int)vreg_info_.size() - 1);
 }
 
+vreg_t ir_t::new_tile(data_type_t dt, tile_shape_t shape) {
+    assert(shape.rows > 0 && shape.colsb > 0 && "new_tile: empty shape");
+
+    const vreg_t v = new_vreg(reg_kind_t::tile, dt);
+    vreg_info_[(int)v].shape = shape;
+    return v;
+}
+
 int ir_t::mov_imm(vreg_t dst, dim_t imm) {
     op_t op;
     op.kind = op_kind_t::mov_imm;
@@ -222,6 +230,13 @@ void ir_t::prefetch(vreg_t base, dim_t disp) {
     op.kind = op_kind_t::prefetch;
     op.mem.base = base;
     op.mem.disp = disp;
+    ops_.push_back(op);
+}
+
+void ir_t::tzero(vreg_t dst) {
+    op_t op;
+    op.kind = op_kind_t::tzero;
+    op.dst = dst;
     ops_.push_back(op);
 }
 
@@ -447,6 +462,7 @@ void ir_t::def_use(
             u(op.mem.base);
             break;
         case op_kind_t::prefetch: u(op.mem.base); break;
+        case op_kind_t::tzero: d(op.dst); break;
         case op_kind_t::loop_begin:
             if (op.init_is_reg) u(op.s0);
             d(op.dst);

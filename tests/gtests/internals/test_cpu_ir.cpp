@@ -136,8 +136,8 @@ void expect_no_reg_conflicts(const ir_t &ir, const reg_pools_t &pools,
         for (int b = a + 1; b < n; b++) {
             if (!iv[b].used()) continue;
 
-            const int file_a = pools.kind_to_file[(int)ir.vreg_info()[a].kind];
-            const int file_b = pools.kind_to_file[(int)ir.vreg_info()[b].kind];
+            const int file_a = pools.file_of(ir.vreg_info()[a]);
+            const int file_b = pools.file_of(ir.vreg_info()[b]);
             if (file_a != file_b) continue;
 
             const bool overlap
@@ -166,7 +166,7 @@ void expect_valid_temps(const ir_t &ir, const reg_pools_t &pools,
     for (int i = 0; i < ir.n_ops(); i++) {
         std::set<std::pair<int, int>> held; // (file, physical register)
         auto hold = [&](int v, int phys) {
-            const int file = pools.kind_to_file[(int)ir.vreg_info()[v].kind];
+            const int file = pools.file_of(ir.vreg_info()[v]);
             EXPECT_TRUE(held.insert({file, phys}).second)
                     << "op " << i << ": register " << phys << " held twice";
         };
@@ -641,7 +641,8 @@ TEST(RegConfigTests, MapsMaskKindToFilePerIsa) {
                 = make_reg_config(avx2, param_reg, rsp_reg, reserved_masks);
 
         ASSERT_EQ(rc.pools.files.size(), 2u);
-        EXPECT_EQ(rc.pools.kind_to_file, std::vector<int>({0, 1, 1}));
+        EXPECT_EQ(rc.pools.kind_to_file,
+                std::vector<file_range_t>({{0, 1}, {1, 1}, {1, 1}, {2, 0}}));
         EXPECT_EQ(rc.pools.files[1].slot_size, 32u);
         EXPECT_EQ(rc.pools.files[0].regs.size(), 16u - n_reserved_gprs);
         EXPECT_EQ(rc.pools.files[1].regs.size(), 16u);
@@ -652,7 +653,8 @@ TEST(RegConfigTests, MapsMaskKindToFilePerIsa) {
                 avx512_core, param_reg, rsp_reg, reserved_masks);
 
         ASSERT_EQ(rc.pools.files.size(), 3u);
-        EXPECT_EQ(rc.pools.kind_to_file, std::vector<int>({0, 1, 2}));
+        EXPECT_EQ(rc.pools.kind_to_file,
+                std::vector<file_range_t>({{0, 1}, {1, 1}, {2, 1}, {3, 0}}));
         EXPECT_EQ(rc.pools.files[1].slot_size, 64u);
         // `r16` to `r31` are added where the machine has Intel APX enabled.
         EXPECT_EQ(rc.pools.files[0].regs.size(),
@@ -662,6 +664,27 @@ TEST(RegConfigTests, MapsMaskKindToFilePerIsa) {
         // write mask.
         EXPECT_EQ(rc.pools.files[2].regs, std::vector<int>({1, 2, 3, 4, 5}));
     }
+}
+
+// Checks the tile files `make_reg_config()` builds from a tile configuration.
+// Each distinct shape gets one file with the tiles configured with it, and an
+// unused tile is in no file. The tile kind maps to these files.
+TEST(RegConfigTests, BuildsOneTileFilePerShape) {
+    const tile_shape_t big {16, 64}, small {8, 32};
+    tile_config_t tiles;
+    tiles.shapes = {big, small, tile_shape_t {}, big};
+
+    const reg_config_t rc = make_reg_config(avx512_core_amx, /*param_reg=*/0,
+            /*rsp_reg=*/Xbyak::Operand::RSP, /*reserved_masks=*/ {}, tiles);
+
+    // The gpr, vec, and mask files come first.
+    ASSERT_EQ(rc.pools.files.size(), 5u);
+    EXPECT_EQ(rc.pools.kind_to_file[(int)reg_kind_t::tile],
+            (file_range_t {3, 2}));
+    EXPECT_EQ(rc.pools.files[3].regs, std::vector<int>({0, 3}));
+    EXPECT_EQ(rc.pools.files[4].regs, std::vector<int>({1}));
+    EXPECT_FALSE(rc.pools.files[3].spillable);
+    EXPECT_FALSE(rc.pools.files[4].spillable);
 }
 
 // Allocator tests
@@ -1659,6 +1682,49 @@ end x64ir
         EXPECT_EQ(kernel_dump_str(gen, ir, data_section_t(), reg_cfg, alloc),
                 c.second);
     }
+}
+
+// Checks the output for tiles of two shapes. Each shape has a file of its own,
+// named after the shape, and each tile takes a register from the file of its
+// shape.
+TEST(DumpTests, KernelDumpShowsTileFiles) {
+    using namespace data_type;
+    const tile_shape_t big {16, 64}, small {8, 32};
+    ir_t ir;
+    const vreg_t c0 = ir.new_tile(f32, big);
+    const vreg_t c1 = ir.new_tile(f32, big);
+    const vreg_t b = ir.new_tile(bf16, small);
+    ir.tzero(c0);
+    ir.tzero(b);
+    ir.tzero(c1);
+
+    const char *expected = R"(begin x64ir ir_kernel isa=avx10_1_512_amx
+code: 0 bytes (instructions 0 bytes, static data 0 bytes)
+alloc gpr: pool 2, peak 0, spilled 0
+alloc vec: pool 32, peak 0, spilled 0
+alloc mask: pool 7, peak 0, spilled 0
+alloc tile16x64: pool 2, peak 1 at op 0, spilled 0
+alloc tile8x32: pool 1, peak 1 at op 1, spilled 0
+
+index | gpr vec mask tile16x64 tile8x32 | operation
+    0 |   0   0    0         1        0 | tzero f32:t0@tmm0
+    1 |   0   0    0         0        1 | tzero bf16:t2@tmm1
+    2 |   0   0    0         1        0 | tzero f32:t1@tmm0
+end x64ir
+)";
+
+    const ir_kernel_t gen(
+            ir, /*vec_regs_limit=*/-1, /*gpr_regs_limit=*/-1, avx512_core_amx);
+
+    tile_config_t tiles;
+    tiles.shapes = {big, small, big};
+    reg_config_t reg_cfg = make_reg_config(avx512_core_amx, abi_param1.getIdx(),
+            Xbyak::Operand::RSP, {}, tiles);
+    reg_cfg.pools.files[0].regs = {Xbyak::Operand::RAX, Xbyak::Operand::RCX};
+    const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
+
+    EXPECT_EQ(kernel_dump_str(gen, ir, data_section_t(), reg_cfg, alloc),
+            expected);
 }
 
 } // namespace dnnl

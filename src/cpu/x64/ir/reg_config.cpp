@@ -26,7 +26,7 @@ namespace x64 {
 namespace ir {
 
 reg_config_t make_reg_config(cpu_isa_t isa, int param_reg, int rsp_reg,
-        const std::vector<int> &reserved_masks) {
+        const std::vector<int> &reserved_masks, const tile_config_t &tiles) {
     reg_config_t rc;
     rc.param_reg = param_reg;
 
@@ -63,12 +63,13 @@ reg_config_t make_reg_config(cpu_isa_t isa, int param_reg, int rsp_reg,
 
     rc.pools.files = {gpr_file, vec_file};
 
-    // Map each register kind to a file. `reg_kind_t` order is
-    // { gpr, vec, mask }.
+    // Map each register kind to its files. `reg_kind_t` order is
+    // { gpr, vec, mask, tile }.
     //  * gpr: file 0
     //  * vec: file 1
     //  * mask: file 1 on AVX2*, where a mask is a vector register, and file 2
     //    on AVX-512, which has a dedicated k-register file.
+    //  * tile: the tile files, which follow the others (see below).
     if (is_superset(isa, avx512_core)) {
         // Mask file holds `k1` to `k7` minus `reserved_masks`. `k0` is excluded
         // because it cannot encode a write mask. A k-register is never spilled,
@@ -80,10 +81,33 @@ reg_config_t make_reg_config(cpu_isa_t isa, int param_reg, int rsp_reg,
         }
 
         rc.pools.files.push_back(mask_file);
-        rc.pools.kind_to_file = {0, 1, 2};
+        rc.pools.kind_to_file = {{0, 1}, {1, 1}, {2, 1}};
     } else {
-        rc.pools.kind_to_file = {0, 1, 1};
+        rc.pools.kind_to_file = {{0, 1}, {1, 1}, {1, 1}};
     }
+
+    // Tile files follow the others, one per shape, in the order the shapes
+    // first appear. Each holds the tile registers configured with its shape,
+    // and unused tiles are left out. A tile is never spilled, so the files
+    // have no spill slot.
+    std::vector<reg_file_t> &files = rc.pools.files;
+    file_range_t tile_files = {(int)files.size(), 0};
+    for (int t = 0; t < (int)tiles.shapes.size(); t++) {
+        const tile_shape_t &shape = tiles.shapes[t];
+        if (shape == tile_shape_t {}) continue;
+
+        auto file = std::find_if(files.begin() + tile_files.first, files.end(),
+                [&](const reg_file_t &f) { return f.tile_shape == shape; });
+        if (file == files.end()) {
+            reg_file_t tile_file;
+            tile_file.spillable = false;
+            tile_file.tile_shape = shape;
+            file = files.insert(files.end(), tile_file);
+            tile_files.n++;
+        }
+        file->regs.push_back(t);
+    }
+    rc.pools.kind_to_file.push_back(tile_files);
 
     return rc;
 }

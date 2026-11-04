@@ -56,6 +56,7 @@ const char *kind_name(op_kind_t kind) {
         case op_kind_t::vload_masked: return "vload_masked";
         case op_kind_t::vstore_masked: return "vstore_masked";
         case op_kind_t::prefetch: return "prefetch";
+        case op_kind_t::tzero: return "tzero";
         case op_kind_t::loop_begin: return "loop_begin";
         case op_kind_t::loop_end: return "loop_end";
         case op_kind_t::if_begin: return "if_begin";
@@ -87,6 +88,7 @@ const char *reg_kind_name(reg_kind_t kind) {
         case reg_kind_t::gpr: return "gpr";
         case reg_kind_t::vec: return "vec";
         case reg_kind_t::mask: return "mask";
+        case reg_kind_t::tile: return "tile";
     }
     assert(!"unknown reg kind");
 
@@ -109,6 +111,7 @@ std::string phys_str(cpu_isa_t isa, reg_kind_t kind, int phys) {
         case reg_kind_t::mask:
             return is_avx512 ? Xbyak::Opmask(phys).toString()
                              : Xbyak::Ymm(phys).toString();
+        case reg_kind_t::tile: return Xbyak::Tmm(phys).toString();
     }
     assert(!"unknown reg kind");
 
@@ -136,8 +139,8 @@ std::string location_str(const ir_t &ir, cpu_isa_t isa,
     return slot + "(no temp)";
 }
 
-// Returns `g<id>`, `<dt>:v<id>`, or `m<id>` by the kind of `v`, followed by its
-// location after `@`.
+// Returns `g<id>`, `<dt>:v<id>`, `m<id>`, or `<dt>:t<id>` by the kind of `v`,
+// followed by its location after `@`.
 std::string vreg_str(const ir_t &ir, vreg_t v, cpu_isa_t isa,
         const reg_alloc_result_t &alloc, const std::vector<temp_reg_t> *temps) {
     if (v == vreg_t::none) return "none";
@@ -153,18 +156,32 @@ std::string vreg_str(const ir_t &ir, vreg_t v, cpu_isa_t isa,
             return std::string(dnnl_dt2str(ir.vreg_info()[(int)v].dt)) + ":v"
                     + id + at;
         case reg_kind_t::mask: return "m" + id + at;
+        case reg_kind_t::tile:
+            return std::string(dnnl_dt2str(ir.vreg_info()[(int)v].dt)) + ":t"
+                    + id + at;
     }
     assert(!"unknown reg kind");
 
     return "?" + id;
 }
 
-// Returns the name of register file `f`. On AVX2, a mask is a vector register.
+// Returns the name of register file `f`: the first kind whose files include
+// it, followed by `<rows>x<colsb>` for a tile file. On AVX2, a mask is a vector
+// register, so its file is named `vec`.
 std::string file_name(const reg_pools_t &pools, int f) {
-    for (int k = 0; k < (int)pools.kind_to_file.size(); k++)
-        if (pools.kind_to_file[k] == f) return reg_kind_name((reg_kind_t)k);
+    for (int k = 0; k < (int)pools.kind_to_file.size(); k++) {
+        const file_range_t &r = pools.kind_to_file[k];
+        if (f < r.first || f >= r.first + r.n) continue;
 
-    return "file" + std::to_string(f);
+        std::string kind = reg_kind_name((reg_kind_t)k);
+        const tile_shape_t &shape = pools.files[f].tile_shape;
+        if (shape == tile_shape_t {}) return kind;
+        return kind + std::to_string(shape.rows) + "x"
+                + std::to_string(shape.colsb);
+    }
+    assert(!"file_name: no kind allocates from the file");
+
+    return "?";
 }
 
 // Returns the memory operand of `op`. `data` is the vec vreg the access moves,
@@ -244,7 +261,8 @@ std::string op_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
         case op_kind_t::vmul:
         case op_kind_t::vhreduce: return k + r(op.dst) + ", " + r(op.s0);
         case op_kind_t::load: return k + r(op.dst) + ", " + mem(vreg_t::none);
-        case op_kind_t::vzero: return k + r(op.dst);
+        case op_kind_t::vzero:
+        case op_kind_t::tzero: return k + r(op.dst);
         case op_kind_t::vload:
         case op_kind_t::vload_scalar:
         case op_kind_t::vload_bcast: return k + r(op.dst) + ", " + mem(op.dst);
@@ -290,13 +308,9 @@ std::string peak_str(const std::vector<int> &pressure) {
 
 // Returns the vregs that allocate from file `f`.
 std::vector<int> file_vregs(const ir_t &ir, const reg_pools_t &pools, int f) {
-    auto file_of = [](const ir_t &ir, const reg_pools_t &pools, int v) {
-        return pools.kind_to_file[(int)ir.vreg_info()[v].kind];
-    };
-
     std::vector<int> vregs;
     for (int v = 0; v < ir.n_vregs(); v++)
-        if (file_of(ir, pools, v) == f) vregs.push_back(v);
+        if (pools.file_of(ir.vreg_info()[v]) == f) vregs.push_back(v);
 
     return vregs;
 }
@@ -319,9 +333,11 @@ std::vector<std::vector<int>> count_pressure(
         for (int v : defs)
             needs[v] = 1;
 
-        for (int v = 0; v < ir.n_vregs(); v++)
-            if (needs[v])
-                pressure[pools.kind_to_file[(int)ir.vreg_info()[v].kind]][i]++;
+        // A tile whose shape has no file is not counted.
+        for (int v = 0; v < ir.n_vregs(); v++) {
+            const int f = pools.file_of(ir.vreg_info()[v]);
+            if (needs[v] && f >= 0) pressure[f][i]++;
+        }
     }
 
     return pressure;

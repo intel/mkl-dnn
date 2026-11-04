@@ -21,6 +21,7 @@
 #include "common/c_types_map.hpp"
 #include "cpu/x64/injectors/jit_uni_binary_injector.hpp"
 #include "cpu/x64/ir/ir.hpp"
+#include "cpu/x64/ir/reg_config.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
 namespace dnnl {
@@ -55,8 +56,11 @@ struct postops_config_t {
 // because `generate_kernel()` takes it from the generator.
 //
 //   postops - inputs of the post-ops injector
+//   tiles   - tile configuration the kernel runs with. Tile vregs allocate
+//             from the tiles it configures.
 struct codegen_config_t {
     postops_config_t postops;
+    tile_config_t tiles;
 };
 
 // Generates the complete kernel for `ir` into `gen`.
@@ -72,7 +76,9 @@ struct codegen_config_t {
 // The register configuration, emitter, and post-ops injector all take the ISA
 // from `gen.max_cpu_isa()`. The kernel argument pointer is `abi_param1`.
 //
-// The post-ops injector is created only when `cfg.postops.post_ops` is set.
+// The post-ops injector is created only when `cfg.postops.post_ops` is set. A
+// tile configuration needs an ISA with tile registers (`amx_tile`) and has at
+// most as many tiles as the target palette.
 void generate_kernel(
         jit_generator_t &gen, const ir_t &ir, const codegen_config_t &cfg = {});
 
