@@ -97,11 +97,11 @@ struct advancing_regs_t {
     ir::vreg_t b_off = ir::vreg_t::none;
     // Current bias pointer. The bias is indexed by the load dimension only, so
     // it advances with the N loop and is rewound before the next M block.
-    // `none` unless `with_bias`.
+    // `none` without the `bias` stage.
     ir::vreg_t bias_ptr = ir::vreg_t::none;
     // Current weights-scale pointer. A per-N scale advances and rewinds like
     // `bias_ptr`, a common one stays at its only element.
-    // `none` unless `with_wei_scales`.
+    // `none` without a weights scale stage.
     ir::vreg_t wei_scale_ptr = ir::vreg_t::none;
 };
 
@@ -120,7 +120,7 @@ struct invariant_regs_t {
     // stores to D, zero stores to C. `none` when the kernel has no post-op.
     ir::vreg_t do_post_ops = ir::vreg_t::none;
     // Common source and destination scale pointers.
-    // `none` unless `with_src_scales` and `with_dst_scales` respectively.
+    // `none` without the `src_scale` and `dst_scale` stages respectively.
     ir::vreg_t src_scale_ptr = ir::vreg_t::none;
     ir::vreg_t dst_scale_ptr = ir::vreg_t::none;
 };
@@ -163,22 +163,23 @@ m_loop_input_regs_t init_m_loop_input_regs(ir::ir_t &ir, const conf_t &cfg) {
     regs.advancing.b_off = ir.new_gpr();
     ir.mov_imm(regs.advancing.b_off, 0);
 
-    if (cfg.output.with_bias) {
+    if (cfg.output.has_stage(output_stage_t::bias)) {
         regs.advancing.bias_ptr = ir.new_gpr();
         ir.load_param(regs.advancing.bias_ptr, GET_OFF(ptr_bias));
     }
 
-    if (cfg.output.with_src_scales) {
+    if (cfg.output.has_stage(output_stage_t::src_scale)) {
         regs.invariant.src_scale_ptr = ir.new_gpr();
         ir.load_param(regs.invariant.src_scale_ptr, GET_OFF(ptr_src_scales));
     }
 
-    if (cfg.output.with_wei_scales) {
+    if (cfg.output.has_stage(output_stage_t::wei_scale)
+            || cfg.output.has_stage(output_stage_t::wei_scale_per_n)) {
         regs.advancing.wei_scale_ptr = ir.new_gpr();
         ir.load_param(regs.advancing.wei_scale_ptr, GET_OFF(ptr_wei_scales));
     }
 
-    if (cfg.output.with_dst_scales) {
+    if (cfg.output.has_stage(output_stage_t::dst_scale)) {
         regs.invariant.dst_scale_ptr = ir.new_gpr();
         ir.load_param(regs.invariant.dst_scale_ptr, GET_OFF(ptr_dst_scales));
     }
@@ -352,6 +353,108 @@ void emit_bs_body(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
     }, step);
 }
 
+// One stage of a post-ops call, applied to the accumulators of the block.
+void emit_post_ops_stage(ir::ir_t &ir, const conf_t &cfg,
+        const m_loop_input_regs_t &regs, const out_block_t &blk,
+        const std::vector<ir::vreg_t> &acc, output_stage_t stage) {
+
+    switch (stage) {
+        case output_stage_t::src_scale: {
+            const ir::vreg_t sc = ir.new_vec(cfg.output.dt_src_scales);
+            ir.vload_bcast(sc, regs.invariant.src_scale_ptr, 0,
+                    cfg.output.dt_src_scales);
+            for (const ir::vreg_t &v : acc)
+                ir.vmul(v, sc);
+            break;
+        }
+        case output_stage_t::wei_scale: {
+            const ir::vreg_t sc = ir.new_vec(cfg.output.dt_wei_scales);
+            ir.vload_bcast(sc, regs.advancing.wei_scale_ptr, 0,
+                    cfg.output.dt_wei_scales);
+            for (const ir::vreg_t &v : acc)
+                ir.vmul(v, sc);
+            break;
+        }
+        case output_stage_t::wei_scale_per_n: {
+            // One scale vector per N register, shared by every M row of the
+            // block.
+            for (int ld = 0; ld < blk.ld_block2; ld++) {
+                const ir::vreg_t sc = ir.new_vec(cfg.output.dt_wei_scales);
+                if (blk.ld_tail_mask == ir::vreg_t::none)
+                    ir.vload(sc, regs.advancing.wei_scale_ptr,
+                            cfg.wei_scale_off(cfg.ld_pos(blk, ld)),
+                            cfg.output.dt_wei_scales);
+                else
+                    ir.vload_masked(sc, regs.advancing.wei_scale_ptr,
+                            cfg.wei_scale_off(cfg.ld_pos(blk, ld)),
+                            blk.ld_tail_mask, cfg.output.dt_wei_scales);
+
+                for (int bd = 0; bd < blk.bd_block; bd++)
+                    ir.vmul(acc[bd * blk.ld_block2 + ld], sc);
+            }
+            break;
+        }
+        case output_stage_t::bias: {
+            // One bias vector per N register, shared by every M row of the
+            // block.
+            for (int ld = 0; ld < blk.ld_block2; ld++) {
+                const ir::vreg_t bias = ir.new_vec(cfg.output.dt_bias);
+                if (blk.ld_tail_mask == ir::vreg_t::none)
+                    ir.vload(bias, regs.advancing.bias_ptr,
+                            cfg.bias_off(cfg.ld_pos(blk, ld)),
+                            cfg.output.dt_bias);
+                else
+                    ir.vload_masked(bias, regs.advancing.bias_ptr,
+                            cfg.bias_off(cfg.ld_pos(blk, ld)), blk.ld_tail_mask,
+                            cfg.output.dt_bias);
+
+                for (int bd = 0; bd < blk.bd_block; bd++)
+                    ir.vadd(acc[bd * blk.ld_block2 + ld], bias);
+            }
+            break;
+        }
+        case output_stage_t::injector_postops: {
+            // The injector gets the address of the block and the offset of
+            // each accumulator in the block, as `jit_brgemm_kernel_t` passes
+            // `reg_aux_D` and `D_offset()`. A binary post-op computes the
+            // output coordinates from the address at run time and from the
+            // offset at JIT time (`calculate_*_partial()`), and gets them
+            // wrong for an offset outside the block. So a block that is not
+            // at the pointers gets its address in its own register. A sum
+            // post-op reads the previous value from the same address.
+            ir::vreg_t blk_ptr = regs.advancing.store_ptr;
+            if (blk.bd_start != 0 || blk.ld_start != 0) {
+                blk_ptr = ir.new_gpr();
+                ir.mov_reg(blk_ptr, regs.advancing.store_ptr);
+                ir.add_imm(blk_ptr, cfg.c_off(blk.bd_start, blk.ld_start));
+            }
+
+            std::vector<dim_t> out_byte_off(acc.size());
+            for (int bd = 0; bd < blk.bd_block; bd++)
+                for (int ld = 0; ld < blk.ld_block2; ld++)
+                    out_byte_off[bd * blk.ld_block2 + ld]
+                            = cfg.c_off(bd, (dim_t)ld * cfg.loop.ld_block);
+
+            // A block is either all full registers or the one masked
+            // register of the N tail, which holds `ldb_tail` elements.
+            const int n_elems = blk.ld_tail_mask != ir::vreg_t::none
+                    ? cfg.loop.ldb_tail
+                    : cfg.loop.ld_block;
+            ir.inject_postops(acc, blk_ptr, out_byte_off, n_elems);
+            break;
+        }
+        case output_stage_t::dst_scale: {
+            // The caller passes the inverted f32 destination scale, so it is a
+            // multiply.
+            const ir::vreg_t sc = ir.new_vec(data_type::f32);
+            ir.vload_bcast(sc, regs.invariant.dst_scale_ptr, 0, data_type::f32);
+            for (const ir::vreg_t &v : acc)
+                ir.vmul(v, sc);
+            break;
+        }
+    }
+}
+
 // One N block.
 //
 // Creates the accumulators of the block with the compute path, reduces them
@@ -398,106 +501,10 @@ void emit_n_block(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
     }
 
     if (cfg.output.has_post_ops()) {
-        // The order is the one oneDNN defines and the classic kernel follows:
-        //   src scale -> weights scale -> bias -> post-ops -> dst scale.
-        // The scales are applied one at a time, as in the classic kernel, so
-        // the result rounds the same way.
         const int if_post_ops
                 = ir.if_begin(regs.invariant.do_post_ops, ir::cmp_t::ne, 0);
-
-        if (cfg.output.with_src_scales) {
-            const ir::vreg_t sc = ir.new_vec(cfg.output.dt_src_scales);
-            ir.vload_bcast(sc, regs.invariant.src_scale_ptr, 0,
-                    cfg.output.dt_src_scales);
-            for (const ir::vreg_t &v : acc)
-                ir.vmul(v, sc);
-        }
-
-        if (cfg.output.with_wei_scales && !cfg.output.per_n_wei_scales) {
-            const ir::vreg_t sc = ir.new_vec(cfg.output.dt_wei_scales);
-            ir.vload_bcast(sc, regs.advancing.wei_scale_ptr, 0,
-                    cfg.output.dt_wei_scales);
-            for (const ir::vreg_t &v : acc)
-                ir.vmul(v, sc);
-        }
-
-        if (cfg.output.per_n_wei_scales) {
-            // One scale vector per N register, shared by every M row of the
-            // block.
-            for (int ld = 0; ld < blk.ld_block2; ld++) {
-                const ir::vreg_t sc = ir.new_vec(cfg.output.dt_wei_scales);
-                if (blk.ld_tail_mask == ir::vreg_t::none)
-                    ir.vload(sc, regs.advancing.wei_scale_ptr,
-                            cfg.wei_scale_off(cfg.ld_pos(blk, ld)),
-                            cfg.output.dt_wei_scales);
-                else
-                    ir.vload_masked(sc, regs.advancing.wei_scale_ptr,
-                            cfg.wei_scale_off(cfg.ld_pos(blk, ld)),
-                            blk.ld_tail_mask, cfg.output.dt_wei_scales);
-
-                for (int bd = 0; bd < blk.bd_block; bd++)
-                    ir.vmul(acc[bd * blk.ld_block2 + ld], sc);
-            }
-        }
-
-        if (cfg.output.with_bias) {
-            // One bias vector per N register, shared by every M row of the
-            // block.
-            for (int ld = 0; ld < blk.ld_block2; ld++) {
-                const ir::vreg_t bias = ir.new_vec(cfg.output.dt_bias);
-                if (blk.ld_tail_mask == ir::vreg_t::none)
-                    ir.vload(bias, regs.advancing.bias_ptr,
-                            cfg.bias_off(cfg.ld_pos(blk, ld)),
-                            cfg.output.dt_bias);
-                else
-                    ir.vload_masked(bias, regs.advancing.bias_ptr,
-                            cfg.bias_off(cfg.ld_pos(blk, ld)), blk.ld_tail_mask,
-                            cfg.output.dt_bias);
-
-                for (int bd = 0; bd < blk.bd_block; bd++)
-                    ir.vadd(acc[bd * blk.ld_block2 + ld], bias);
-            }
-        }
-
-        if (cfg.output.with_injector_postops) {
-            // The injector gets the address of the block and the offset of
-            // each accumulator in the block, as `jit_brgemm_kernel_t` passes
-            // `reg_aux_D` and `D_offset()`. A binary post-op computes the
-            // output coordinates from the address at run time and from the
-            // offset at JIT time (`calculate_*_partial()`), and gets them
-            // wrong for an offset outside the block. So a block that is not
-            // at the pointers gets its address in its own register. A sum
-            // post-op reads the previous value from the same address.
-            ir::vreg_t blk_ptr = regs.advancing.store_ptr;
-            if (blk.bd_start != 0 || blk.ld_start != 0) {
-                blk_ptr = ir.new_gpr();
-                ir.mov_reg(blk_ptr, regs.advancing.store_ptr);
-                ir.add_imm(blk_ptr, cfg.c_off(blk.bd_start, blk.ld_start));
-            }
-
-            std::vector<dim_t> out_byte_off(acc.size());
-            for (int bd = 0; bd < blk.bd_block; bd++)
-                for (int ld = 0; ld < blk.ld_block2; ld++)
-                    out_byte_off[bd * blk.ld_block2 + ld]
-                            = cfg.c_off(bd, (dim_t)ld * cfg.loop.ld_block);
-
-            // A block is either all full registers or the one masked
-            // register of the N tail, which holds `ldb_tail` elements.
-            const int n_elems = blk.ld_tail_mask != ir::vreg_t::none
-                    ? cfg.loop.ldb_tail
-                    : cfg.loop.ld_block;
-            ir.inject_postops(acc, blk_ptr, out_byte_off, n_elems);
-        }
-
-        if (cfg.output.with_dst_scales) {
-            // The caller passes the inverted f32 destination scale, so it is a
-            // multiply.
-            const ir::vreg_t sc = ir.new_vec(data_type::f32);
-            ir.vload_bcast(sc, regs.invariant.dst_scale_ptr, 0, data_type::f32);
-            for (const ir::vreg_t &v : acc)
-                ir.vmul(v, sc);
-        }
-
+        for (const output_stage_t stage : cfg.output.post_ops_stages)
+            emit_post_ops_stage(ir, cfg, regs, blk, acc, stage);
         ir.if_end(if_post_ops);
     }
 
@@ -560,9 +567,9 @@ void build_brgemm(const conf_t &cfg, const compute_path_t &cp, ir::ir_t &ir) {
         ir.add_imm(regs.advancing.c_ptr, cfg.c_off(0, ld));
         if (regs.advancing.store_ptr != regs.advancing.c_ptr)
             ir.add_imm(regs.advancing.store_ptr, cfg.c_off(0, ld));
-        if (cfg.output.with_bias)
+        if (cfg.output.has_stage(output_stage_t::bias))
             ir.add_imm(regs.advancing.bias_ptr, cfg.bias_off(ld));
-        if (cfg.output.per_n_wei_scales)
+        if (cfg.output.has_stage(output_stage_t::wei_scale_per_n))
             ir.add_imm(regs.advancing.wei_scale_ptr, cfg.wei_scale_off(ld));
     };
 
@@ -578,9 +585,9 @@ void build_brgemm(const conf_t &cfg, const compute_path_t &cp, ir::ir_t &ir) {
         if (regs.advancing.store_ptr != regs.advancing.c_ptr)
             ir.add_imm(regs.advancing.store_ptr, cfg.c_off(bd, ld));
         if (ld != 0) {
-            if (cfg.output.with_bias)
+            if (cfg.output.has_stage(output_stage_t::bias))
                 ir.add_imm(regs.advancing.bias_ptr, cfg.bias_off(ld));
-            if (cfg.output.per_n_wei_scales)
+            if (cfg.output.has_stage(output_stage_t::wei_scale_per_n))
                 ir.add_imm(regs.advancing.wei_scale_ptr, cfg.wei_scale_off(ld));
             ir.mov_imm(regs.advancing.b_off, cfg.b_off(0, n_start));
         }
@@ -747,21 +754,28 @@ status_t init_output_conf(output_conf_t &output, const brgemm_desc_t &brg) {
             "runtime leading dimension");
 
     output.beta = brg.beta;
-    output.with_bias = brg.with_bias;
     output.dt_c = brg.dt_c;
     output.dt_bias = brg.dt_bias;
-    output.with_injector_postops
-            = brg.with_eltwise || brg.with_binary || brg.with_sum;
-    if (output.with_injector_postops) {
+    output.dt_src_scales = brg.dt_src_scales;
+    output.dt_wei_scales = brg.dt_wei_scales;
+
+    // The order is the one oneDNN defines and the classic kernel follows:
+    //   src scale -> weights scale -> bias -> post-ops -> dst scale.
+    // The scales are applied one at a time, as in the classic kernel, so the
+    // result rounds the same way.
+    std::vector<output_stage_t> &stages = output.post_ops_stages;
+    if (brg.with_src_scales) stages.push_back(output_stage_t::src_scale);
+    if (brg.with_wei_scales)
+        stages.push_back(brg.is_single_wei_scale
+                        ? output_stage_t::wei_scale
+                        : output_stage_t::wei_scale_per_n);
+    if (brg.with_bias) stages.push_back(output_stage_t::bias);
+    if (brg.with_eltwise || brg.with_binary || brg.with_sum) {
+        stages.push_back(output_stage_t::injector_postops);
         output.post_ops = brg.attr()->post_ops_;
         output.dst_md = *brg.dst_md();
     }
-    output.with_src_scales = brg.with_src_scales;
-    output.with_wei_scales = brg.with_wei_scales;
-    output.per_n_wei_scales = brg.with_wei_scales && !brg.is_single_wei_scale;
-    output.with_dst_scales = brg.with_dst_scales;
-    output.dt_src_scales = brg.dt_src_scales;
-    output.dt_wei_scales = brg.dt_wei_scales;
+    if (brg.with_dst_scales) stages.push_back(output_stage_t::dst_scale);
 
     // A post-ops call stores to D through the C displacements.
     VCONDCHECK_BRGEMM_IR(IMPLICATION(output.has_post_ops(), brg.LDC == brg.LDD),
@@ -841,7 +855,7 @@ struct jit_brgemm_ir_kernel_t : public brgemm_kernel_t {
         build_brgemm(conf_, *cp, ir);
 
         ir::postops_config_t postops;
-        if (conf_.output.with_injector_postops) {
+        if (conf_.output.has_stage(output_stage_t::injector_postops)) {
             postops.post_ops = &conf_.output.post_ops;
             postops.dst_md = &conf_.output.dst_md;
             postops.rhs_arg_offset = GET_OFF(post_ops_binary_rhs_arg_vec);

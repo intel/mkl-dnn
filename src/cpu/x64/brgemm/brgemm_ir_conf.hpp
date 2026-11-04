@@ -21,6 +21,9 @@
 // kernel, shared by the builder (`brgemm_ir.cpp`) and the code of each compute
 // path.
 
+#include <algorithm>
+#include <vector>
+
 #include "common/c_types_map.hpp"
 #include "common/type_helpers.hpp"
 
@@ -114,45 +117,56 @@ struct compute_path_conf_t {
     data_type_t dt_acc = data_type::undef;
 };
 
+// A stage of the output path. Each one acts on the complete sum, so it runs
+// only on a post-ops call.
+//
+//   src_scale        - multiplies by the common source scale
+//   wei_scale        - multiplies by the common weights scale
+//   wei_scale_per_n  - multiplies by the weights scale of each output column
+//   bias             - adds the bias of each output column
+//   injector_postops - applies the attribute post-ops (eltwise, binary, sum)
+//                      through the post-ops injector
+//   dst_scale        - multiplies by the common destination scale
+enum class output_stage_t {
+    src_scale,
+    wei_scale,
+    wei_scale_per_n,
+    bias,
+    injector_postops,
+    dst_scale,
+};
+
 // Output path configuration.
 //
-//   beta      - output scaling: 0 overwrites C, 1 accumulates into C
-//   with_bias - whether a bias is added to the output
-//   dt_c      - element data type of C and D in memory
-//   dt_bias   - element data type of the bias
-//   with_injector_postops - whether attribute post-ops (eltwise, binary, sum)
-//               are requested
-//   post_ops  - the attribute post-ops, applied through the post-ops injector
-//   dst_md    - the destination memory descriptor, which a binary post-op
-//               needs to locate its right-hand-side argument
-//   with_src_scales  - whether a common source scale multiplies the output
-//   with_wei_scales  - whether a weights scale multiplies the output
-//   per_n_wei_scales - whether the weights scale has one value per output
-//               column. Otherwise it is one common value
-//   with_dst_scales  - whether a common destination scale multiplies the
-//               output
+//   beta            - output scaling: 0 overwrites C, 1 accumulates into C
+//   dt_c            - element data type of C and D in memory
+//   dt_bias         - element data type of the bias
+//   post_ops        - the attribute post-ops, applied through the post-ops
+//                     injector
+//   dst_md          - the destination memory descriptor, which a binary
+//                     post-op needs to locate its right-hand-side argument
 //   dt_src_scales / dt_wei_scales - element data type of each scale
+//   post_ops_stages - the stages of a post-ops call, in the order they run
+//
+// Adding C and the store are not stages. The builder emits them on every
+// call: adding C before the stages when `beta` is 1, and the store after them.
 struct output_conf_t {
     float beta = 0.0f;
-    bool with_bias = false;
     data_type_t dt_c = data_type::undef;
     data_type_t dt_bias = data_type::undef;
-    bool with_injector_postops = false;
     post_ops_t post_ops;
     memory_desc_t dst_md;
-    bool with_src_scales = false;
-    bool with_wei_scales = false;
-    bool per_n_wei_scales = false;
-    bool with_dst_scales = false;
     data_type_t dt_src_scales = data_type::undef;
     data_type_t dt_wei_scales = data_type::undef;
+    std::vector<output_stage_t> post_ops_stages;
 
-    // True if the kernel has anything to apply on a post-ops call: the bias, a
-    // scale, or an attribute post-op.
-    bool has_post_ops() const {
-        return with_bias || with_injector_postops || with_src_scales
-                || with_wei_scales || with_dst_scales;
+    bool has_stage(output_stage_t stage) const {
+        return std::find(post_ops_stages.begin(), post_ops_stages.end(), stage)
+                != post_ops_stages.end();
     }
+
+    // True if the kernel has anything to apply on a post-ops call.
+    bool has_post_ops() const { return !post_ops_stages.empty(); }
 };
 
 // Builder configuration.
@@ -178,13 +192,14 @@ struct conf_t {
     }
     int dt_sz_c() const { return (int)types::data_type_size(output.dt_c); }
     int dt_sz_bias() const {
-        return output.with_bias ? (int)types::data_type_size(output.dt_bias)
-                                : 0;
+        return output.has_stage(output_stage_t::bias)
+                ? (int)types::data_type_size(output.dt_bias)
+                : 0;
     }
     // Element size in bytes of a per-N weights scale, 0 for a common one,
     // which is never indexed.
     int dt_sz_wei_scales() const {
-        return output.per_n_wei_scales
+        return output.has_stage(output_stage_t::wei_scale_per_n)
                 ? (int)types::data_type_size(output.dt_wei_scales)
                 : 0;
     }
