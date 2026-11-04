@@ -24,6 +24,7 @@
 // either vector backend. The emitter passes the tile number of each tile vreg,
 // and each operation constructs its Xbyak `Tmm` registers from it.
 
+#include "cpu/x64/ir/ir.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
 namespace dnnl {
@@ -43,10 +44,13 @@ struct tile_backend_t {
 
     // Load and store a tile, one row every `stride` bytes. The stride is the
     // index register of the address.
-    void tload(int d, int base, dim_t disp, int stride) {
+    void tload(int d, int base, dim_t disp, int stride, mem_hint_t hint) {
         const auto addr = gen().ptr[Xbyak::Reg64(base) + Xbyak::Reg64(stride)
                 + (int)disp];
-        gen().tileloadd(Xbyak::Tmm(d), addr);
+        if ((hint & mem_hint_t::non_temporal) != mem_hint_t::none)
+            gen().tileloaddt1(Xbyak::Tmm(d), addr);
+        else
+            gen().tileloadd(Xbyak::Tmm(d), addr);
     }
 
     void tstore(int base, dim_t disp, int s, int stride) {

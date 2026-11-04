@@ -205,6 +205,15 @@ std::string mem_str(const ir_t &ir, const op_t &op, vreg_t data, cpu_isa_t isa,
     return s;
 }
 
+// Returns `, <name>` for each flag of `hint`, or nothing when it has none.
+std::string hint_str(mem_hint_t hint) {
+    std::string s;
+    if ((hint & mem_hint_t::non_temporal) != mem_hint_t::none)
+        s += ", non_temporal";
+
+    return s;
+}
+
 // Returns the operands of an `inject_postops` op from its side-table entry:
 // the accumulators, then `base=` unless the base pointer is `none`, then
 // `off=` unless the offsets are empty, then `n_elems=`.
@@ -275,8 +284,10 @@ std::string op_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
         case op_kind_t::inject_postops:
             return k + postops_str(ir, op, isa, alloc, temps);
         case op_kind_t::vload_masked:
-        case op_kind_t::tload:
             return k + r(op.dst) + ", " + mem(op.dst) + ", " + r(op.s1);
+        case op_kind_t::tload:
+            return k + r(op.dst) + ", " + mem(op.dst) + ", " + r(op.s1)
+                    + hint_str(op.hint);
         case op_kind_t::vstore_masked:
         case op_kind_t::tstore:
             return k + mem(op.s0) + ", " + r(op.s0) + ", " + r(op.s1);
