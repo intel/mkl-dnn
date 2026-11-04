@@ -54,6 +54,18 @@ inline size_t align64(size_t n) {
     return (n + 63) & ~static_cast<size_t>(63);
 }
 
+// Return the physical row stride in elements. Add one cache line when the
+// row stride would otherwise alias L1 sets; keep short rows dense.
+dim_t scratch_row_ld(dim_t width, size_t dt_sz, bool allow_padding) {
+    const size_t line = platform::get_cache_line_size();
+    const size_t l1_way_bytes = platform::get_num_sets_in_cache(1) * line;
+    const size_t row_bytes = static_cast<size_t>(width) * dt_sz;
+    if (!allow_padding || l1_way_bytes == 0 || row_bytes % l1_way_bytes != 0
+            || row_bytes < 2 * l1_way_bytes)
+        return width;
+    return static_cast<dim_t>((row_bytes + line) / dt_sz);
+}
+
 // Returns the peak load of an f32 tile on the L2 cache: the largest number of
 // tile lines mapped to one L2 set, as a fraction of the L2 associativity
 // (1.0 means the tile alone fills a whole set). Returns 0 if unknown.
@@ -228,10 +240,14 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         primitive_attr_t attr;
         CHECK(attr.set_post_ops(po));
 
+        // LDC is the score tile's physical row stride. It equals full_tile_width
+        // when an mm1 binary post-op has a tensor RHS (e.g., the attention
+        // mask), or when select is folded into mm1 (see configure()).
         memory_desc_t dst_md;
         dims_t d_dims = {M, full_tile_width};
-        CHECK(memory_desc_init_by_tag(
-                dst_md, 2, d_dims, data_type::f32, format_tag::ab));
+        dims_t d_strides = {ldc, 1};
+        CHECK(memory_desc_init_by_strides(
+                dst_md, 2, d_dims, data_type::f32, d_strides));
 
         CHECK(brgemm_desc_set_postops(&brg, &attr, &dst_md, /*LDD=*/ldc));
     }
@@ -480,7 +496,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const dim_t o_col_stride = p_.o_strides[ndims - 1];
     const bool mm2_direct = p_.out_dt == data_type::f32 && o_col_stride == 1;
     conf.mm2_direct = mm2_direct;
-    const dim_t mm2_ldc = mm2_direct ? o_row_stride : p_.hs_v;
+    conf.ld_pv = scratch_row_ld(p_.hs_v, sizeof(float), /*allow_padding=*/true);
+    const dim_t mm2_ldc = mm2_direct ? o_row_stride : conf.ld_pv;
 
     // BRGEMM leading dims mirror the online kernel: A/B leading dims come from
     // the user strides (row_dim = the M/K row axis), scores/pv are dense.
@@ -528,7 +545,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                         /*beta=*/0.0f, ms[qi], ns[ni], p_.hs_qk,
                         /*lda=*/p_.q_strides[row_dim],
                         /*ldb=*/conf.ldk,
-                        /*ldc=*/p_.seq_kv, &p_.mm1_post_ops, select_postop,
+                        /*ldc=*/conf.ld_scores, &p_.mm1_post_ops, select_postop,
                         &mm1_amx.need_config, mm1_amx.palette,
                         &mm1_amx.wsp_size,
                         /*full_output_width=*/p_.seq_kv,
@@ -556,7 +573,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                     auto &mm2_amx = conf.mm2_amx[qi][ki][vi];
                     CHECK(build_brgemm_desc(descs.mm2_desc[qi][ki][vi],
                             p_.mm_dt, mm2_beta, ms[qi], width, ks[ki],
-                            /*lda=*/p_.seq_kv, /*ldb=*/conf.ldv,
+                            /*lda=*/conf.ld_prob, /*ldb=*/conf.ldv,
                             /*ldc=*/mm2_ldc, nullptr, false,
                             &mm2_amx.need_config, mm2_amx.palette,
                             &mm2_amx.wsp_size, 0, conf.mm2_needs_vnni_b));
@@ -569,7 +586,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                     if (!width) continue;
                     CHECK(build_brgemm_desc(descs.mm2_desc_beta0[qi][vi],
                             p_.mm_dt, 0.0f, ms[qi], width, conf.mm2_k_block,
-                            p_.seq_kv, conf.ldv, mm2_ldc, nullptr, false,
+                            conf.ld_prob, conf.ldv, mm2_ldc, nullptr, false,
                             nullptr, nullptr, nullptr, 0,
                             conf.mm2_needs_vnni_b));
                 }
@@ -595,6 +612,21 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     }
 
     conf.mm1_select_postop = try_select_postop;
+
+    // Score and P row strides. The binary injector requires a tensor rhs (an
+    // attention mask, or the folded select condition) to share the score
+    // tile's layout: the no-broadcast path indexes the rhs at the raw
+    // destination offset and broadcast strategies reject a destination laid
+    // out differently from the rhs. Keep the score rows dense then; scalar
+    // rhs and eltwise post-ops are layout-independent.
+    bool dense_scores_required = try_select_postop;
+    for (const auto &pop : p_.mm1_post_ops)
+        if (pop.is_binary && !pop.rhs_is_scalar) dense_scores_required = true;
+    conf.ld_scores
+            = scratch_row_ld(p_.seq_kv, sizeof(float), !dense_scores_required);
+    conf.ld_prob = p_.mm_dt == data_type::f32
+            ? conf.ld_scores
+            : scratch_row_ld(p_.seq_kv, mm_dt_sz, /*allow_padding=*/true);
 
     CHECK(build_mm2_descs());
     if (build_mm1_descs(try_select_postop) != status::success) {
@@ -627,14 +659,14 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // down-converted from the f32 softmax output; f32 reuses the scores tile
     // directly. The pv tile lets mm2 write a dense output that is then
     // scattered (and down-converted) to the (possibly strided) user output.
-    const size_t scores_bytes
-            = align64(static_cast<size_t>(q_block) * p_.seq_kv * sizeof(float));
-    const size_t pv_bytes = mm2_direct
-            ? 0
-            : align64(static_cast<size_t>(q_block) * p_.hs_v * sizeof(float));
+    const size_t scores_bytes = align64(
+            static_cast<size_t>(q_block) * conf.ld_scores * sizeof(float));
+    const size_t pv_bytes = mm2_direct ? 0
+                                       : align64(static_cast<size_t>(q_block)
+                                                 * conf.ld_pv * sizeof(float));
     const size_t prob_bytes = p_.mm_dt == data_type::f32
             ? 0
-            : align64(static_cast<size_t>(q_block) * p_.seq_kv * mm_dt_sz);
+            : align64(static_cast<size_t>(q_block) * conf.ld_prob * mm_dt_sz);
     // AMX (bf16/f16) kernels need a per-thread tile-store scratch; size it to
     // the largest wsp over all kernels (they run sequentially per work-item).
     size_t max_wsp = 0;
@@ -775,7 +807,8 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
                 CHECK(build_brgemm_desc(mm1_brg, p_.mm_dt, /*beta=*/0.0f,
                         d.bcast_dim, d.load_dim, d.reduce_dim,
                         /*lda=*/p_.q_strides[row_dim],
-                        /*ldb=*/conf.ldk, /*ldc=*/seq_kv, &p_.mm1_post_ops,
+                        /*ldb=*/conf.ldk, /*ldc=*/conf.ld_scores,
+                        &p_.mm1_post_ops,
                         /*select_postop=*/false,
                         /*amx_need_config=*/nullptr, /*amx_palette=*/nullptr,
                         /*amx_wsp=*/nullptr, /*full_output_width=*/seq_kv,
@@ -854,7 +887,7 @@ status_t create_kernels(cpu_isa_t isa_for_ir,
                 sdpa_full_softmax_select_ir::create_select_ir_kernel(isa_for_ir,
                         /*wseq_kv=*/seq_kv,
                         /*invert_select=*/p_.invert_select,
-                        /*scores_row_stride=*/seq_kv,
+                        /*scores_row_stride=*/conf.ld_scores,
                         /*cond_row_stride=*/cond_row));
         CHECK(k->create_kernel());
         select_kernel_ = std::move(k);
@@ -903,14 +936,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
 
     const size_t block_size = conf.scratch_per_thread;
 
+    const dim_t ld_scores = conf.ld_scores;
+    const dim_t ld_prob = conf.ld_prob;
+    const dim_t ld_pv = conf.ld_pv;
     const size_t scores_bytes
-            = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
+            = align64(static_cast<size_t>(q_block) * ld_scores * sizeof(float));
     const size_t pv_bytes = mm2_direct_
             ? 0
-            : align64(static_cast<size_t>(q_block) * p_.hs_v * sizeof(float));
+            : align64(static_cast<size_t>(q_block) * ld_pv * sizeof(float));
     const size_t prob_bytes = mm_dt == data_type::f32
             ? 0
-            : align64(static_cast<size_t>(q_block) * seq_kv * mm_dt_sz);
+            : align64(static_cast<size_t>(q_block) * ld_prob * mm_dt_sz);
 
     // Element strides to walk the K tensor's seq_kv / hs_qk axes when
     // materialising the dense [hs_qk, seq_kv] transpose (see init: derived from
@@ -1040,11 +1076,11 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // mm1 tiles seq_kv into full mm1_n_block-wide column blocks plus an
         // optional mm1_n_tail block. Each call computes columns [kv0, kv0+N):
         // the B slice is offset by kv0 columns and the output is written into
-        // the full [m, seq_kv] score tile at column kv0 (LDC/LDD = seq_kv). The
-        // post-op injector addresses the mask or select condition at the global
-        // column: data_C_ptr_ is the full-tile base, while c_blk is offset by
-        // kv0. The rhs table carries no kv0 offset; the injector derives it
-        // from those pointers.
+        // the full [m, seq_kv] score tile at column kv0 (LDC/LDD = ld_scores).
+        // The post-op injector addresses the mask or select condition at the
+        // global column: data_C_ptr_ is the full-tile base, while c_blk is
+        // offset by kv0. The rhs table carries no kv0 offset; the injector
+        // derives it from those pointers.
         auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = q_tile_buffer_ptr;
@@ -1096,9 +1132,9 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             (*select_kernel_)(&sa);
         }
         for (dim_t i = 0; i < m; ++i) {
-            float *srow = scores + i * seq_kv;
+            float *srow = scores + i * ld_scores;
             void *prob_row = static_cast<char *>(prob)
-                    + static_cast<size_t>(i) * seq_kv * mm_dt_sz;
+                    + static_cast<size_t>(i) * ld_prob * mm_dt_sz;
             softmax_impl::jit_softmax_kernel_base_t::call_params_t sp;
             sp.src = srow;
             sp.dst = prob_row;
@@ -1129,7 +1165,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                 : pv;
 
         // Run mm2 for the reduction block [kv0, kv0+K): A is P's column
-        // slice (lda = seq_kv), B is V's matching panel (packed: (kv0/k_pack)
+        // slice (lda = ld_prob), B is V's matching panel (packed: (kv0/k_pack)
         // K-groups in; f32: kv0 rows down), accumulating into mm2_c.
         auto run_mm2 = [&](const brgemm_kernel_t *k, dim_t kv0, dim_t v0) {
             brgemm_batch_element_t be;
@@ -1172,7 +1208,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             const bool dense_col = o_col_stride == 1;
             if (p_.out_dt == data_type::f32) {
                 for (dim_t i = 0; i < m; ++i) {
-                    const float *prow = pv + i * p_.hs_v;
+                    const float *prow = pv + i * ld_pv;
                     float *out_row = reinterpret_cast<float *>(
                             o_tile_buffer_ptr + i * o_row_stride * o_dt_sz);
                     if (dense_col)
@@ -1184,7 +1220,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                 }
             } else if (p_.out_dt == data_type::f16) {
                 for (dim_t i = 0; i < m; ++i) {
-                    const float *prow = pv + i * p_.hs_v;
+                    const float *prow = pv + i * ld_pv;
                     float16_t *out_row = reinterpret_cast<float16_t *>(
                             o_tile_buffer_ptr + i * o_row_stride * o_dt_sz);
                     if (dense_col)
@@ -1196,7 +1232,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                 }
             } else if (p_.out_dt == data_type::bf16) { // bf16
                 for (dim_t i = 0; i < m; ++i) {
-                    const float *prow = pv + i * p_.hs_v;
+                    const float *prow = pv + i * ld_pv;
                     bfloat16_t *out_row = reinterpret_cast<bfloat16_t *>(
                             o_tile_buffer_ptr + i * o_row_stride * o_dt_sz);
                     if (dense_col)

@@ -167,6 +167,7 @@ struct sdpa_full_softmax_conf_t {
     bool mm1_needs_vnni_b = false;
     bool mm2_needs_vnni_b = false;
     dim_t ldk = 0, ldv = 0;
+    dim_t ld_scores = 0, ld_prob = 0, ld_pv = 0;
     dim_t v_block = 0, v_tail = 0;
     bool pack_k_for_aliasing = false;
     // A non-inverted select mask with a dense condition is folded into mm1 as
