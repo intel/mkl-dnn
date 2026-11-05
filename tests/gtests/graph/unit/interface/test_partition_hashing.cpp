@@ -51,6 +51,8 @@ TEST(test_interface_partition_hashing, GraphAttributesHash) {
     const graph::graph_attr_t strict_attr {{graph::fpmath_mode::strict, false}};
     const graph::graph_attr_t bf16_attr {{graph::fpmath_mode::bf16, false}};
     const graph::graph_attr_t int_attr {{graph::fpmath_mode::strict, true}};
+    const graph::graph_attr_t det_attr {
+            {graph::fpmath_mode::strict, false}, true};
 
     EXPECT_TRUE(default_attr == strict_attr);
     EXPECT_EQ(default_attr.hash(), strict_attr.hash());
@@ -58,6 +60,8 @@ TEST(test_interface_partition_hashing, GraphAttributesHash) {
     EXPECT_NE(strict_attr.hash(), bf16_attr.hash());
     EXPECT_FALSE(strict_attr == int_attr);
     EXPECT_NE(strict_attr.hash(), int_attr.hash());
+    EXPECT_FALSE(strict_attr == det_attr);
+    EXPECT_NE(strict_attr.hash(), det_attr.hash());
 }
 
 TEST(test_interface_partition_hashing, GraphAttributesKey) {
@@ -74,6 +78,10 @@ TEST(test_interface_partition_hashing, GraphAttributesKey) {
             &engine, {}, {}, {}, bf16_attr};
     const graph::partition_hashing::key_t int_key {
             &engine, {}, {}, {}, int_attr};
+    const graph::graph_attr_t det_attr {
+            {graph::fpmath_mode::strict, false}, true};
+    const graph::partition_hashing::key_t det_key {
+            &engine, {}, {}, {}, det_attr};
     const std::hash<graph::partition_hashing::key_t> hash;
 
     EXPECT_TRUE(default_key == strict_key);
@@ -82,6 +90,8 @@ TEST(test_interface_partition_hashing, GraphAttributesKey) {
     EXPECT_NE(hash(strict_key), hash(bf16_key));
     EXPECT_FALSE(strict_key == int_key);
     EXPECT_NE(hash(strict_key), hash(int_key));
+    EXPECT_FALSE(strict_key == det_key);
+    EXPECT_NE(hash(strict_key), hash(det_key));
     // See: DUMMY_PARALLEL.
     dnnl::impl::parallel(1, [](int, int) {});
 }
