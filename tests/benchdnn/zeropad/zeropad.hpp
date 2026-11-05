@@ -71,6 +71,9 @@ struct prb_t : public prb_dims_t, public base_prb_t {
 
     void skip_unimplemented(res_t *res) const override;
 
+    std::unique_ptr<base_perf_report_t> create_perf_report(
+            const char *perf_template) const override;
+
 private:
     std::string set_repro_line() override;
 };

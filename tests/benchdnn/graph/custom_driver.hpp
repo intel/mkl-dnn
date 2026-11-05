@@ -72,6 +72,13 @@ struct prb_t : public base_prb_t {
     std::vector<int> supported_exec_args(
             bool override_dir_with_fwd) const override;
 
+    // The custom driver runs only from the graph driver, which reports
+    // through its own `graph::perf_report_t`, never through `task_t`.
+    std::unique_ptr<base_perf_report_t> create_perf_report(
+            const char *perf_template) const override {
+        return nullptr;
+    }
+
 private:
     std::string set_repro_line() override { return std::string(); }
 };

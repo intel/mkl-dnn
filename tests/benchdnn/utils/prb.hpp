@@ -25,8 +25,11 @@
 #include "tests/thread_context.hpp"
 
 #include <cassert>
+#include <memory>
 #include <string>
 #include <vector>
+
+struct base_perf_report_t;
 
 // A base class for all driver-specific `prb_t` problem descriptors. It holds
 // the members that are common across **every** driver and exposes a polymorphic
@@ -75,6 +78,12 @@ struct base_prb_t {
             bool override_dir_with_fwd) const {
         return {};
     }
+
+    // Pure virtual so that every driver must supply its `perf_report_t`, which
+    // keeps the shared `task_t` independent of driver types.
+    virtual std::unique_ptr<base_perf_report_t> create_perf_report(
+            const char *perf_template) const
+            = 0;
 
     const char *str() const { return repro.c_str(); }
 

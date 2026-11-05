@@ -34,6 +34,12 @@ std::ostream &operator<<(
     return s;
 }
 
+std::unique_ptr<base_perf_report_t> prb_t::create_perf_report(
+        const char *perf_template) const {
+    return std::unique_ptr<base_perf_report_t>(
+            new perf_report_t(this, perf_template));
+}
+
 std::string prb_t::set_repro_line() {
     using ::operator<<;
     using sum::operator<<;
