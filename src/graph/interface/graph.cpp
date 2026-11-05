@@ -219,6 +219,8 @@ status_t dnnl_graph_graph::serialize(const std::string &filename) const {
             "fpmath_mode", std::string(utils::fpmath_mode2str(fpmath.mode_)));
     writer.write_keyvalue("fpmath_mode_apply_to_int",
             std::string(fpmath.apply_to_int_ ? "true" : "false"));
+    writer.write_keyvalue("deterministic",
+            std::string(get_attr().get_deterministic() ? "true" : "false"));
     std::vector<size_t> inputs_id;
     inputs_id.reserve(get_input_values().size());
     for (const auto &val : get_input_values()) {

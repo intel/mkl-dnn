@@ -56,6 +56,7 @@ inline void set_graph_attributes(
     const auto &fpmath = graph_attr.get_fpmath();
     attr.set_fpmath_mode(
             static_cast<dnnl::fpmath_mode>(fpmath.mode_), fpmath.apply_to_int_);
+    attr.set_deterministic(graph_attr.get_deterministic());
 }
 
 format_tag get_ncx_format(size_t ndim);
