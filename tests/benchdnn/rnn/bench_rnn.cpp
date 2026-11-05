@@ -23,12 +23,9 @@
 #include "dnnl_common.hpp"
 #include "utils/parser.hpp"
 #include "utils/stringstream.hpp"
+#include "utils/task_executor.hpp"
 
 #include "rnn/rnn.hpp"
-
-// TODO: replace with common abstractions when RNN gets rid of static scales
-#include "rnn/rnn_task.hpp"
-#include "rnn/rnn_task_executor.hpp"
 
 namespace rnn {
 
