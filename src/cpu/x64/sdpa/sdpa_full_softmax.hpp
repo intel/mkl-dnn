@@ -22,6 +22,7 @@
 
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
+#include "common/sdpa_pd.hpp"
 
 #include "cpu/x64/brgemm/brgemm_types.hpp"
 
@@ -69,7 +70,6 @@ struct sdpa_mm1_post_op_t {
 };
 
 struct sdpa_full_softmax_params_t {
-    int ndims = 0;
     dim_t batch = 0;
     dim_t num_head_q = 0;
     // GQA group size: num_head_q / num_head_kv (>= 1).
@@ -98,10 +98,6 @@ struct sdpa_full_softmax_params_t {
     bool has_select = false;
     // When true, keep scores where cond == 0; otherwise keep where cond != 0.
     bool invert_select = false;
-
-    // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
-    // and the mm1 BRGEMM transposes it; otherwise K is [.., head_size, seq_kv].
-    bool mm1_transpose_b = false;
 
     // SoftMax "inf_as_zero" mode: a fully-masked row (all -inf) produces an
     // all-zero probability row instead of NaN. Selects the softmax primitive
@@ -155,9 +151,8 @@ struct sdpa_full_softmax_conf_t {
     float mm2_beta = 0.0f;
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
-    // BRGEMM B VNNI pack factor (1 plain, 2 VNNI2).
-    dim_t b_k_pack = 1;
-    // VNNI pack factor of the materialized QK^T weights.
+    bool need_kt = false, need_vt = false;
+    // Independent BRGEMM B pack factors for K and V (1 plain, 2 VNNI2).
     dim_t kt_k_pack = 1;
     dim_t vt_k_pack = 1;
     // Physical reduction extents required by the K and V copy kernels.
