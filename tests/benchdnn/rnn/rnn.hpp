@@ -585,11 +585,11 @@ private:
     const prb_t *p_;
 };
 
-void prepare_ws_fwd(const prb_t &prb, float *ws_fwd_buffer,
+void prepare_ws_fwd(const prb_t *prb, float *ws_fwd_buffer,
         AOC<float> &ws_src_layer, AOC<float> &ws_src_iter,
         AOC<float> &ws_src_iter_c, AOC<float> &ws_gates, AOC<float> &ws_ht);
 
-void rnn_linear_fwd(const prb_t &prb, const args_t &args,
+void rnn_linear_fwd(const prb_t *prb, const args_t &args,
         const AOC<float> &ws_src_layer, const AOC<float> &ws_src_iter,
         const AOC<float> &ws_src_iter_c, const AOC<float> &ws_gates,
         const AOC<float> &ws_ht);
@@ -603,15 +603,15 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
 
 void compute_ref(const base_prb_t *base_prb, dir_t dir, const args_t &args,
         dnnl_primitive_t prim_ref = nullptr);
-void compute_ref_fwd(const prb_t &prb, const args_t &args);
-void compute_ref_bwd(const prb_t &prb, const args_t &args);
+void compute_ref_fwd(const prb_t *prb, const args_t &args);
+void compute_ref_bwd(const prb_t *prb, const args_t &args);
 
 int createit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const base_prb_t &base_prb, res_t *res);
+        const base_prb_t *base_prb, res_t *res);
 int checkit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
         const base_prb_t *base_prb, res_t *res);
 int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
-        const base_prb_t &base_prb, res_t *res);
+        const base_prb_t *base_prb, res_t *res);
 int bench(int argc, char **argv);
 
 } // namespace rnn

@@ -50,7 +50,7 @@ typedef enum {
 //NOLINTEND(modernize-use-using)
 
 dnnl_status_t init_rnn_fwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
-        const prb_t &prb, dnnl_prop_kind_t prop_kind,
+        const prb_t *prb, dnnl_prop_kind_t prop_kind,
         const_dnnl_memory_desc_t src_layer_d,
         const_dnnl_memory_desc_t src_iter_d,
         const_dnnl_memory_desc_t src_iter_c_d,
@@ -65,7 +65,7 @@ dnnl_status_t init_rnn_fwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
         res_t *res);
 
 dnnl_status_t init_rnn_bwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
-        const prb_t &prb, dnnl_prop_kind_t prop_kind,
+        const prb_t *prb, dnnl_prop_kind_t prop_kind,
         const_dnnl_memory_desc_t src_layer_d,
         const_dnnl_memory_desc_t src_iter_d,
         const_dnnl_memory_desc_t src_iter_c_d,
@@ -94,13 +94,13 @@ dnnl_status_t init_rnn_bwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
 
 void init_buffer(float *buf, int64_t size, float value);
 
-float maybe_q(const prb_t &prb, float h);
-float maybe_deq(const prb_t &prb, const float in);
-float maybe_deq(const prb_t &prb, const float in, int64_t oc);
+float maybe_q(const prb_t *prb, float h);
+float maybe_deq(const prb_t *prb, const float in);
+float maybe_deq(const prb_t *prb, const float in, int64_t oc);
 float maybe_deq(
-        const prb_t &prb, const float in, float scale, float compensation);
+        const prb_t *prb, const float in, float scale, float compensation);
 float maybe_deq_proj(
-        const prb_t &prb, const float in, float compensation, int64_t oc);
+        const prb_t *prb, const float in, float compensation, int64_t oc);
 
 float logistic(float x);
 float dlogistic(float x);
@@ -118,7 +118,7 @@ void data_q10n(int64_t dimc, int64_t dimr, int64_t ld_src, float *src_,
 void data_deq10n(int64_t dimc, int64_t dimr, int64_t ld_src, float *src_,
         float data_scale, float data_shift);
 void gates_reduction(
-        const prb_t &prb, const float *b_gates_, float *diff_bias_);
+        const prb_t *prb, const float *b_gates_, float *diff_bias_);
 
 rnn_data_kind_t data_kind2rnn_data_kind(data_kind_t data_kind);
 data_kind_t rnn_data_kind2data_kind(rnn_data_kind_t rnn_data_kind);

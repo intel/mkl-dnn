@@ -29,13 +29,13 @@
 
 using create_func_t = std::function<int(
         std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &,
-        const base_prb_t &, res_t *)>;
+        const base_prb_t *, res_t *)>;
 using check_cache_func_t = std::function<int(
         std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &,
         const base_prb_t *, res_t *)>;
 using do_func_t = std::function<int(
         const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &,
-        const base_prb_t &, res_t *)>;
+        const base_prb_t *, res_t *)>;
 
 template <typename perf_report_t>
 struct rnn_task_t {
@@ -64,7 +64,7 @@ struct rnn_task_t {
         tct.start();
 
         const base_prb_t *prb = prb_.get();
-        SAFE(create_func_(*v_prim_, *prb, &res_), WARN);
+        SAFE(create_func_(*v_prim_, prb, &res_), WARN);
         return OK;
     }
 
@@ -83,7 +83,7 @@ struct rnn_task_t {
         BENCHDNN_PRINT(1, "run: %s\n", prb_.get()->str());
         if (res_.state == INITIALIZED && bench_mode != bench_mode_t::init) {
             const base_prb_t *prb = prb_.get();
-            do_func_(*v_prim_, *prb, &res_);
+            do_func_(*v_prim_, prb, &res_);
         }
 
         // A timer for each test case. Starts from `create_func_` and ends at
