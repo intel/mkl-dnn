@@ -1012,14 +1012,10 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestGetCppObjects) {
 }
 
 HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestBinarySelectPostOpSrc2AnyFormat) {
-    auto engine_kind = get_test_engine_kind();
-    SKIP_IF(engine_kind != engine::kind::cpu,
-            "Binary select post-op is only checked on CPU engine");
-
-    engine eng {engine_kind, 0};
+    engine eng {get_test_engine_kind(), 0};
 
     const memory::dims dims {2, 16, 4, 4};
-    memory::desc dst_md {dims, data_type::f32, tag::nhwc};
+    const memory::desc dst_md {dims, data_type::f32, tag::nhwc};
 
     // src1 is a per-channel tensor, src2 has the full dst shape. The layout
     // of src2 with `any` format must be derived from src2 itself.
@@ -1032,6 +1028,11 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestBinarySelectPostOpSrc2AnyFormat) {
 
     auto pd = eltwise_forward::primitive_desc(eng, prop_kind::forward_inference,
             algorithm::eltwise_relu, dst_md, dst_md, 0.f, 0.f, attr);
+
+    const auto q_src1_md = pd.query_md(query::exec_arg_md,
+            DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1);
+    ASSERT_EQ(
+            q_src1_md, memory::desc({1, 16, 1, 1}, data_type::f32, tag::abcd));
 
     const auto q_src2_md = pd.query_md(query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_2);
