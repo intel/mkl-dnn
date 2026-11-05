@@ -55,29 +55,31 @@ inline size_t align64(size_t n) {
     return (n + 63) & ~static_cast<size_t>(63);
 }
 
-// Estimates whether an f32 tile maps too many cache lines to any one L2 cache set
-bool f32_tile_aliases_l2(
+// Returns the peak load of an f32 tile on the L2 cache: the largest number of
+// tile lines mapped to one L2 set, as a fraction of the L2 associativity
+// (1.0 means the tile alone fills a whole set). Returns 0 if unknown.
+float f32_tile_l2_set_load(
         dim_t tile_rows, dim_t tile_columns, dim_t row_stride) {
     const size_t sets = platform::get_num_sets_in_cache(2);
     const size_t ways = platform::get_num_ways_in_cache(2);
     const size_t line_size = platform::get_cache_line_size();
     if (!sets || !ways || !line_size || tile_rows <= 0 || tile_columns <= 0)
-        return false;
+        return 0.f;
 
     const size_t period = sets * line_size;
     const size_t stride = (row_stride * sizeof(float)) % period;
     const size_t tile_width = tile_columns * sizeof(float);
     std::vector<size_t> occupancy(sets);
+    size_t max_occupancy = 0;
     size_t offset = 0;
     for (dim_t row = 0; row < tile_rows; ++row) {
         const size_t first_line = offset / line_size;
         const size_t last_line = (offset + tile_width - 1) / line_size;
-        for (size_t line = first_line; line <= last_line; ++line) {
-            if (++occupancy[line % sets] > ways) return true;
-        }
+        for (size_t line = first_line; line <= last_line; ++line)
+            max_occupancy = nstl::max(max_occupancy, ++occupancy[line % sets]);
         offset = (offset + stride) % period;
     }
-    return false;
+    return static_cast<float>(max_occupancy) / ways;
 }
 
 // Down-convert n contiguous f32 elements into dst as data type dt (f16/bf16).
@@ -259,6 +261,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     constexpr int row_dim = ndims - 2;
     const dim_t k_seq_stride = p_.k_strides[ndims - 1];
     const dim_t k_hs_stride = p_.k_strides[row_dim];
+
     const bool mm1_transpose_k = k_seq_stride != 1;
     const bool transpose_v = p_.v_strides[ndims - 1] != 1;
 
@@ -268,13 +271,6 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     CHECK(is_vnni_b_required(p_.mm_dt, transpose_v, mm2_needs_vnni_b));
 
     const bool need_vt = conf.need_vt = mm2_needs_vnni_b || transpose_v;
-    const bool pack_k_for_aliasing = p_.mm_dt == data_type::f32
-            && !mm1_transpose_k
-            && f32_tile_aliases_l2(
-                    hs_qk, nstl::min<dim_t>(seq_kv, 64), k_hs_stride);
-    const bool need_kt = conf.need_kt
-            = mm1_transpose_k || mm1_needs_vnni_b || pack_k_for_aliasing;
-    conf.pack_k_for_aliasing = pack_k_for_aliasing;
     const dim_t vt_k_pack
             = mm2_needs_vnni_b ? data_type_vnni_granularity(p_.mm_dt) : 1;
     conf.vt_k_pack = vt_k_pack;
@@ -282,10 +278,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             = mm1_needs_vnni_b ? data_type_vnni_granularity(p_.mm_dt) : 1;
     conf.kt_k_pack = kt_k_pack;
     const dim_t copy_k_block = sdpa_brgemm_copy::b_packer_t::k_block(p_.mm_dt);
-    const dim_t kt_k_pad = need_kt ? copy_k_block : dim_t(1);
     const dim_t vt_k_pad = need_vt ? copy_k_block : dim_t(1);
-
-    conf.kt_k_pad = kt_k_pad;
     conf.vt_k_pad = vt_k_pad;
 
     const dim_t l2_budget_bytes
@@ -323,6 +316,29 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
     kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
+
+    // An f32 K already laid out as [hs_qk, seq_kv] is read in place by mm1 as
+    // [hs_qk x kv_block] B panels. If the K row stride maps many panel rows to
+    // the same L2 sets, the panel is evicted between re-reads, so it is packed
+    // into dense 64-wide panels instead. The panel shares L2 with the score
+    // tile, Q, the V panel and prefetched lines, so it starts thrashing well
+    // before it alone fills a set. Packing costs one extra pass over K per KV
+    // head and only pays off when the panel is re-read by enough query rows
+    // (seq_q * group_head): moderate aliasing needs more reuse to amortize it
+    // than a panel that alone overflows a set.
+    const dim_t k_reuse_rows = seq_q * nstl::max<dim_t>(p_.group_head, 1);
+    const float k_l2_set_load
+            = f32_tile_l2_set_load(hs_qk, kv_block, k_hs_stride);
+    const bool pack_k_for_aliasing = p_.mm_dt == data_type::f32
+            && !mm1_transpose_k
+            && ((k_reuse_rows >= 256 && k_l2_set_load > 0.5f)
+                    || (k_reuse_rows >= 128 && k_l2_set_load >= 1.0f));
+    const bool need_kt = conf.need_kt
+            = mm1_transpose_k || mm1_needs_vnni_b || pack_k_for_aliasing;
+    conf.pack_k_for_aliasing = pack_k_for_aliasing;
+    const dim_t kt_k_pad = need_kt ? copy_k_block : dim_t(1);
+    conf.kt_k_pad = kt_k_pad;
+
     if (need_kt) kv_block = nstl::min<dim_t>(kv_block, 64);
     conf.kv_block = kv_block;
     const dim_t kv_tail = kv_block < seq_kv ? seq_kv % kv_block : 0;
