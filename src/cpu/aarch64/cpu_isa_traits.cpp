@@ -99,9 +99,7 @@ static isa_info_t get_isa_info_t(void) {
     // descending order due to mayiuse check
 #define HANDLE_CASE(cpu_isa) \
     if (mayiuse(cpu_isa)) return isa_info_t(cpu_isa);
-    // Some cores (e.g. Apple M4) implement SME without SVE. As sme is not
-    // a superset of asimd, report the best of SVE or ASIMD on these instead.
-    if (mayiuse(sve)) HANDLE_CASE(sme);
+    HANDLE_CASE(sme);
     HANDLE_CASE(sve_512);
     HANDLE_CASE(sve_256);
     HANDLE_CASE(sve_128);
