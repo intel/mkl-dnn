@@ -114,7 +114,8 @@ struct advancing_regs_t {
 struct invariant_regs_t {
     // Base pointer of the batch-element array.
     ir::vreg_t batch = ir::vreg_t::none;
-    // Batch size loop count. `none` when max_bs == 1 (single batch element).
+    // Batch size loop count. `none` when max_bs == 1 (single batch element)
+    // and in the unrolled schedule, which always runs `max_bs` elements.
     ir::vreg_t bs = ir::vreg_t::none;
     // A and B base pointers, the `ptr_A` and `ptr_B` kernel arguments, which
     // `brgemm_offs` adds the byte offsets of each batch element to. `none` for
@@ -150,7 +151,7 @@ m_loop_input_regs_t init_m_loop_input_regs(ir::ir_t &ir, const conf_t &cfg) {
     regs.invariant.batch = ir.new_gpr();
     ir.load_param(regs.invariant.batch, GET_OFF(batch));
 
-    if (cfg.loop.max_bs > 1) {
+    if (cfg.loop.schedule == schedule_t::looped && cfg.loop.max_bs > 1) {
         regs.invariant.bs = ir.new_gpr();
         ir.load_param(regs.invariant.bs, GET_OFF(BS));
     }
@@ -222,11 +223,12 @@ m_loop_input_regs_t init_m_loop_input_regs(ir::ir_t &ir, const conf_t &cfg) {
 
 // Iteration lists
 //
-// Each level of the loop nest (M, N, and K) has a list of its blocks, stored
-// as runs of blocks with the same size. The code of a block depends only on
-// its size and its position, so the looped schedule emits one body per run,
-// and the unrolled schedule one body per block. The batch has no list because
-// it is a runtime loop over blocks of one size.
+// Each level of the loop nest (M, N, K, and the batch) has a list of its
+// blocks, stored as runs of blocks with the same size. The code of a block
+// depends only on its size and its position, so the looped schedule emits one
+// body per run, and the unrolled schedule one body per block. The looped
+// schedule does not use the batch list: it runs the batch as a runtime loop
+// over `BS` elements.
 
 // Consecutive blocks of one loop level with the same size.
 //
@@ -254,6 +256,11 @@ std::vector<block_run_t> n_runs(const loop_conf_t &loop) {
 std::vector<block_run_t> k_runs(const loop_conf_t &loop) {
     return {{loop.rd_block, loop.rdb},
             {loop.rdb_tail, loop.rdb_tail > 0 ? 1 : 0}};
+}
+
+// Runs of the batch: `max_bs` elements, each a block of size 1.
+std::vector<block_run_t> bs_runs(const loop_conf_t &loop) {
+    return {{1, loop.max_bs}};
 }
 
 // Emits one level of the loop nest from its runs, for the looped schedule.
@@ -334,21 +341,21 @@ dim_t level_size(const std::vector<block_run_t> &runs) {
     return size;
 }
 
-// Sets `a_ptr` and `b_ptr` to the A and B of the batch element at `batch_ptr`.
-// Mirrors `set_A_B_matrices()` in `jit_brgemm_kernel.cpp`.
+// Sets `a_ptr` and `b_ptr` to the A and B of the batch element at
+// `batch_ptr + disp`. Mirrors `set_A_B_matrices()` in `jit_brgemm_kernel.cpp`.
 void emit_batch_element_ptrs(ir::ir_t &ir, const conf_t &cfg,
-        const invariant_regs_t &regs, ir::vreg_t batch_ptr, ir::vreg_t a_ptr,
-        ir::vreg_t b_ptr) {
+        const invariant_regs_t &regs, ir::vreg_t batch_ptr, dim_t disp,
+        ir::vreg_t a_ptr, ir::vreg_t b_ptr) {
 
     switch (cfg.loop.batch_kind) {
         case brgemm_addr:
-            ir.load(a_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(ptr.A));
-            ir.load(b_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(ptr.B));
+            ir.load(a_ptr, batch_ptr, disp + GET_OFF_BATCH_ELEMENT(ptr.A));
+            ir.load(b_ptr, batch_ptr, disp + GET_OFF_BATCH_ELEMENT(ptr.B));
             break;
         case brgemm_offs:
-            ir.load(a_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(offset.A));
+            ir.load(a_ptr, batch_ptr, disp + GET_OFF_BATCH_ELEMENT(offset.A));
             ir.add_reg(a_ptr, regs.a_base);
-            ir.load(b_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(offset.B));
+            ir.load(b_ptr, batch_ptr, disp + GET_OFF_BATCH_ELEMENT(offset.B));
             ir.add_reg(b_ptr, regs.b_base);
             break;
         default: assert(!"unsupported batch kind"); break;
@@ -365,7 +372,8 @@ void emit_bs_body(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
 
     const ir::vreg_t a_ptr = ir.new_gpr();
     const ir::vreg_t b_ptr = ir.new_gpr();
-    emit_batch_element_ptrs(ir, cfg, regs.invariant, batch_ptr, a_ptr, b_ptr);
+    emit_batch_element_ptrs(
+            ir, cfg, regs.invariant, batch_ptr, 0, a_ptr, b_ptr);
 
     // Shift to the current M and N block.
     ir.add_reg(a_ptr, regs.advancing.a_off);
@@ -643,8 +651,8 @@ void emit_looped_nest(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
 // does.
 //
 // Every M, N, and K block is emitted at its position, so no pointer moves. N is
-// inside M. The kernel has one batch element, and its A and B pointers are set
-// once for the whole kernel.
+// inside M. The kernel always runs `max_bs` batch elements and does not read
+// `BS`, as the uker does without `var_bs`.
 //
 // There are no output stages yet. The accumulators of a block start at zero,
 // or at C when beta is 1, and are stored to C unchanged. The uker also loads C
@@ -652,11 +660,20 @@ void emit_looped_nest(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
 void emit_unrolled_nest(ir::ir_t &ir, const conf_t &cfg,
         const compute_path_t &cp, const m_loop_input_regs_t &regs) {
 
+    // Sets `a_ptr` and `b_ptr` to the batch element `bs`. With one batch
+    // element this happens once for the whole kernel. Otherwise it happens for
+    // each element of each block, as in the uker.
     const ir::vreg_t a_ptr = ir.new_gpr();
     const ir::vreg_t b_ptr = ir.new_gpr();
-    emit_batch_element_ptrs(
-            ir, cfg, regs.invariant, regs.invariant.batch, a_ptr, b_ptr);
+    auto set_ptrs = [&](dim_t bs) {
+        const dim_t disp = bs * (dim_t)sizeof(brgemm_batch_element_t);
+        emit_batch_element_ptrs(ir, cfg, regs.invariant, regs.invariant.batch,
+                disp, a_ptr, b_ptr);
+    };
 
+    if (cfg.loop.max_bs == 1) set_ptrs(0);
+
+    const std::vector<block_run_t> batch = bs_runs(cfg.loop);
     const std::vector<block_run_t> k = k_runs(cfg.loop);
 
     auto emit_block = [&](dim_t bd_block, dim_t bd_start, dim_t ld_elems,
@@ -670,9 +687,13 @@ void emit_unrolled_nest(ir::ir_t &ir, const conf_t &cfg,
                 ? cp.load_accumulators(ir, cfg, blk, regs.advancing.c_ptr)
                 : cp.init_accumulators(ir, cfg, blk);
 
-        emit_unrolled_level(k, [&](dim_t rd_block, dim_t rd_start) {
-            cp.emit_microkernel(
-                    ir, cfg, blk, acc, a_ptr, b_ptr, rd_start, (int)rd_block);
+        emit_unrolled_level(batch, [&](dim_t, dim_t bs) {
+            if (cfg.loop.max_bs > 1) set_ptrs(bs);
+
+            emit_unrolled_level(k, [&](dim_t rd_block, dim_t rd_start) {
+                cp.emit_microkernel(ir, cfg, blk, acc, a_ptr, b_ptr, rd_start,
+                        (int)rd_block);
+            });
         });
 
         cp.store_accumulators(ir, cfg, blk, acc, regs.advancing.store_ptr);
@@ -771,8 +792,6 @@ status_t init_loop_conf(
                     || prf.dist2 >= 0 || prf.distNTA >= 0;
         };
 
-        VCONDCHECK_BRGEMM_IR(brgattr.max_bs == 1, VERBOSE_UNSUPPORTED_FEATURE,
-                "batch of more than one element");
         VCONDCHECK_BRGEMM_IR(brg.innermost_loop == brgemm_ld_loop_innermost,
                 VERBOSE_UNSUPPORTED_FEATURE, "M loop innermost");
         VCONDCHECK_BRGEMM_IR(!brg.interleave_tilestores_,
@@ -1033,6 +1052,13 @@ status_t check_displacements(const conf_t &conf) {
     VCONDCHECK_BRGEMM_IR(fits(conf.wei_scale_off(n)),
             VERBOSE_UNSUPPORTED_FEATURE,
             "weights scale displacement overflows int32");
+
+    // The unrolled schedule addresses every batch element from the start of
+    // the batch.
+    const dim_t bs = level_size(bs_runs(conf.loop));
+    const dim_t batch_off = bs * (dim_t)sizeof(brgemm_batch_element_t);
+    VCONDCHECK_BRGEMM_IR(IMPLICATION(!looped, fits(batch_off)),
+            VERBOSE_UNSUPPORTED_FEATURE, "batch displacement overflows int32");
 
     return status::success;
 }
