@@ -76,9 +76,12 @@ struct sdpa_full_softmax_params_t {
     dim_t head_size_qk = 0;
     dim_t head_size_v = 0;
 
-    // Q/K/V and BRGEMM inputs must be f32; scores, P, and output are f32 too.
+    // Compute data type for Q/K/V and the mm1/mm2 BRGEMM inputs (f32/f16/bf16).
+    // The scores and pv tiles are always accumulated in f32 (BRGEMM C is f32);
+    // the transposed-K buffer and P (mm2's A operand) are materialised in this
+    // type, and the softmax runs on the f32 scores.
     dnnl::impl::data_type_t mm_dt = dnnl::impl::data_type::f32;
-    // SDPA output must be f32.
+    // SDPA output (result) data type; the f32 pv tile is down-converted to it.
     dnnl::impl::data_type_t out_dt = dnnl::impl::data_type::f32;
 
     // User strides in elements. Q / output / select-condition carry the group
@@ -92,6 +95,10 @@ struct sdpa_full_softmax_params_t {
     bool has_select = false;
     // When true, keep scores where cond == 0; otherwise keep where cond != 0.
     bool invert_select = false;
+
+    // mm1 (QK^T) transpose_b: when set, K is stored as [.., seq_kv, head_size]
+    // and the mm1 BRGEMM transposes it; otherwise K is [.., head_size, seq_kv].
+    bool mm1_transpose_b = false;
 
     // SoftMax "inf_as_zero" mode: a fully-masked row (all -inf) produces an
     // all-zero probability row instead of NaN. Selects the softmax primitive
@@ -121,8 +128,19 @@ struct sdpa_full_softmax_run_args_t {
     std::vector<const void *> mm1_post_op_rhs;
 };
 
-// Derived compute configuration: JIT-free query/KV blocking and per-thread
-// scratch layout. Pure scalar config (mirroring brgemm_matmul_conf_t), owned by
+// AMX tile configuration for a BRGEMM kernel. Non-AMX ISAs leave need_config
+// false and wsp_size 0; AMX (bf16/f16) must load `palette` via
+// amx_tile_configure() before running and needs a wsp_size-byte tile-store
+// scratch per thread.
+struct sdpa_amx_cfg_t {
+    bool need_config = false;
+    size_t wsp_size = 0;
+    char palette[64] = {};
+};
+
+// Derived compute configuration: the JIT-free arithmetic (query/KV blocking,
+// per-thread + global scratch layout, AMX palette/wsp). Pure scalar config
+// (mirroring brgemm_matmul_conf_t), computed once by configure() and owned by
 // the primitive_desc so the pd sizes its scratchpad from it; the finalized
 // BRGEMM descriptors live separately in sdpa_full_softmax_descs_t (like brg_descs_).
 struct sdpa_full_softmax_conf_t {
@@ -132,14 +150,29 @@ struct sdpa_full_softmax_conf_t {
     // mm2 accumulates across kv-blocks: beta = 0 for a single block, else the
     // first block uses a beta = 0 kernel and the rest beta = 1.
     float mm2_beta = 0.0f;
+    // mm2 writes its f32 result directly into the user output (no pv+scatter).
+    bool mm2_direct = false;
+    // BRGEMM B VNNI pack factor (1 plain, 2 VNNI2).
+    dim_t b_k_pack = 1;
+    // K granularity required by the selected BRGEMM path (AMX block or VNNI).
+    dim_t b_k_pad = 1;
+    bool mm1_transpose_k = false;
+    dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
     // a binary_select post-op; the descriptors are built accordingly.
     bool mm1_select_postop = false;
+    dim_t num_head_kv = 0;
+    size_t amx_wsp_bytes = 0;
     size_t scratch_per_thread = 0;
+    size_t kt_global_bytes = 0, vt_global_bytes = 0;
     int nthr = 0;
 
+    // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
+    sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2];
+
     size_t scratch_total(int n) const {
-        return scratch_per_thread * static_cast<size_t>(n);
+        return scratch_per_thread * static_cast<size_t>(n) + kt_global_bytes
+                + vt_global_bytes;
     }
 };
 
@@ -195,8 +228,10 @@ struct sdpa_full_softmax_kernels_t {
 // primitive owns the kernels (create_kernels) and drives the loop (execute).
 namespace sdpa_full_softmax {
 
-// Compute the derived configuration (query/KV blocking and per-thread scratch
-// layout) and build the finalized BRGEMM descriptors into `descs`.
+// Compute the derived configuration (query/KV blocking, per-thread + global
+// scratch layout, AMX palette/wsp) and build the finalized BRGEMM descriptors
+// into `descs`. JIT-free, so a primitive_desc can size its scratchpad from the
+// returned conf without compiling kernels.
 status_t configure(const sdpa_full_softmax_params_t &params,
         sdpa_full_softmax_conf_t &conf, sdpa_full_softmax_descs_t &descs);
 

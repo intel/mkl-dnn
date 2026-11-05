@@ -36,9 +36,9 @@ namespace x64 {
 // brgemm_sdpa_fwd_t supports two interchangeable compute strategies, both
 // implemented as free functions operating on the pd's conf and primitive kernels:
 // `full_softmax` (namespace sdpa_full_softmax -- each query tile covers all keys
-// before softmax) and `online_softmax` (namespace sdpa_online_softmax
-// -- streams over KV tiles). Both support f32 only.
-// pd_t::init() picks one by mask capability, or a forced choice via
+// before softmax; f32/f16/bf16) and `online_softmax` (namespace sdpa_online_softmax
+// -- streams over KV tiles; f32-only).
+// pd_t::init() picks one by shape/dtype capability, or a forced choice via
 // ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto}.
 enum class sdpa_impl_kind_t { full_softmax, online_softmax };
 

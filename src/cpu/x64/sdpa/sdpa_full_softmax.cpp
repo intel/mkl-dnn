@@ -19,7 +19,9 @@
 #include <cstring>
 #include <limits>
 
+#include "common/bfloat16.hpp"
 #include "common/dnnl_thread.hpp"
+#include "common/float16.hpp"
 #include "common/memory_desc.hpp"
 #include "common/opdesc.hpp"
 #include "common/primitive_attr.hpp"
@@ -32,9 +34,11 @@
 
 #include "cpu/x64/sdpa/sdpa_full_softmax.hpp"
 
+#include "cpu/x64/amx_tile_configure.hpp"
 #include "cpu/x64/brgemm/brgemm.hpp"
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/jit_uni_softmax.hpp"
+#include "cpu/x64/matmul/brgemm_matmul_utils.hpp"
 #include "cpu/x64/sdpa/sdpa_full_softmax_select_ir.hpp"
 
 namespace dnnl {
@@ -49,12 +53,35 @@ inline size_t align64(size_t n) {
     return (n + 63) & ~static_cast<size_t>(63);
 }
 
-// Build (but do not JIT) a BRGEMM descriptor. Kept JIT-free so it can be
-// used by configure() and by the select fallback in create_kernels().
+// Down-convert n contiguous f32 elements into dst as data type dt (f16/bf16).
+// Used to materialise P (mm2's A operand) from the f32 softmax output. f32 is
+// handled by the caller (it uses the f32 scores tile directly, no conversion).
+// Delegates to the jit-backed bulk converters (jit_cvt_ps_to_xf16_t) with a
+// scalar fallback, rather than converting element by element.
+inline void convert_from_f32(
+        void *dst, data_type_t dt, const float *src, size_t n) {
+    switch (dt) {
+        case data_type::f16:
+            cvt_float_to_float16(static_cast<float16_t *>(dst), src, n);
+            break;
+        case data_type::bf16:
+            cvt_float_to_bfloat16(static_cast<bfloat16_t *>(dst), src, n);
+            break;
+        default: break;
+    }
+}
+
+// Build (but do not JIT) a BRGEMM descriptor. Fills `brg` and, when the AMX
+// out-params are supplied, the tile palette + tile-store wsp size read from the
+// finalized descriptor. Kept JIT-free so it can be used both to size the
+// scratchpad (configure) and, immediately before brgemm_kernel_create, to
+// (re)build the descriptor the kernel is compiled from (create_kernels).
 status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         dim_t M, dim_t N, dim_t K, dim_t lda, dim_t ldb, dim_t ldc,
         const std::vector<sdpa_mm1_post_op_t> *post_ops = nullptr,
-        bool select_as_postop = false, dim_t full_output_width = 0) {
+        bool select_as_postop = false, bool *amx_need_config = nullptr,
+        char *amx_palette = nullptr, size_t *amx_wsp = nullptr,
+        dim_t full_output_width = 0) {
     CHECK(brgemm_desc_init(&brg, isa_undef, brgemm_addr, dt, dt,
             /*transA=*/false, /*transB=*/false, brgemm_row_major,
             /*alpha=*/1.0f, beta, lda, ldb, ldc, M, N, K, /*strides=*/nullptr));
@@ -124,7 +151,28 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
                 dst_md, 2, d_dims, data_type::f32, format_tag::ab));
         CHECK(brgemm_desc_set_postops(&brg, &attr, &dst_md, /*LDD=*/ldc));
     }
+
+    const bool amx_fp16 = dt == data_type::f16 && mayiuse(avx512_core_amx_fp16);
+    const bool amx_vnni_k_tail = mayiuse(avx512_core_amx)
+            && (dt == data_type::bf16 || amx_fp16)
+            && K % data_type_vnni_granularity(dt) != 0;
+    if (amx_vnni_k_tail) {
+        brgemm_attr_t brgattr;
+        brgattr.extendable_k = true;
+        brgattr.wary_A_k_tail_read = true;
+        CHECK(brgemm_desc_set_attr(&brg, brgattr));
+    }
+
     CHECK(brgemm_desc_finalize(&brg));
+    // AMX kernels (bf16/f16 on amx*) need a tile palette configured before
+    // execution and a per-thread tile-store scratch; brgemm_init_tiles fills
+    // the palette and returns non-success for non-AMX ISAs (f32/avx512_core).
+    if (amx_need_config) {
+        char pal[64] = {};
+        *amx_need_config = brgemm_init_tiles(brg, pal) == status::success;
+        if (amx_palette) std::memcpy(amx_palette, pal, sizeof(pal));
+        if (amx_wsp) *amx_wsp = static_cast<size_t>(brg.get_wsp_buffer_size());
+    }
     return status::success;
 }
 } // namespace
@@ -148,10 +196,31 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     conf.params = params;
     const sdpa_full_softmax_params_t &p_ = conf.params;
 
-    if (p_.mm_dt != data_type::f32 || p_.out_dt != data_type::f32)
+    if (!utils::one_of(
+                p_.mm_dt, data_type::f32, data_type::f16, data_type::bf16))
         return status::unimplemented;
 
-    if (p_.o_strides[p_.ndims - 1] != 1) return status::unimplemented;
+    if (!utils::one_of(
+                p_.out_dt, data_type::f32, data_type::f16, data_type::bf16))
+        return status::unimplemented;
+
+    const size_t qk_dt_sz = types::data_type_size(p_.mm_dt);
+
+    const bool needs_vnni_b = p_.mm_dt == data_type::bf16
+            || (p_.mm_dt == data_type::f16
+                    && (mayiuse(avx512_core_amx_fp16)
+                            || (mayiuse(avx2_vnni_2)
+                                    && !mayiuse(avx512_core_fp16))));
+
+    const dim_t k_pack = needs_vnni_b ? 2 : 1;
+    const bool pack_b = needs_vnni_b;
+    const bool amx_vnni_pack = pack_b && mayiuse(avx512_core_amx)
+            && (p_.mm_dt == data_type::bf16 || mayiuse(avx512_core_amx_fp16));
+    const dim_t b_k_pad
+            = amx_vnni_pack ? matmul::get_wei_k_blk(p_.mm_dt) : k_pack;
+
+    conf.b_k_pack = k_pack;
+    conf.b_k_pad = b_k_pad;
 
     const dim_t seq_q = p_.seq_q;
     const dim_t seq_kv = p_.seq_kv;
@@ -178,18 +247,20 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // L2-resident; an untiled matmul re-streams its whole panel per M-chunk and
     // turns memory-bound once that panel exceeds ~L2. Size kv_block so the wider
     // panel fits within its L2 budget, then round DOWN to a column granule: a
-    // 64-wide block when the budget allows, else 32, else a 16-column floor.
-    // A large head or small L2 shrinks the block rather than collapsing it to
-    // the whole (untiled) axis. Clamp to seq_kv:
+    // 64-wide block (clean VNNI sub-panels, AMX-K-friendly) when the budget
+    // allows, else 32, else a 16-column floor (still a multiple of the bf16/f16
+    // VNNI pack factor). A large head or a small L2 thus shrinks the block
+    // rather than collapsing it to the whole (untiled) axis. Clamp to seq_kv:
     // short context runs as one untiled block (kv_block == seq_kv -> no kv tail,
     // mm2 keeps beta = 0).
     const dim_t b_panel_budget_bytes = l2_budget_bytes / 8;
     const dim_t b_panel_rows = nstl::max(hs_qk, hs_v);
-    dim_t kv_block = b_panel_rows > 0
-            ? static_cast<dim_t>(
-                      b_panel_budget_bytes / (b_panel_rows * sizeof(float)))
-            : seq_kv;
-    const dim_t granule = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : 16);
+    dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
+                                                / (b_panel_rows * qk_dt_sz))
+                                      : seq_kv;
+    const dim_t min_granule = nstl::max<dim_t>(16, b_k_pad);
+    const dim_t granule
+            = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
     kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
     kv_block = nstl::min<dim_t>(kv_block, seq_kv);
     conf.kv_block = kv_block;
@@ -201,33 +272,68 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     const float mm2_beta = kv_block < seq_kv ? 1.0f : 0.0f;
     conf.mm2_beta = mm2_beta;
 
-    // mm2 writes directly to the contiguous-column user output.
+    // mm2 can write its f32 result straight into the user output tensor (C =
+    // output, LDC = output row stride), skipping the pv scratch tile and the
+    // down-convert/scatter, when the output is f32 with unit-stride rows. All
+    // other cases (bf16/f16 output or a strided output column) keep pv+scatter.
     const dim_t o_row = p_.o_strides[row_dim];
+    const dim_t o_col = p_.o_strides[p_.ndims - 1];
+    const bool mm2_direct = p_.out_dt == data_type::f32 && o_col == 1;
+    conf.mm2_direct = mm2_direct;
+    const dim_t mm2_ldc = mm2_direct ? o_row : hs_v;
 
     // BRGEMM leading dims mirror the online kernel: A/B leading dims come from
-    // the user strides (row_dim = the M/K row axis); scores are dense.
+    // the user strides (row_dim = the M/K row axis), scores/pv are dense.
     //   mm1: scores[m, seq_kv] = Q[m, hs_qk] * K[hs_qk, seq_kv]
-    //   mm2: output[m, hs_v]   = P[m, seq_kv] * V[seq_kv, hs_v]
-    // BRGEMM reads K directly as [hs_qk, seq_kv], with a contiguous key axis.
-    if (p_.k_strides[p_.ndims - 1] != 1) return status::unimplemented;
-    const dim_t mm1_ldb = p_.k_strides[row_dim];
+    //   mm2: pv[m, hs_v]       = P[m, seq_kv] * V[seq_kv, hs_v]
+    // The brgemm ukernel does not support a transposed B operand and needs mm1
+    // B row-major as [hs_qk, seq_kv] (seq_kv unit-stride). Decide the transpose
+    // from the K tensor's PHYSICAL strides, not the graph transpose_b attr:
+    //   * transpose_b == true  : K is [.., seq_kv, hs_qk] -> seq_kv axis is
+    //                            row_dim, hs_qk axis is the last dim.
+    //   * transpose_b == false : K is [.., hs_qk, seq_kv] -> hs_qk axis is
+    //                            row_dim, seq_kv axis is the last dim.
+    // In either orientation, if the seq_kv axis is not unit-stride a dense
+    // [hs_qk, seq_kv] transpose is materialised once (see execute); a K that is
+    // logically pre-transposed but physically stored with hs_qk contiguous
+    // therefore still gets transposed here.
+    const dim_t k_seq_stride = p_.mm1_transpose_b ? p_.k_strides[row_dim]
+                                                  : p_.k_strides[p_.ndims - 1];
+    const dim_t k_hs_stride = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
+                                                 : p_.k_strides[row_dim];
+    conf.k_seq_stride = k_seq_stride;
+    conf.k_hs_stride = k_hs_stride;
+    const bool mm1_transpose_k = k_seq_stride != 1;
+    conf.mm1_transpose_k = mm1_transpose_k;
+    // mm1 materialises a dense (and, for bf16/f16, VNNI-packed) [hs_qk, seq_kv]
+    // B tile whenever it must transpose K or pack it; its ldb is then the dense
+    // seq_kv. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in place.
+    const bool need_kt = mm1_transpose_k || pack_b;
+    const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride;
 
-    // Build the mm1/mm2 BRGEMM descriptors (no JIT) into `descs` for
-    // create_kernels(). kv is the seq_kv sub-block width (mm1 N / mm2 K);
-    // the mm1 post-op descriptors keep the full seq_kv width
+    // Build the mm1/mm2 BRGEMM descriptors (no JIT) into `descs`, plus each
+    // kernel's AMX palette + tile-store wsp into the conf (the per-thread
+    // scratch size depends on them). create_kernels() compiles directly from
+    // these stored descriptors -- no rebuild. kv is the seq_kv sub-block width
+    // (mm1 N / mm2 K); the mm1 post-op descriptors keep the full seq_kv width
     // (full_output_width) so the folded mask/select is addressed by global column.
     auto build_tile_descs = [&](dim_t m, dim_t kv, bool select_postop, int qi,
                                     int ki) -> status_t {
+        sdpa_amx_cfg_t &mm1_amx = conf.mm1_amx[qi][ki];
+        sdpa_amx_cfg_t &mm2_amx = conf.mm2_amx[qi][ki];
         CHECK(build_brgemm_desc(descs.mm1_desc[qi][ki], p_.mm_dt, /*beta=*/0.0f,
                 m, kv, hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop,
+                &mm1_amx.need_config, mm1_amx.palette, &mm1_amx.wsp_size,
                 /*full_output_width=*/seq_kv));
-        // mm2 B is the user V in place (ldb = its row stride).
+        // mm2 B is the user V in place for f32 (ldb = its row stride), or a
+        // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
         // K = kv (one kv-block of the reduction); beta accumulates across them.
         CHECK(build_brgemm_desc(descs.mm2_desc[qi][ki], p_.mm_dt, mm2_beta, m,
                 hs_v, kv, /*lda=*/seq_kv,
-                /*ldb=*/p_.v_strides[row_dim], /*ldc=*/o_row,
-                /*post_ops=*/nullptr, /*select_postop=*/false));
+                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/mm2_ldc,
+                /*post_ops=*/nullptr, /*select_postop=*/false,
+                &mm2_amx.need_config, mm2_amx.palette, &mm2_amx.wsp_size));
         descs.mm_valid[qi][ki] = true;
         return status::success;
     };
@@ -265,8 +371,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             if (mm2_beta != 0.0f) {
                 CHECK(build_brgemm_desc(descs.mm2_desc_beta0[qi], p_.mm_dt,
                         /*beta=*/0.0f, ms[qi], hs_v, kv_block, /*lda=*/seq_kv,
-                        /*ldb=*/p_.v_strides[row_dim],
-                        /*ldc=*/o_row));
+                        /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
+                        /*ldc=*/mm2_ldc));
                 descs.beta0_valid[qi] = true;
             }
         }
@@ -291,12 +397,65 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         CHECK(build_all_descs(false));
     }
 
-    // Per-thread scratch: the f32 score tile also holds P for mm2.
+    // Safety net: an AMX ukernel ALWAYS requires a VNNI-packed B. If any kernel
+    // selected AMX tiles while pack_b was not set (e.g. an unforeseen ISA/shape
+    // combination), the B layout would be wrong -- bail out to a safe fallback
+    // rather than compute silently incorrect results.
+    for (int qi = 0; qi < 2; ++qi)
+        for (int ki = 0; ki < 2; ++ki)
+            if ((conf.mm1_amx[qi][ki].need_config
+                        || conf.mm2_amx[qi][ki].need_config)
+                    && !pack_b)
+                return status::unimplemented;
+
+    // Per-thread scratch: one score tile [q_block x seq_kv] and one pv tile
+    // [q_block x hs_v], both f32 (BRGEMM accumulates in f32). For a non-f32
+    // compute type, a third [q_block x seq_kv] tile holds P (mm2's A operand)
+    // down-converted from the f32 softmax output; f32 reuses the scores tile
+    // directly. The pv tile lets mm2 write a dense output that is then
+    // scattered (and down-converted) to the (possibly strided) user output.
     const size_t scores_bytes
             = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
-    conf.scratch_per_thread = scores_bytes;
+    const size_t pv_bytes = mm2_direct
+            ? 0
+            : align64(static_cast<size_t>(q_block) * hs_v * sizeof(float));
+    const size_t prob_bytes = p_.mm_dt == data_type::f32
+            ? 0
+            : align64(static_cast<size_t>(q_block) * seq_kv * qk_dt_sz);
+    // AMX (bf16/f16) kernels need a per-thread tile-store scratch; size it to
+    // the largest wsp over all kernels (they run sequentially per work-item).
+    size_t max_wsp = 0;
+    for (int qi = 0; qi < 2; ++qi)
+        for (int ki = 0; ki < 2; ++ki)
+            max_wsp = nstl::max(max_wsp,
+                    nstl::max(conf.mm1_amx[qi][ki].wsp_size,
+                            conf.mm2_amx[qi][ki].wsp_size));
+    conf.amx_wsp_bytes = max_wsp > 0 ? align64(max_wsp) : 0;
+    conf.scratch_per_thread
+            = scores_bytes + pv_bytes + prob_bytes + conf.amx_wsp_bytes;
 
     conf.nthr = dnnl_get_max_threads();
+
+    // transpose_b QK^T: mm1 needs a dense [hs_qk, seq_kv] B tile per head, but
+    // the brgemm ukernel has no transposed-B mode. Transpose the whole K tensor
+    // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
+    // buffer that follows the per-thread blocks; kt_global_bytes sizes it. For
+    // bf16/f16 the tile is VNNI-packed over hs_qk (K padded to k_pack), so the
+    // buffer uses rnd_up(hs_qk, b_k_pad) rows.
+    const dim_t num_head_kv
+            = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
+    conf.num_head_kv = num_head_kv;
+    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, b_k_pad);
+    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, b_k_pad);
+    if (need_kt && num_head_kv > 0)
+        conf.kt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
+                * hs_qk_pad * seq_kv * qk_dt_sz;
+    // bf16/f16: mm2's V is VNNI-packed once per (batch, kv_head) into a shared
+    // [batch x num_head_kv x rnd_up(seq_kv, b_k_pad) x hs_v] buffer following the
+    // transposed-K buffer.
+    if (pack_b && num_head_kv > 0)
+        conf.vt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
+                * seq_kv_pad * hs_v * qk_dt_sz;
 
     return status::success;
 }
@@ -308,6 +467,9 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     // Bind conf scalars + kernel slots to the member names the body uses.
     const dim_t q_block_ = conf.q_block, q_tail_ = conf.q_tail;
     const dim_t kv_block_ = conf.kv_block, kv_tail_ = conf.kv_tail;
+    const dim_t b_k_pack_ = conf.b_k_pack;
+    const bool mm1_transpose_k_ = conf.mm1_transpose_k;
+    const dim_t k_hs_stride_ = conf.k_hs_stride;
     auto &mm1_kernels_ = kernels.mm1_kernels;
     auto &mm2_kernels_ = kernels.mm2_kernels;
     auto &mm2_kernels_beta0_ = kernels.mm2_kernels_beta0;
@@ -320,8 +482,11 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
     const int row_dim = p_.ndims - 2;
-    // The select-post-op fallback keeps the direct-K leading dimension.
-    const dim_t mm1_ldb = p_.k_strides[row_dim];
+    // Packing / transpose / leading-dim decisions mirror configure(); needed
+    // only for the (rare) select-post-op compile-failure rebuild below.
+    const bool pack_b = b_k_pack_ == 2;
+    const bool need_kt = mm1_transpose_k_ || pack_b;
+    const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride_;
 
     auto destroy_kernels = [&]() {
         for (int qi = 0; qi < 2; ++qi) {
@@ -379,7 +544,8 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
                         ms[qi], kvs[ki], hs_qk, /*lda=*/p_.q_strides[row_dim],
                         /*ldb=*/mm1_ldb, /*ldc=*/seq_kv, &p_.mm1_post_ops,
                         /*select_postop=*/false,
-                        /*full_output_width=*/seq_kv));
+                        /*amx_need_config=*/nullptr, /*amx_palette=*/nullptr,
+                        /*amx_wsp=*/nullptr, /*full_output_width=*/seq_kv));
                 CHECK(brgemm_kernel_create(&mm1_kernels_[qi][ki], mm1_brg));
                 CHECK(brgemm_kernel_create(
                         &mm2_kernels_[qi][ki], descs.mm2_desc[qi][ki]));
@@ -477,7 +643,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // Bind conf scalars + compiled kernels to the member names the body uses.
     const dim_t q_block_ = conf.q_block;
     const dim_t kv_block_ = conf.kv_block;
+    const bool mm2_direct_ = conf.mm2_direct;
+    const dim_t b_k_pack_ = conf.b_k_pack;
+    const bool mm1_transpose_k_ = conf.mm1_transpose_k;
+    const dim_t k_seq_stride_ = conf.k_seq_stride;
+    const dim_t k_hs_stride_ = conf.k_hs_stride;
+    const dim_t num_head_kv_ = conf.num_head_kv;
+    const size_t amx_wsp_bytes_ = conf.amx_wsp_bytes;
     const size_t scratch_per_thread_ = conf.scratch_per_thread;
+    const size_t kt_global_bytes_ = conf.kt_global_bytes;
+    const auto &mm1_amx_ = conf.mm1_amx;
+    const auto &mm2_amx_ = conf.mm2_amx;
     const auto &mm1_kernels_ = kernels.mm1_kernels;
     const auto &mm2_kernels_ = kernels.mm2_kernels;
     const auto &mm2_kernels_beta0_ = kernels.mm2_kernels_beta0;
@@ -489,6 +665,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const int row_dim = ndims - 2;
     const dim_t seq_q = p_.seq_q;
     const dim_t seq_kv = p_.seq_kv;
+    const dim_t hs_v = p_.head_size_v;
     const dim_t group = p_.group_head;
     const dim_t q_block = q_block_;
     const bool has_select = p_.has_select;
@@ -502,21 +679,17 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     auto *o_base = static_cast<char *>(args.out);
     auto *cond_base = static_cast<const char *>(args.cond);
 
-    // Q, output, and select-condition tensors use query-head coordinates;
+    // Q, output, and select-condition tensors use query-head/group coordinates;
     // K and V use batch/KV-head coordinates shared by each GQA group.
-    const auto query_tensor_base_offset
+    const auto tensor_base_offset
             = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
-                      dim_t query_head_idx) -> dim_t {
-        return batch_idx * strides[0] + query_head_idx * strides[1];
-    };
-    const auto kv_tensor_base_offset
-            = [&](const std::vector<dim_t> &strides, dim_t batch_idx,
-                      dim_t kv_head_idx) -> dim_t {
-        return batch_idx * strides[0] + kv_head_idx * strides[1];
+                      dim_t head_idx) -> dim_t {
+        return batch_idx * strides[0] + head_idx * strides[1];
     };
 
     const dim_t q_row = p_.q_strides[row_dim];
     const dim_t o_row = p_.o_strides[row_dim];
+    const dim_t o_col = p_.o_strides[ndims - 1];
     // Broadcast-aware select-condition strides: an axis with extent 1 is a
     // broadcast axis whose stride is meaningless (set to the collapsed extent), so it must contribute 0. distill_bert's condition is
     // [1,1,1,seq_kv] -- broadcast over head and seq_q -- so without this the
@@ -532,44 +705,147 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
 
     const dim_t n_qblk = utils::div_up(seq_q, q_block);
     const size_t block_size = scratch_per_thread_;
+    const size_t scores_bytes
+            = align64(static_cast<size_t>(q_block) * seq_kv * sizeof(float));
+    const size_t pv_bytes = mm2_direct_
+            ? 0
+            : align64(static_cast<size_t>(q_block) * hs_v * sizeof(float));
+    const data_type_t mm_dt = p_.mm_dt;
+    const data_type_t out_dt = p_.out_dt;
+    const size_t qk_dt_sz = types::data_type_size(mm_dt);
+    const size_t o_dt_sz = types::data_type_size(out_dt);
+    const size_t prob_bytes = mm_dt == data_type::f32
+            ? 0
+            : align64(static_cast<size_t>(q_block) * seq_kv * qk_dt_sz);
+    const bool transpose_b = mm1_transpose_k_;
+    const dim_t hs_qk = p_.head_size_qk;
+    // VNNI-pack factor decided in init from dtype AND ISA (b_k_pack_ == 1 for
+    // f32 and the non-AMX f16 FMA path, 2 for bf16 / AMX-FP16 f16).
+    const dim_t k_pack = b_k_pack_;
+    const dim_t b_k_pad = conf.b_k_pad;
+    const bool pack_b = k_pack > 1;
+    // mm1 materialises a dense (VNNI-packed for bf16/f16) [hs_qk, seq_kv] B
+    // tile whenever it must transpose or pack K; f32 with contiguous seq_kv
+    // reads K in place.
+    const bool need_kt = transpose_b || pack_b;
+    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, b_k_pad);
+    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, b_k_pad);
+    // Element strides to walk the K tensor's seq_kv / hs_qk axes when
+    // materialising the dense [hs_qk, seq_kv] transpose (see init: derived from
+    // the physical layout, so this handles both natural and pre-transposed K).
+    const dim_t k_row = k_seq_stride_;
+    const dim_t k_col = k_hs_stride_;
+
+    // Materialise mm1's B (transposed K) and, for bf16/f16, mm2's B (V) ONCE
+    // per (batch, kv_head) up front, into shared buffers that follow the
+    // per-thread blocks. Each mm1 B tile is a dense [hs_qk, seq_kv] transpose
+    // (the brgemm ukernel has no transposed-B mode), VNNI-packed over hs_qk for
+    // bf16/f16 (2 consecutive reduction elements interleaved:
+    // kt[(h/k_pack)*seq_kv*k_pack + kv*k_pack + h%k_pack]). Each mm2 B tile is a
+    // dense [seq_kv, hs_v] copy of V, VNNI-packed over seq_kv. Doing it once
+    // avoids the redundant per-query-tile pack. The copy is dtype-agnostic
+    // (memcpy of qk_dt_sz bytes per element).
+    const dim_t num_head_kv = num_head_kv_;
+    const size_t kt_head_elems = static_cast<size_t>(hs_qk_pad) * seq_kv;
+    const size_t vt_head_elems = static_cast<size_t>(seq_kv_pad) * hs_v;
+    char *kt_all = need_kt ? static_cast<char *>(scratch_base)
+                    + static_cast<size_t>(nthr) * block_size
+                           : nullptr;
+    char *vt_all = pack_b ? kt_all + kt_global_bytes_ : nullptr;
+    if (need_kt) {
+        parallel_nd(
+                p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
+            const char *kp = k_base
+                    + tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
+                            * qk_dt_sz;
+            char *kt = kt_all
+                    + (static_cast<size_t>(batch_idx) * num_head_kv
+                              + kv_head_idx)
+                            * kt_head_elems * qk_dt_sz;
+            // Zero padded reduction rows for BRGEMM's VNNI/AMX K block.
+            if (pack_b && hs_qk_pad > hs_qk)
+                std::memset(kt, 0, kt_head_elems * qk_dt_sz);
+            for (dim_t kv = 0; kv < seq_kv; ++kv)
+                for (dim_t h = 0; h < hs_qk; ++h) {
+                    const size_t dst = pack_b ? (h / k_pack) * seq_kv * k_pack
+                                    + kv * k_pack + h % k_pack
+                                              : h * seq_kv + kv;
+                    std::memcpy(kt + dst * qk_dt_sz,
+                            kp + (kv * k_row + h * k_col) * qk_dt_sz, qk_dt_sz);
+                }
+        });
+    }
+    if (pack_b) {
+        const dim_t v_row = p_.v_strides[row_dim];
+        const dim_t v_col = p_.v_strides[ndims - 1];
+        parallel_nd(
+                p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
+            const char *vp = v_base
+                    + tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
+                            * qk_dt_sz;
+            char *vt = vt_all
+                    + (static_cast<size_t>(batch_idx) * num_head_kv
+                              + kv_head_idx)
+                            * vt_head_elems * qk_dt_sz;
+            if (seq_kv_pad > seq_kv)
+                std::memset(vt, 0, vt_head_elems * qk_dt_sz);
+            for (dim_t kv = 0; kv < seq_kv; ++kv)
+                for (dim_t n = 0; n < hs_v; ++n) {
+                    const size_t dst = (kv / k_pack) * hs_v * k_pack
+                            + n * k_pack + kv % k_pack;
+                    std::memcpy(vt + dst * qk_dt_sz,
+                            vp + (kv * v_row + n * v_col) * qk_dt_sz, qk_dt_sz);
+                }
+        });
+    }
+
     // Each work item computes one query block across the full seq_kv axis,
     // then writes its [m, hs_v] output block.
     parallel_nd_ext(nthr, p_.batch, p_.num_head_q, n_qblk,
             [&](int tid, int, dim_t batch_idx, dim_t query_head_idx,
                     dim_t query_block_idx) {
         const dim_t kv_head_idx = query_head_idx / group;
+        const dim_t group_idx = query_head_idx % group;
         const dim_t q0 = query_block_idx * q_block;
         const dim_t m = nstl::min(q_block, seq_q - q0);
         const bool is_tail = m != q_block;
 
         const char *q_ptr = q_base
-                + (query_tensor_base_offset(
-                           p_.q_strides, batch_idx, query_head_idx)
+                + (tensor_base_offset(p_.q_strides, batch_idx, query_head_idx)
                           + q0 * q_row)
-                        * sizeof(float);
+                        * qk_dt_sz;
         const char *k_ptr = k_base
-                + kv_tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
-                        * sizeof(float);
+                + tensor_base_offset(p_.k_strides, batch_idx, kv_head_idx)
+                        * qk_dt_sz;
         const char *v_ptr = v_base
-                + kv_tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
-                        * sizeof(float);
+                + tensor_base_offset(p_.v_strides, batch_idx, kv_head_idx)
+                        * qk_dt_sz;
         char *o_ptr = o_base
-                + (query_tensor_base_offset(
-                           p_.o_strides, batch_idx, query_head_idx)
+                + (tensor_base_offset(p_.o_strides, batch_idx, query_head_idx)
                           + q0 * o_row)
-                        * sizeof(float);
+                        * o_dt_sz;
         const uint8_t *c_ptr = has_select
                 ? reinterpret_cast<const uint8_t *>(cond_base
-                          + (query_tensor_base_offset(eff_cond_strides,
-                                     batch_idx, query_head_idx)
+                          + (tensor_base_offset(eff_cond_strides, batch_idx,
+                                     query_head_idx)
                                     + q0 * cond_row)
                                   * sizeof(uint8_t))
                 : nullptr;
 
         char *my_scratch = static_cast<char *>(scratch_base) + tid * block_size;
         float *scores = reinterpret_cast<float *>(my_scratch);
-        // P (mm2's A operand) is the f32 softmax output in scores.
-        void *prob = scores;
+        float *pv = reinterpret_cast<float *>(my_scratch + scores_bytes);
+        // P (mm2's A operand) is the softmax output in the compute type. For
+        // f32 it is the scores tile itself; otherwise a down-converted copy in
+        // the third per-thread tile.
+        void *prob = mm_dt == data_type::f32
+                ? static_cast<void *>(scores)
+                : static_cast<void *>(my_scratch + scores_bytes + pv_bytes);
+        // AMX (bf16/f16) tile-store scratch follows the score/pv/prob tiles.
+        void *amx_wsp = amx_wsp_bytes_ > 0
+                ? static_cast<void *>(
+                          my_scratch + scores_bytes + pv_bytes + prob_bytes)
+                : nullptr;
 
         const int qi = is_tail ? 1 : 0;
         // seq_kv tiling: n_kv_full full kv_block-wide blocks + an optional
@@ -581,7 +857,25 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
 
         // mm1: scores[m, seq_kv] = Q_tile[m, hs_qk] * K_tile[hs_qk, seq_kv].
         // Each call fills one kv_block-wide slice of the full score tile.
-        // K is already [hs_qk, seq_kv] with a contiguous key axis.
+        // For a transpose_b QK^T (or a bf16/f16 pack), K was materialised up
+        // front into kt_all; point B at this (batch, kv_head)'s dense (VNNI)
+        // [hs_qk, seq_kv] tile. Otherwise K is already [hs_qk, seq_kv] in place.
+        const void *b_ptr = k_ptr;
+        if (need_kt)
+            b_ptr = kt_all
+                    + (static_cast<size_t>(batch_idx) * num_head_kv
+                              + kv_head_idx)
+                            * kt_head_elems * qk_dt_sz;
+        // mm2 B: VNNI-packed V tile for bf16/f16, else the user V in place.
+        const void *v_b_ptr = pack_b ? vt_all
+                        + (static_cast<size_t>(batch_idx) * num_head_kv
+                                  + kv_head_idx)
+                                * vt_head_elems * qk_dt_sz
+                                     : static_cast<const void *>(v_ptr);
+        // Element stride to advance one seq_kv column of mm1's B: VNNI pack
+        // factor for a packed tile, 1 for a dense transpose, else the K
+        // tensor's seq_kv physical stride (== 1 for in-place, non-transposed).
+        const dim_t mm1_bcol = need_kt ? (pack_b ? k_pack : 1) : k_seq_stride_;
         const dim_t v_row = p_.v_strides[row_dim];
 
         // Build the binary post-op rhs table ONCE in chain order (it does not
@@ -599,15 +893,24 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                 const char *base
                         = static_cast<const char *>(args.mm1_post_op_rhs[pi]);
                 if (!pop.rhs_is_scalar) {
-                    // Offset the 4D mask by (batch, query head, query tile).
-                    // Broadcast axes contribute nothing; the kv-block column
-                    // comes from the output pointer, not here.
+                    // Offset the rhs base by (batch, head, query-tile) using
+                    // its OWN rank: a 4D rhs indexes the flat query head, a 5D
+                    // rhs splits it into (kv_head, group); broadcast axes (dim==1)
+                    // contribute nothing. The query row is offset by q0. The
+                    // kv-block column comes from the output pointer, not here.
                     const auto &d = pop.rhs_dims;
                     const auto &s = pop.rhs_strides;
+                    const int rn = static_cast<int>(d.size());
                     dim_t off = 0;
-                    if (d[0] != 1) off += batch_idx * s[0];
-                    if (d[1] != 1) off += query_head_idx * s[1];
-                    if (d[2] != 1) off += q0 * s[2];
+                    if (rn == 4) {
+                        if (d[0] != 1) off += batch_idx * s[0];
+                        if (d[1] != 1) off += query_head_idx * s[1];
+                    } else {
+                        if (d[0] != 1) off += batch_idx * s[0];
+                        if (d[1] != 1) off += kv_head_idx * s[1];
+                        if (d[2] != 1) off += group_idx * s[2];
+                    }
+                    if (d[rn - 2] != 1) off += q0 * s[rn - 2];
                     base += off * types::data_type_size(pop.rhs_dt);
                 }
                 rhs.push_back(base);
@@ -627,7 +930,8 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         auto run_mm1 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = q_ptr;
-            be.ptr.B = k_ptr + static_cast<size_t>(kv0) * sizeof(float);
+            be.ptr.B = static_cast<const char *>(b_ptr)
+                    + static_cast<size_t>(kv0) * mm1_bcol * qk_dt_sz;
             float *c_blk = scores + kv0;
             if (has_mm1_postops) {
                 brgemm_post_ops_data_t pod(
@@ -637,15 +941,21 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                         /*data_C_ptr_=*/reinterpret_cast<const char *>(scores),
                         /*first_mb_matrix_addr_off=*/0);
                 brgemm_kernel_execute_postops(
-                        k, 1, &be, c_blk, c_blk, pod, nullptr);
+                        k, 1, &be, c_blk, c_blk, pod, amx_wsp);
             } else {
-                brgemm_kernel_execute(k, 1, &be, c_blk, nullptr);
+                brgemm_kernel_execute(k, 1, &be, c_blk, amx_wsp);
             }
         };
 
+        if (mm1_amx_[qi][0].need_config)
+            amx_tile_configure(mm1_amx_[qi][0].palette);
         for (dim_t b = 0; b < n_kv_full; ++b)
             run_mm1(mm1_kernels_[qi][0], b * kv_block);
-        if (kv_tail) { run_mm1(mm1_kernels_[qi][1], n_kv_full * kv_block); }
+        if (kv_tail) {
+            if (mm1_amx_[qi][1].need_config)
+                amx_tile_configure(mm1_amx_[qi][1].palette);
+            run_mm1(mm1_kernels_[qi][1], n_kv_full * kv_block);
+        }
 
         // Full-axis softmax: scores[m, seq_kv] -> P[m, seq_kv], normalized
         // over all keys independently for each query row. The jit softmax
@@ -683,18 +993,32 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // L2-resident. The blocks accumulate: when tiled into >1 block the
         // first block uses a beta = 0 kernel (fresh C) and the rest beta = 1, so
         // no destination pre-zeroing is needed; a single block uses beta = 0
-        // (identical to the untiled path). P is the f32 scores tile; mm2
-        // writes directly to the user output.
-        float *mm2_c = reinterpret_cast<float *>(o_ptr);
+        // (identical to the untiled path). mm2 writes either straight into the
+        // f32 user output (mm2_direct_) or into the dense pv scratch tile.
+        // P is the softmax output in the compute type: for f32 that is the
+        // scores tile; otherwise down-convert the dense [m, seq_kv] scores into
+        // the prob tile first (mm2's A must match the BRGEMM input type).
+        if (mm_dt != data_type::f32)
+            convert_from_f32(
+                    prob, mm_dt, scores, static_cast<size_t>(m) * seq_kv);
 
-        // Run mm2 for the kv-block [kv0, kv0+K): A is P's column slice
-        // (lda = seq_kv), B is V's panel at kv0 rows down.
+        // mm2 destination: the user output directly (f32, unit-stride rows) or
+        // the pv scratch tile that is scattered/down-converted below.
+        float *mm2_c = mm2_direct_ ? reinterpret_cast<float *>(o_ptr) : pv;
+
+        // Run mm2 for the kv-block [kv0, kv0+K): A is P's column slice (lda =
+        // seq_kv), B is V's kv-block panel (packed: (kv0/k_pack) K-groups in;
+        // f32: kv0 rows down), accumulating into mm2_c.
         auto run_mm2 = [&](const brgemm_kernel_t *k, dim_t kv0) {
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
-                    + static_cast<size_t>(kv0) * sizeof(float);
-            be.ptr.B = v_ptr + static_cast<size_t>(kv0) * v_row * sizeof(float);
-            brgemm_kernel_execute(k, 1, &be, mm2_c, nullptr);
+                    + static_cast<size_t>(kv0) * qk_dt_sz;
+            be.ptr.B = pack_b ? static_cast<const char *>(v_b_ptr)
+                            + static_cast<size_t>(kv0 / k_pack) * hs_v * k_pack
+                                    * qk_dt_sz
+                              : static_cast<const char *>(v_b_ptr)
+                            + static_cast<size_t>(kv0) * v_row * qk_dt_sz;
+            brgemm_kernel_execute(k, 1, &be, mm2_c, amx_wsp);
         };
 
         // The first kv-block writes fresh C (beta = 0); the rest accumulate
@@ -702,10 +1026,67 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
         // if any, is never first), so mm2_kernels_beta0_ (sized for kv_block_)
         // is the right kernel.
         const bool multi_block = kv_block < seq_kv;
+        if (mm2_amx_[qi][0].need_config)
+            amx_tile_configure(mm2_amx_[qi][0].palette);
         run_mm2(multi_block ? mm2_kernels_beta0_[qi] : mm2_kernels_[qi][0], 0);
         for (dim_t b = 1; b < n_kv_full; ++b)
             run_mm2(mm2_kernels_[qi][0], b * kv_block);
-        if (kv_tail) { run_mm2(mm2_kernels_[qi][1], n_kv_full * kv_block); }
+        if (kv_tail) {
+            if (mm2_amx_[qi][1].need_config)
+                amx_tile_configure(mm2_amx_[qi][1].palette);
+            run_mm2(mm2_kernels_[qi][1], n_kv_full * kv_block);
+        }
+
+        // Write the result to the user output. When mm2 wrote f32 directly into
+        // the output there is nothing to do. Otherwise down-convert / copy the
+        // dense f32 pv tile to the (possibly strided) output; unit-stride rows
+        // (the common case) use the bulk converters / memcpy, a strided output
+        // column falls back to scalar per-element stores.
+        if (!mm2_direct_) {
+            const bool dense_col = o_col == 1;
+            if (out_dt == data_type::f32) {
+                for (dim_t i = 0; i < m; ++i) {
+                    const float *prow = pv + i * hs_v;
+                    float *out_row = reinterpret_cast<float *>(
+                            o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
+                    if (dense_col)
+                        std::memcpy(out_row, prow,
+                                static_cast<size_t>(hs_v) * sizeof(float));
+                    else
+                        for (dim_t d = 0; d < hs_v; ++d)
+                            out_row[d * o_col] = prow[d];
+                }
+            } else if (out_dt == data_type::f16) {
+                for (dim_t i = 0; i < m; ++i) {
+                    const float *prow = pv + i * hs_v;
+                    float16_t *out_row = reinterpret_cast<float16_t *>(
+                            o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
+                    if (dense_col)
+                        cvt_float_to_float16(
+                                out_row, prow, static_cast<size_t>(hs_v));
+                    else
+                        for (dim_t d = 0; d < hs_v; ++d)
+                            out_row[d * o_col] = float16_t(prow[d]);
+                }
+            } else { // bf16
+                for (dim_t i = 0; i < m; ++i) {
+                    const float *prow = pv + i * hs_v;
+                    bfloat16_t *out_row = reinterpret_cast<bfloat16_t *>(
+                            o_ptr + i * o_row * static_cast<dim_t>(o_dt_sz));
+                    if (dense_col)
+                        cvt_float_to_bfloat16(
+                                out_row, prow, static_cast<size_t>(hs_v));
+                    else
+                        for (dim_t d = 0; d < hs_v; ++d)
+                            out_row[d * o_col] = bfloat16_t(prow[d]);
+                }
+            }
+        }
+        // Release AMX tiles so the configured state does not leak past this
+        // work-item (no-op for non-AMX f32). The full-block cfg's need_config
+        // is representative (the tail kernels share the ISA/dtype).
+        if (mm1_amx_[qi][0].need_config || mm2_amx_[qi][0].need_config)
+            amx_tile_release();
     });
 
     return status::success;

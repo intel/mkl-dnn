@@ -62,15 +62,14 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
             utils::everyone_is(true, qry_mdw.is_plain(), key_mdw.is_plain(),
                     val_mdw.is_plain(), dst_mdw.is_plain()),
             VERBOSE_UNSUPPORTED_TAG);
+
     VDISPATCH_SDPA(qry_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
-            "the query head-size axes must be contiguous");
+            "the query head-size axis must be contiguous");
     VDISPATCH_SDPA(val_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
-            "the value head-size axes must be contiguous");
-    VDISPATCH_SDPA(key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
-            "the key axis must be contiguous");
+            "the value head-size axis must be contiguous");
 
     const data_type_t dt = qry_mdw.data_type();
-    VDISPATCH_SDPA(dt == f32, VERBOSE_UNSUPPORTED_DT);
+    VDISPATCH_SDPA(utils::one_of(dt, f32, bf16, f16), VERBOSE_UNSUPPORTED_DT);
     VDISPATCH_SDPA(key_mdw.data_type() == dt && val_mdw.data_type() == dt
                     && dst_mdw.data_type() == dt,
             "query, key, value and dst data types must match");
@@ -111,13 +110,16 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
             VDISPATCH_SDPA(mask_mdw.dims()[mask_k_index] == 1
                             || mask_mdw.strides()[mask_k_index] == 1,
                     "the select condition key axis must be contiguous");
+
             const memory_desc_wrapper fill_mdw(desc()->fill_md());
             VDISPATCH_SDPA(fill_mdw.ndims() == 1 && fill_mdw.dims()[0] == 1
                             && fill_mdw.data_type() == f32,
                     "the select attention mask fill must be a scalar f32");
         } else
-            VDISPATCH_SDPA(mask_mdw.data_type() == f32,
-                    "the attention mask data type must be f32");
+            VDISPATCH_SDPA(
+                    mask_mdw.data_type() == dt || mask_mdw.data_type() == f32,
+                    "the attention mask data type must match qry/dst or be "
+                    "f32");
     }
 
     if (with_attn_scale()) {
@@ -129,10 +131,17 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
     VDISPATCH_SDPA(
             sdpa_fwd_pd_t::set_default_formats(), VERBOSE_UNSUPPORTED_TAG);
 
-    // The online-softmax strategy never materializes the full score matrix,
-    // but cannot apply an additive buffer mask. Use full-softmax for that mask
-    // unless ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto} overrides it.
-    const bool online_capable = !with_buffer_mask();
+    // The online-softmax strategy never materializes the full [seq_q x seq_kv]
+    // score matrix, but is f32-only and has no attention-mask post-op yet; the
+    // full-softmax strategy covers bf16/f16 and an additive mask. Pick
+    // online-softmax whenever the shapes/dtypes allow it, unless overridden for
+    // debugging/perf comparisons via ONEDNN_SDPA_IMPL={online_softmax,full_softmax,auto}
+    // (auto, the default, is the capability-based choice above).
+    // The online mm1 reads K in place (no transpose), so its keys axis must be
+    // unit-stride; full-softmax materialises a transpose for a strided keys
+    // axis, so route those cases to full rather than rejecting them.
+    const bool online_capable = dt == f32 && !with_buffer_mask()
+            && key_mdw.strides()[sdpa_pd_t::ndims - 1] == 1;
     const std::string forced = getenv_string_user("SDPA_IMPL");
     VDISPATCH_SDPA(
             utils::one_of(forced, std::string(), std::string("auto"),
@@ -142,7 +151,7 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         VDISPATCH_SDPA(online_capable,
                 "the online-softmax SDPA strategy was forced via "
                 "ONEDNN_SDPA_IMPL but "
-                "does not support this attention mask");
+                "does not support this data type or attention mask");
         kind_ = sdpa_impl_kind_t::online_softmax;
     } else if (forced == "full_softmax") {
         kind_ = sdpa_impl_kind_t::full_softmax;
@@ -150,10 +159,6 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
         kind_ = online_capable ? sdpa_impl_kind_t::online_softmax
                                : sdpa_impl_kind_t::full_softmax;
     }
-
-    VDISPATCH_SDPA(kind_ != sdpa_impl_kind_t::full_softmax
-                    || dst_mdw.strides()[sdpa_pd_t::ndims - 1] == 1,
-            "full-softmax requires a contiguous output column axis");
 
     auto scratchpad = scratchpad_registry().registrar();
 
@@ -216,6 +221,11 @@ status_t brgemm_sdpa_fwd_t::pd_t::init(const engine_t *engine) {
             val_mdw.strides(), val_mdw.strides() + sdpa_pd_t::ndims);
     bp_.o_strides.assign(
             dst_mdw.strides(), dst_mdw.strides() + sdpa_pd_t::ndims);
+    // key_md()'s logical dim order is fixed by the pd contract to
+    // [batch, kv_heads, head_size, keys] (keys() reads the *last* dim), i.e.
+    // head_size is already the row axis and keys the inner axis -- the
+    // "non-transposed" orientation the full-softmax path expects.
+    bp_.mm1_transpose_b = false;
     bp_.has_select = with_select_mask();
     bp_.invert_select = desc()->invert_select;
     if (with_select_mask()) {
