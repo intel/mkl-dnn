@@ -646,8 +646,9 @@ void emit_looped_nest(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
 // inside M. The kernel has one batch element, and its A and B pointers are set
 // once for the whole kernel.
 //
-// There are no output stages yet, and beta is 0. The accumulators of a block
-// start at zero and are stored to C unchanged.
+// There are no output stages yet. The accumulators of a block start at zero,
+// or at C when beta is 1, and are stored to C unchanged. The uker also loads C
+// into the accumulators when beta is 1 (`may_load_accumulators_`).
 void emit_unrolled_nest(ir::ir_t &ir, const conf_t &cfg,
         const compute_path_t &cp, const m_loop_input_regs_t &regs) {
 
@@ -665,7 +666,9 @@ void emit_unrolled_nest(ir::ir_t &ir, const conf_t &cfg,
         const out_block_t blk {
                 (int)bd_block, ld_block2, bd_start, ld_start, ir::vreg_t::none};
 
-        const std::vector<ir::vreg_t> acc = cp.init_accumulators(ir, cfg, blk);
+        const std::vector<ir::vreg_t> acc = cfg.output.beta != 0.0f
+                ? cp.load_accumulators(ir, cfg, blk, regs.advancing.c_ptr)
+                : cp.init_accumulators(ir, cfg, blk);
 
         emit_unrolled_level(k, [&](dim_t rd_block, dim_t rd_start) {
             cp.emit_microkernel(
@@ -992,12 +995,10 @@ status_t init_output_conf(output_conf_t &output, compute_path_kind_t kind,
             VERBOSE_UNSUPPORTED_FEATURE, "LDC != LDD");
 
     // The TMUL compute path stores its accumulators only with tile stores so
-    // far, so no output stage can act on them, and it cannot load C yet.
+    // far, so no output stage can act on them.
     const bool is_tmul = kind == compute_path_kind_t::tmul;
     VCONDCHECK_BRGEMM_IR(IMPLICATION(is_tmul, !output.has_post_ops()),
             VERBOSE_UNSUPPORTED_FEATURE, "output stages on tiles");
-    VCONDCHECK_BRGEMM_IR(IMPLICATION(is_tmul, output.beta == 0.0f),
-            VERBOSE_UNSUPPORTED_FEATURE, "beta == 1 on tiles");
     return status::success;
 }
 

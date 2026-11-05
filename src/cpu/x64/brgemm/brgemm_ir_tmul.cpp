@@ -60,6 +60,24 @@ struct tmul_compute_path_t : public compute_path_t {
         return acc;
     }
 
+    std::vector<ir::vreg_t> load_accumulators(ir::ir_t &ir, const conf_t &cfg,
+            const out_block_t &blk, ir::vreg_t c_ptr) const override {
+
+        const compute_path_conf_t &compute_path = cfg.compute_path;
+        const int n_m = m_tiles(cfg, blk);
+        const int n_n = blk.ld_block2;
+        std::vector<ir::vreg_t> acc(n_m * n_n, ir::vreg_t::none);
+
+        for (int m = 0; m < n_m; m++) {
+            for (int n = 0; n < n_n; n++) {
+                ir::vreg_t &t = acc[m * n_n + n];
+                t = ir.new_tile(compute_path.dt_acc, compute_path.c_tile);
+                ir.tload(t, c_ptr, c_tile_off(cfg, blk, m, n), c_stride_);
+            }
+        }
+        return acc;
+    }
+
     void store_accumulators(ir::ir_t &ir, const conf_t &cfg,
             const out_block_t &blk, const std::vector<ir::vreg_t> &acc,
             ir::vreg_t c_ptr) const override {

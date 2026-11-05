@@ -40,8 +40,9 @@ namespace brgemm_ir {
 //
 // For each output block the builder calls `init_accumulators()` before the
 // batch loop, then `emit_microkernel()` for each K run of each batch element.
-// The unrolled schedule calls `store_accumulators()` at the end of the block.
-// The compute path chooses the layout of the accumulators.
+// The unrolled schedule calls `load_accumulators()` instead of
+// `init_accumulators()` when beta is 1, and `store_accumulators()` at the end
+// of the block. The compute path chooses the layout of the accumulators.
 struct compute_path_t {
     virtual ~compute_path_t() = default;
 
@@ -49,6 +50,14 @@ struct compute_path_t {
     virtual std::vector<ir::vreg_t> init_accumulators(
             ir::ir_t &ir, const conf_t &cfg, const out_block_t &blk) const
             = 0;
+
+    // Creates the accumulators of `blk` and loads them from C at `c_ptr`. Like
+    // `store_accumulators()`, only the TMUL compute path implements it.
+    virtual std::vector<ir::vreg_t> load_accumulators(ir::ir_t &ir,
+            const conf_t &cfg, const out_block_t &blk, ir::vreg_t c_ptr) const {
+        assert(!"load_accumulators: not supported by the compute path");
+        return {};
+    }
 
     // Stores the accumulators of `blk` to C at `c_ptr` unchanged.
     //
