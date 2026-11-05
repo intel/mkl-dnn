@@ -76,8 +76,8 @@ struct sdpa_full_softmax_params_t {
     dim_t group_head = 1;
     dim_t seq_q = 0;
     dim_t seq_kv = 0;
-    dim_t head_size_qk = 0;
-    dim_t head_size_v = 0;
+    dim_t hs_qk = 0;
+    dim_t hs_v = 0;
 
     // Compute data type for Q/K/V and the mm1/mm2 BRGEMM inputs (f32/f16/bf16).
     // The scores and pv tiles are always accumulated in f32 (BRGEMM C is f32);
@@ -118,6 +118,7 @@ struct sdpa_full_softmax_run_args_t {
     const void *v = nullptr;
     const void *cond = nullptr; // uint8 select condition, or null
     void *out = nullptr;
+    void *scratch = nullptr;
     float fill = 0.0f;
     // Base pointers for the mm1 binary post-op right-hand sides, one per binary
     // entry in sdpa_full_softmax_params_t::mm1_post_ops (in the same order; eltwise
@@ -151,33 +152,30 @@ struct sdpa_full_softmax_conf_t {
     float mm2_beta = 0.0f;
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
-    bool need_kt = false, need_vt = false;
-    // Independent BRGEMM B pack factors for K and V (1 plain, 2 VNNI2).
-    dim_t kt_k_pack = 1;
-    dim_t vt_k_pack = 1;
+    bool need_copy_k = false, need_copy_v = false;
+    bool mm1_needs_vnni_b = false;
+    bool mm2_needs_vnni_b = false;
     // Physical reduction extents required by the K and V copy kernels.
     dim_t kt_k_pad = 1, vt_k_pad = 1;
     // Materialized B operands use independent 64-column panels.
-    dim_t kt_ld = 0, vt_ld = 0;
+    dim_t ldk = 0, ldv = 0;
     dim_t v_block = 0, v_tail = 0;
-    bool mm1_transpose_k = false;
     bool pack_k_for_aliasing = false;
     dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
     // a binary_select post-op; the descriptors are built accordingly.
     bool mm1_select_postop = false;
-    dim_t num_head_kv = 0;
     size_t amx_wsp_bytes = 0;
     size_t scratch_per_thread = 0;
-    size_t kt_global_bytes = 0, vt_global_bytes = 0;
+    size_t k_copy_bytes = 0, v_copy_bytes = 0;
     int nthr = 0;
 
     // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
     sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2][2];
 
     size_t scratch_total(int n) const {
-        return scratch_per_thread * static_cast<size_t>(n) + kt_global_bytes
-                + vt_global_bytes;
+        return scratch_per_thread * static_cast<size_t>(n) + k_copy_bytes
+                + v_copy_bytes;
     }
 };
 
@@ -244,16 +242,14 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 // JIT-compile the BRGEMM + softmax kernels from a conf + descs produced by
 // configure(), into `kernels`. The engine instantiates the reused jit softmax
 // kernel; the execute path stays engine-free.
-status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
+status_t create_kernels(cpu_isa_t isa_for_ir,
+        const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_descs_t &descs, engine_t *engine,
         sdpa_full_softmax_kernels_t &kernels);
 
-// Run the full-softmax SDPA. scratch_base points at a buffer of at least
-// conf.scratch_total(nthr) bytes; each thread slices its own per-thread block
-// and the shared transposed-K buffer (if any) follows them.
 status_t execute(const sdpa_full_softmax_conf_t &conf,
         const sdpa_full_softmax_kernels_t &kernels,
-        const sdpa_full_softmax_run_args_t &args, void *scratch_base, int nthr);
+        const sdpa_full_softmax_run_args_t &args, int nthr);
 
 } // namespace sdpa_full_softmax
 

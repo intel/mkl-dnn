@@ -143,8 +143,9 @@ status_t configure(const sdpa_online_softmax_params_t &params,
     return status::success;
 }
 
-status_t create_kernels(cpu_isa_t isa, const sdpa_online_softmax_conf_t &conf,
-        engine_t *engine, sdpa_online_softmax_kernels_t &kernels) {
+status_t create_kernels(cpu_isa_t isa_for_ir,
+        const sdpa_online_softmax_conf_t &conf, engine_t *engine,
+        sdpa_online_softmax_kernels_t &kernels) {
     UNUSED(engine);
     const sdpa_online_softmax_params_t &p_ = conf.params;
     const dim_t kv_blk_ = conf.kv_blk;
@@ -222,15 +223,15 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_online_softmax_conf_t &conf,
         const int m = static_cast<int>(q_rows[qi]);
         for (int ki = 0; ki < n_ki; ++ki) {
             std::unique_ptr<jit_generator_t> k(
-                    sdpa_softmax_ir::create_softmax_tile_ir_kernel(isa, m,
-                            static_cast<int>(kv_w[ki]), p_.has_select,
+                    sdpa_softmax_ir::create_softmax_tile_ir_kernel(isa_for_ir,
+                            m, static_cast<int>(kv_w[ki]), p_.has_select,
                             p_.invert_select, cond_stride));
             CHECK(k->create_kernel());
             kernels.softmax_ir_kernel[qi][ki] = std::move(k);
         }
         std::unique_ptr<jit_generator_t> ak(
                 sdpa_softmax_ir::create_acc_renorm_ir_kernel(
-                        isa, m, static_cast<int>(hs_v)));
+                        isa_for_ir, m, static_cast<int>(hs_v)));
         CHECK(ak->create_kernel());
         kernels.acc_renorm_ir_kernel[qi] = std::move(ak);
     }
