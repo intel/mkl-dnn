@@ -63,8 +63,7 @@ struct settings_t : public base_settings_t {
     std::vector<float> eps {1.f / 16};
 
     const char *perf_template_csv() const {
-        static const std::string args
-                = "%dir%,%dt%,%tag%,%stat_tag%,%flags%,%eps%";
+        static const std::string args = "%dir%,%dt%,%tag%,%stat_tag%,%flags%";
         return perf_template_csv_base(args);
     }
 
