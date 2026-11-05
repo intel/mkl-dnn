@@ -25,6 +25,7 @@
 #include "common/optional.hpp"
 #include "common/sdpa_pd.hpp"
 
+#include "cpu/x64/amx_tile_configure.hpp"
 #include "cpu/x64/brgemm/brgemm_types.hpp"
 
 namespace dnnl {
@@ -135,7 +136,7 @@ struct sdpa_full_softmax_run_args_t {
 struct sdpa_amx_cfg_t {
     bool need_config = false;
     size_t wsp_size = 0;
-    char palette[64] = {};
+    char palette[AMX_PALETTE_SIZE] = {};
 };
 
 struct tensor_copy_desc_t {
@@ -143,7 +144,6 @@ struct tensor_copy_desc_t {
     size_t batch_stride = 0;
     size_t head_stride = 0;
     dim_t padded_k = 0;
-    dim_t packed_ld = 0;
     dim_t vnni_factor = 1;
 };
 
@@ -155,15 +155,17 @@ struct tensor_copy_desc_t {
 struct sdpa_full_softmax_conf_t {
     sdpa_full_softmax_params_t params;
     dim_t q_block = 0, q_tail = 0;
-    dim_t kv_block = 0, kv_tail = 0;
-    // mm2 accumulates across kv-blocks: beta = 0 for a single block, else the
-    // first block uses a beta = 0 kernel and the rest beta = 1.
+    // mm1 writes the score tile in mm1_n_block-wide column blocks,
+    // mm2 reduces P in mm2_k_block-deep blocks.
+    dim_t mm1_n_block = 0, mm1_n_tail = 0;
+    dim_t mm2_k_block = 0, mm2_k_tail = 0;
+    // mm2 accumulates across its seq_kv blocks: beta = 0 for a single block,
+    // else the first block uses a beta = 0 kernel and the rest beta = 1.
     float mm2_beta = 0.0f;
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
     bool mm1_needs_vnni_b = false;
     bool mm2_needs_vnni_b = false;
-    // Materialized B operands use independent 64-column panels.
     dim_t ldk = 0, ldv = 0;
     dim_t v_block = 0, v_tail = 0;
     bool pack_k_for_aliasing = false;
@@ -179,7 +181,8 @@ struct sdpa_full_softmax_conf_t {
     utils::optional_t<tensor_copy_desc_t> q_copy_desc, k_copy_desc, v_copy_desc,
             o_copy_desc, cond_copy_desc;
 
-    // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
+    // AMX cfg per kernel: mm1 indexed [is_q_tail][is_n_tail], mm2 indexed
+    // [is_q_tail][is_k_tail][is_v_tail].
     sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2][2];
 
     size_t scratch_total(int n) const {
@@ -187,15 +190,15 @@ struct sdpa_full_softmax_conf_t {
     }
 };
 
-// Finalized (not compiled) BRGEMM descriptors for the full-softmax SDPA, built once
-// by configure() and owned by the primitive_desc (mirroring brgemm_matmul's
-// brg_descs_, kept separate from the conf). Indexed [is_q_tail][is_kv_tail];
-// mm_valid marks which slots were built (tail slots stay unbuilt when the
-// remainder is 0). mm2_desc_beta0 is the beta = 0 full-kv-block mm2 descriptor
-// used for the first block when seq_kv is tiled (per q-tile).
+// mm1 BRGEMM descriptors are indexed [is_q_tail][is_n_tail] and mm2
+// [is_q_tail][is_k_tail][is_v_tail]; the valid flags mark which slots
+// were built (tail slots stay unbuilt when the remainder is 0).
+// mm2_desc_beta0 is the beta = 0 full-K-block mm2 descriptor used for
+// the first block when the mm2 reduction is tiled (per q-tile).
 struct sdpa_full_softmax_descs_t {
     brgemm_desc_t mm1_desc[2][2], mm2_desc[2][2][2], mm2_desc_beta0[2][2];
-    bool mm_valid[2][2] = {};
+    bool mm1_valid[2][2] = {};
+    bool mm2_valid[2][2] = {};
     bool beta0_valid[2] = {};
 };
 
@@ -212,8 +215,9 @@ struct sdpa_full_softmax_kernels_t {
     sdpa_full_softmax_kernels_t &operator=(const sdpa_full_softmax_kernels_t &)
             = delete;
 
-    // mm1/mm2 BRGEMM kernels indexed [is_q_tail][is_kv_tail]; mm2_kernels_beta0
-    // is the beta = 0 first-block mm2 (per q-tile), built only when tiled.
+    // mm1 BRGEMM kernels indexed [is_q_tail][is_n_tail], mm2 indexed
+    // [is_q_tail][is_k_tail][is_v_tail]; mm2_kernels_beta0 is the beta = 0
+    // first-block mm2 (per q-tile), built only when the reduction is tiled.
     brgemm_kernel_t *mm1_kernels[2][2] = {};
     brgemm_kernel_t *mm2_kernels[2][2][2] = {};
     brgemm_kernel_t *mm2_kernels_beta0[2][2] = {};
