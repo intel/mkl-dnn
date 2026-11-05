@@ -251,14 +251,6 @@ void Generator<hw>::gemm(GEMMProblem &problem, GEMMStrategy &strategy, GEMMState
     if (aoScalarLoad) loadABO(problem.Tao, state.inputs.ao, state.inputs.aoPtr);
     if (boScalarLoad) loadABO(problem.Tbo, state.inputs.bo, state.inputs.boPtr);
 
-    if (problem.hasCMXScale()) {
-        auto unrollM = strategy.unroll[LoopM];
-        auto unrollN = strategy.unroll[LoopN];
-        int n_elems = (unrollN / problem.cqGroupN) * (unrollM / problem.cqGroupM);
-        int n_regs = std::max(1, n_elems / GRF::bytes(hw));
-        state.tmpCScales = state.ra.alloc_range(n_regs);
-    }
-
     if (problem.postOps.cStochasticRound) {
         state.inputs.sroundSeed = state.ra.alloc_sub(DataType::ud, getHint(HintType::LongTerm, strategy));
         vector<Subregister> srcs;
@@ -291,6 +283,15 @@ void Generator<hw>::gemm(GEMMProblem &problem, GEMMStrategy &strategy, GEMMState
     if (problem.bqGroupN == 0) problem.bqGroupN = 1;
     if (problem.cqGroupM == 0) problem.cqGroupM = 1;
     if (problem.cqGroupN == 0) problem.cqGroupN = 1;
+
+    if (problem.hasCMXScale()) {
+        // Temporary storage for generated MX scales: the injector writes one
+        // dword-strided scale per M group per column before they are stored via C_scaleLayout.
+        if (problem.cqGroupM != 32 || problem.cqGroupN != 1) stub("Unexpected MX C scale groups");
+        if (strategy.unroll[LoopM] % problem.cqGroupM) stub();
+        int n_scales = (strategy.unroll[LoopM] / problem.cqGroupM) * strategy.unroll[LoopN];
+        state.tmpCScales = state.ra.alloc_range(GRF::bytesToGRFs(hw, n_scales * 4));
+    }
 
     ngen::Subregister ldbStrided, ldcStrided;
     ngen::Subregister fullN;

@@ -669,10 +669,8 @@ void Generator<hw>::gemmApplyMXScale(const GEMMProblem &problem, const GEMMStrat
 
     auto unrollM = strategy.unroll[LoopM];
     auto unrollN = strategy.unroll[LoopN];
-    int n_elems = (unrollN / problem.cqGroupN) * (unrollM / problem.cqGroupM);
-    int m_stride = state.C_scaleLayout[0].ld / 4;
-    int n_regs = std::max(1, (n_elems * m_stride) / GRF::bytes(hw));
-    auto tmpCScales = state.ra.alloc_range(n_regs);
+    // The store payload is read through C_scaleLayout, so the temp must cover it.
+    if (!state.tmpCScales.isValid() || state.tmpCScales.getLen() < state.C_scaleLayout.regs()) stub();
     vector<MaskAssignment> masks;
     // Without a row mask, an M-remainder tile may store its out-of-range group
     // rows past the end of the scale row, corrupting the next column's
@@ -694,9 +692,8 @@ void Generator<hw>::gemmApplyMXScale(const GEMMProblem &problem, const GEMMStrat
     } else
         loadMasks(masks, state.remainders, strategy, state);
 
-    problem.postOps.injectMXScale(this, state.ra, C_grfs, C_ngrf, tmpCScales.sub(hw, 0, ngen::DataType::ub), problem.Tc_ext.ngen(), unrollN);
-    storeMatrix(tmpCScales, state.C_scaleLayout, state.C_scaleAddrs, strategy, state);
-    state.ra.safeRelease(tmpCScales);
+    problem.postOps.injectMXScale(this, state.ra, C_grfs, C_ngrf, state.tmpCScales.sub(hw, 0, ngen::DataType::ub), problem.Tc_ext.ngen(), unrollN);
+    storeMatrix(state.tmpCScales, state.C_scaleLayout, state.C_scaleAddrs, strategy, state);
     safeReleaseMaskAssignments(masks, state);
 
     mark(lSkip);

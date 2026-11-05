@@ -348,7 +348,7 @@ struct GEMMState : public CommonState {
     ngen::Subregister isCompute;                            // ud
     ngen::GRF sysSumAll1s;                                  // Ta/Tb
     ngen::GRF betaCheckReturn;
-    ngen::GRF tmpCScales;                                   // Internal storage of dynamic scales
+    ngen::GRFRange tmpCScales;                              // Internal storage of dynamic scales
     ngen::Subregister statusFlagAddr;                        // uq
     bool systolicSumA = false, systolicSumB = false;
     bool fmaSumA = false, fmaSumB = false;                  // dp4a A/B sums computed in outerProductFMA
