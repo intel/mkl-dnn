@@ -25,45 +25,45 @@
 
 namespace rnn {
 
-void prepare_ws_fwd(const prb_t &prb, float *ws_fwd_buffer,
+void prepare_ws_fwd(const prb_t *prb, float *ws_fwd_buffer,
         AOC<float> &ws_src_layer, AOC<float> &ws_src_iter,
         AOC<float> &ws_src_iter_c, AOC<float> &ws_gates, AOC<float> &ws_ht) {
     float *ptr = ws_fwd_buffer;
-    ws_src_layer = AOC<float>(
-            ptr, prb.n_layer + 2, prb.n_dir(), prb.n_iter + 2, prb.mb, prb.wc);
-    ws_src_iter = AOC<float>(
-            ptr, prb.n_layer + 2, prb.n_dir(), prb.n_iter + 2, prb.mb, prb.wc);
+    ws_src_layer = AOC<float>(ptr, prb->n_layer + 2, prb->n_dir(),
+            prb->n_iter + 2, prb->mb, prb->wc);
+    ws_src_iter = AOC<float>(ptr, prb->n_layer + 2, prb->n_dir(),
+            prb->n_iter + 2, prb->mb, prb->wc);
 
     ptr += ws_src_iter.nelems();
-    ws_src_iter_c = AOC<float>(
-            ptr, prb.n_layer + 2, prb.n_dir(), prb.n_iter + 2, prb.mb, prb.wc);
+    ws_src_iter_c = AOC<float>(ptr, prb->n_layer + 2, prb->n_dir(),
+            prb->n_iter + 2, prb->mb, prb->wc);
 
-    ptr += prb.is_lstm() * ws_src_iter_c.nelems();
-    ws_gates = AOC<float>(ptr, prb.n_layer, prb.n_dir(), prb.n_iter, prb.mb,
-            prb.n_gates(), prb.dhc);
+    ptr += prb->is_lstm() * ws_src_iter_c.nelems();
+    ws_gates = AOC<float>(ptr, prb->n_layer, prb->n_dir(), prb->n_iter, prb->mb,
+            prb->n_gates(), prb->dhc);
 
-    ptr += prb.is_lstm_projection() * ws_gates.nelems();
+    ptr += prb->is_lstm_projection() * ws_gates.nelems();
     ws_ht = AOC<float>(
-            ptr, prb.n_layer, prb.n_dir(), prb.n_iter, prb.mb, prb.wc);
+            ptr, prb->n_layer, prb->n_dir(), prb->n_iter, prb->mb, prb->wc);
 }
 
 /******************************************************************************/
 /******************************* Copy Routines ********************************/
 /******************************************************************************/
-void prepare_projection_compensation(const prb_t &prb,
+void prepare_projection_compensation(const prb_t *prb,
         float *weights_projection_compensation_, const args_t &args) {
     const dnn_mem_t &weights_projection_
             = args.find(DNNL_ARG_WEIGHTS_PROJECTION);
 
     AOC<float> weights_projection_compensation(weights_projection_compensation_,
-            prb.n_layer, prb.n_dir(), prb.dic);
-    AOC<const float> weights_projection(
-            weights_projection_, prb.n_layer, prb.n_dir(), prb.dhc, prb.dic);
-    for (int layer = 0; layer < prb.n_layer; ++layer)
-        for (int dir = 0; dir < prb.n_dir(); ++dir)
-            for (int dic = 0; dic < prb.dic; ++dic) {
+            prb->n_layer, prb->n_dir(), prb->dic);
+    AOC<const float> weights_projection(weights_projection_, prb->n_layer,
+            prb->n_dir(), prb->dhc, prb->dic);
+    for (int layer = 0; layer < prb->n_layer; ++layer)
+        for (int dir = 0; dir < prb->n_dir(); ++dir)
+            for (int dic = 0; dic < prb->dic; ++dic) {
                 float weights_compensation = 0;
-                for (int dhc = 0; dhc < prb.dhc; ++dhc)
+                for (int dhc = 0; dhc < prb->dhc; ++dhc)
                     weights_compensation
                             += weights_projection(layer, dir, dhc, dic);
                 weights_projection_compensation(layer, dir, dic)
@@ -72,42 +72,42 @@ void prepare_projection_compensation(const prb_t &prb,
 }
 
 void prepare_bias(
-        const prb_t &prb, float *bias_with_compensation_, const args_t &args) {
+        const prb_t *prb, float *bias_with_compensation_, const args_t &args) {
     const dnn_mem_t &bias_ = args.find(DNNL_ARG_BIAS);
     const dnn_mem_t &weights_layer_ = args.find(DNNL_ARG_WEIGHTS_LAYER);
     const dnn_mem_t &weights_iter_ = args.find(DNNL_ARG_WEIGHTS_ITER);
 
-    AOC<const float> weights_layer(weights_layer_, prb.n_layer, prb.n_dir(),
-            prb.slc, prb.n_gates(), prb.dhc);
-    AOC<const float> weights_iter(weights_iter_, prb.n_layer, prb.n_dir(),
-            prb.sic, prb.n_gates(), prb.dhc);
+    AOC<const float> weights_layer(weights_layer_, prb->n_layer, prb->n_dir(),
+            prb->slc, prb->n_gates(), prb->dhc);
+    AOC<const float> weights_iter(weights_iter_, prb->n_layer, prb->n_dir(),
+            prb->sic, prb->n_gates(), prb->dhc);
 
     AOC<const float> bias(
-            bias_, prb.n_layer, prb.n_dir(), prb.n_gates(), prb.dhc);
-    AOC<float> bias_with_compensation(bias_with_compensation_, prb.n_layer,
-            prb.n_dir(), prb.n_gates(), prb.dhc);
+            bias_, prb->n_layer, prb->n_dir(), prb->n_gates(), prb->dhc);
+    AOC<float> bias_with_compensation(bias_with_compensation_, prb->n_layer,
+            prb->n_dir(), prb->n_gates(), prb->dhc);
 
-    for (int layer = 0; layer < prb.n_layer; ++layer)
-        for (int dir = 0; dir < prb.n_dir(); ++dir)
-            for (int gate = 0; gate < prb.n_gates(); ++gate)
-                for (int dhc = 0; dhc < prb.dhc; ++dhc) {
+    for (int layer = 0; layer < prb->n_layer; ++layer)
+        for (int dir = 0; dir < prb->n_dir(); ++dir)
+            for (int gate = 0; gate < prb->n_gates(); ++gate)
+                for (int dhc = 0; dhc < prb->dhc; ++dhc) {
                     float weights_compensation = 0;
-                    for (int sic = 0; sic < prb.sic; ++sic)
+                    for (int sic = 0; sic < prb->sic; ++sic)
                         weights_compensation
                                 += weights_iter(layer, dir, sic, gate, dhc);
-                    for (int slc = 0; slc < prb.slc; ++slc)
+                    for (int slc = 0; slc < prb->slc; ++slc)
                         weights_compensation
                                 += weights_layer(layer, dir, slc, gate, dhc);
 
-                    float scale = prb.data_scale
-                            * prb.get_wei_scale(gate * prb.dhc + dhc);
+                    float scale = prb->data_scale
+                            * prb->get_wei_scale(gate * prb->dhc + dhc);
                     bias_with_compensation(layer, dir, gate, dhc)
                             = bias(layer, dir, gate, dhc)
-                            - weights_compensation * prb.data_shift / scale;
+                            - weights_compensation * prb->data_shift / scale;
                 }
 }
 
-void copy_init_fwd(const prb_t &prb, const AOC<float> &ws_src_layer,
+void copy_init_fwd(const prb_t *prb, const AOC<float> &ws_src_layer,
         const AOC<float> &ws_src_iter, const AOC<float> &ws_src_iter_c,
         const args_t &args, rnn_iter_direction_t iter_dir,
         rnn_layer_direction_t lay_dir, int64_t dir_val) {
@@ -115,41 +115,42 @@ void copy_init_fwd(const prb_t &prb, const AOC<float> &ws_src_layer,
     const dnn_mem_t &src_iter_ = args.find(DNNL_ARG_SRC_ITER);
     const dnn_mem_t &src_iter_c_ = args.find(DNNL_ARG_SRC_ITER_C);
 
-    AOC<const float> src_layer(src_layer_, prb.n_iter, prb.mb * prb.slc);
+    AOC<const float> src_layer(src_layer_, prb->n_iter, prb->mb * prb->slc);
     AOC<const float> src_iter(
-            src_iter_, prb.n_layer, prb.n_dir(), prb.mb * prb.sic);
+            src_iter_, prb->n_layer, prb->n_dir(), prb->mb * prb->sic);
     AOC<const float> src_iter_c(
-            src_iter_c_, prb.n_layer, prb.n_dir(), prb.mb * prb.dhc);
+            src_iter_c_, prb->n_layer, prb->n_dir(), prb->mb * prb->dhc);
 
-    int64_t lay_dest = (lay_dir == bottom2top) ? 0 : prb.n_layer + 1;
-    int64_t it_dest = (iter_dir == left2right) ? 0 : prb.n_iter + 1;
+    int64_t lay_dest = (lay_dir == bottom2top) ? 0 : prb->n_layer + 1;
+    int64_t it_dest = (iter_dir == left2right) ? 0 : prb->n_iter + 1;
 
     // Copy src_layer
-    for (int64_t it = 0; it < prb.n_iter; it++) {
-        copy(prb.mb, prb.slc, prb.slc, prb.wc, &src_layer(it, 0),
+    for (int64_t it = 0; it < prb->n_iter; it++) {
+        copy(prb->mb, prb->slc, prb->slc, prb->wc, &src_layer(it, 0),
                 &ws_src_layer(lay_dest, dir_val, it + 1, 0, 0));
-        if (prb.is_int8())
-            data_q10n(prb.mb, prb.slc, prb.wc,
+        if (prb->is_int8())
+            data_q10n(prb->mb, prb->slc, prb->wc,
                     &ws_src_layer(lay_dest, dir_val, it + 1, 0, 0),
-                    prb.data_scale, prb.data_shift);
+                    prb->data_scale, prb->data_shift);
     }
 
     // Copy src_iter (and src_iter_c)
-    for (int64_t lay = 0; lay < prb.n_layer; lay++) {
-        copy(prb.mb, prb.sic, prb.sic, prb.wc, &src_iter(lay, dir_val, 0),
+    for (int64_t lay = 0; lay < prb->n_layer; lay++) {
+        copy(prb->mb, prb->sic, prb->sic, prb->wc, &src_iter(lay, dir_val, 0),
                 &ws_src_iter(lay + 1, dir_val, it_dest, 0, 0));
-        if (prb.is_int8())
-            data_q10n(prb.mb, prb.sic, prb.wc,
+        if (prb->is_int8())
+            data_q10n(prb->mb, prb->sic, prb->wc,
                     &ws_src_iter(lay + 1, dir_val, it_dest, 0, 0),
-                    prb.data_scale, prb.data_shift);
+                    prb->data_scale, prb->data_shift);
 
-        if (prb.alg == VANILLA_LSTM)
-            copy(prb.mb, prb.dhc, prb.dhc, prb.wc, &src_iter_c(lay, dir_val, 0),
+        if (prb->alg == VANILLA_LSTM)
+            copy(prb->mb, prb->dhc, prb->dhc, prb->wc,
+                    &src_iter_c(lay, dir_val, 0),
                     &ws_src_iter_c(lay + 1, dir_val, it_dest, 0, 0));
     }
 }
 
-void copy_res_fwd(const prb_t &prb, const args_t &args,
+void copy_res_fwd(const prb_t *prb, const args_t &args,
         const AOC<const float> &ws_src_layer,
         const AOC<const float> &ws_src_iter,
         const AOC<const float> &ws_src_iter_c, rnn_iter_direction_t iter_dir,
@@ -158,28 +159,30 @@ void copy_res_fwd(const prb_t &prb, const args_t &args,
     const dnn_mem_t &dst_iter_ = args.find(DNNL_ARG_DST_ITER);
     const dnn_mem_t &dst_iter_c_ = args.find(DNNL_ARG_DST_ITER_C);
 
-    AOC<float> dst_iter(dst_iter_, prb.n_layer, prb.n_dir(), prb.mb, prb.dic);
+    AOC<float> dst_iter(
+            dst_iter_, prb->n_layer, prb->n_dir(), prb->mb, prb->dic);
     AOC<float> dst_iter_c(
-            dst_iter_c_, prb.n_layer, prb.n_dir(), prb.mb, prb.dhc);
-    AOC<float> dst_layer(dst_layer_, prb.n_iter, prb.mb, prb.dlc(PRIMITIVE));
-    const bool is_layer_deq = (prb.is_u8() && prb.cfg[DST_LAYER].dt != dnnl_u8)
-            || (prb.is_s8() && prb.cfg[DST_LAYER].dt != dnnl_s8);
-    const bool is_iter_deq = (prb.is_u8() && prb.cfg[DST_ITER].dt != dnnl_u8)
-            || (prb.is_s8() && prb.cfg[DST_ITER].dt != dnnl_s8);
+            dst_iter_c_, prb->n_layer, prb->n_dir(), prb->mb, prb->dhc);
+    AOC<float> dst_layer(dst_layer_, prb->n_iter, prb->mb, prb->dlc(PRIMITIVE));
+    const bool is_layer_deq
+            = (prb->is_u8() && prb->cfg[DST_LAYER].dt != dnnl_u8)
+            || (prb->is_s8() && prb->cfg[DST_LAYER].dt != dnnl_s8);
+    const bool is_iter_deq = (prb->is_u8() && prb->cfg[DST_ITER].dt != dnnl_u8)
+            || (prb->is_s8() && prb->cfg[DST_ITER].dt != dnnl_s8);
     // Copy dst_layer
-    for (int64_t it = 0; it < prb.n_iter; it++) {
-        for (int64_t nb = 0; nb < prb.mb; nb++) {
-            auto from = &ws_src_layer(prb.n_layer, dir_val, it + 1, nb, 0);
+    for (int64_t it = 0; it < prb->n_iter; it++) {
+        for (int64_t nb = 0; nb < prb->mb; nb++) {
+            auto from = &ws_src_layer(prb->n_layer, dir_val, it + 1, nb, 0);
             auto to = &dst_layer(
-                    it, nb, action == action_concat ? prb.dlc(CELL) : 0);
-            copy(1, prb.dlc(CELL), prb.wc, prb.dlc(PRIMITIVE), from, to, action,
-                    prb.is_int8());
+                    it, nb, action == action_concat ? prb->dlc(CELL) : 0);
+            copy(1, prb->dlc(CELL), prb->wc, prb->dlc(PRIMITIVE), from, to,
+                    action, prb->is_int8());
 
             if (is_layer_deq) {
-                float data_shift = prb.data_shift;
+                float data_shift = prb->data_shift;
                 bool do_deq10n = true;
 
-                if (prb.direction == dnnl_bidirectional_sum) {
+                if (prb->direction == dnnl_bidirectional_sum) {
                     // In `bidir_sum` case, we need to dequantize data only
                     // after the final summation. Also, since we sum two shifted
                     // tensors, we need to enlarge the shift by 2x.
@@ -188,28 +191,29 @@ void copy_res_fwd(const prb_t &prb, const args_t &args,
                 }
 
                 if (do_deq10n)
-                    data_deq10n(1, prb.dlc(CELL), prb.dlc(PRIMITIVE), to,
-                            prb.data_scale, data_shift);
+                    data_deq10n(1, prb->dlc(CELL), prb->dlc(PRIMITIVE), to,
+                            prb->data_scale, data_shift);
             }
         }
     }
 
-    int64_t it_source = (iter_dir == left2right) ? prb.n_iter : 1;
+    int64_t it_source = (iter_dir == left2right) ? prb->n_iter : 1;
 
     // Copy dst_iter (and dst_iter_c)
-    for (int64_t lay = 0; lay < prb.n_layer; lay++) {
-        if (prb.alg == VANILLA_LSTM) {
-            copy(prb.mb, prb.dhc, prb.wc, prb.dhc,
+    for (int64_t lay = 0; lay < prb->n_layer; lay++) {
+        if (prb->alg == VANILLA_LSTM) {
+            copy(prb->mb, prb->dhc, prb->wc, prb->dhc,
                     &ws_src_iter_c(lay + 1, dir_val, it_source, 0, 0),
                     &dst_iter_c(lay, dir_val, 0, 0));
         }
 
-        copy(prb.mb, prb.dic, prb.wc, prb.dic,
+        copy(prb->mb, prb->dic, prb->wc, prb->dic,
                 &ws_src_iter(lay + 1, dir_val, it_source, 0, 0),
                 &dst_iter(lay, dir_val, 0, 0));
         if (is_iter_deq)
-            data_deq10n(prb.mb, prb.dic, prb.dic, &dst_iter(lay, dir_val, 0, 0),
-                    prb.data_scale, prb.data_shift);
+            data_deq10n(prb->mb, prb->dic, prb->dic,
+                    &dst_iter(lay, dir_val, 0, 0), prb->data_scale,
+                    prb->data_shift);
     }
 }
 
@@ -217,7 +221,7 @@ void copy_res_fwd(const prb_t &prb, const args_t &args,
 /*************************** Computation Routines *****************************/
 /******************************************************************************/
 
-void rnn_cell_fwd(const prb_t &prb, float *dst_layer, float *dst_iter,
+void rnn_cell_fwd(const prb_t *prb, float *dst_layer, float *dst_iter,
         float *dst_iter_c, float *gates, float *ht, const float *weights_layer,
         const float *weights_iter, const float *weights_peephole,
         const float *weights_projection,
@@ -225,9 +229,9 @@ void rnn_cell_fwd(const prb_t &prb, float *dst_layer, float *dst_iter,
         const float *src_layer, const float *src_layer_attention,
         const float *src_iter, const float *src_iter_c,
         float *cell_scratchpad_) {
-    if (prb.alg != VANILLA_LSTM) assert(dst_layer == dst_iter);
+    if (prb->alg != VANILLA_LSTM) assert(dst_layer == dst_iter);
 
-    switch (prb.alg) {
+    switch (prb->alg) {
         case VANILLA_GRU:
         case VANILLA_AUGRU:
             gru_fwd(prb, dst_layer, gates, weights_layer, weights_iter, bias,
@@ -253,7 +257,7 @@ void rnn_cell_fwd(const prb_t &prb, float *dst_layer, float *dst_iter,
     }
 }
 
-void rnn_linear_fwd(const prb_t &prb, const args_t &args,
+void rnn_linear_fwd(const prb_t *prb, const args_t &args,
         const AOC<float> &ws_src_layer, const AOC<float> &ws_src_iter,
         const AOC<float> &ws_src_iter_c, const AOC<float> &ws_gates,
         const AOC<float> &ws_ht) {
@@ -267,41 +271,41 @@ void rnn_linear_fwd(const prb_t &prb, const args_t &args,
 
     float *bias_ptr = (float *)bias_;
 
-    bool is_lbr = prb.alg == LBR_GRU || prb.alg == LBR_AUGRU;
+    bool is_lbr = prb->alg == LBR_GRU || prb->alg == LBR_AUGRU;
 
     float *bias_with_compensation = nullptr;
     float *weights_projection_compensation_ = nullptr;
-    if (prb.is_int8()) {
-        bias_with_compensation = new float[prb.n_layer * prb.n_dir()
-                * (prb.n_gates() + is_lbr) * prb.dhc];
+    if (prb->is_int8()) {
+        bias_with_compensation = new float[prb->n_layer * prb->n_dir()
+                * (prb->n_gates() + is_lbr) * prb->dhc];
         prepare_bias(prb, bias_with_compensation, args);
         bias_ptr = bias_with_compensation;
-        if (prb.is_lstm_projection()) {
+        if (prb->is_lstm_projection()) {
             weights_projection_compensation_
-                    = new float[prb.n_layer * prb.n_dir() * prb.dic];
+                    = new float[prb->n_layer * prb->n_dir() * prb->dic];
             prepare_projection_compensation(
                     prb, weights_projection_compensation_, args);
         }
     }
 
     AOC<const float> weights_peephole(
-            weights_peephole_, prb.n_layer, prb.n_dir(), 3 * prb.dhc);
-    AOC<const float> weights_projection(
-            weights_projection_, prb.n_layer, prb.n_dir(), prb.dhc * prb.dic);
+            weights_peephole_, prb->n_layer, prb->n_dir(), 3 * prb->dhc);
+    AOC<const float> weights_projection(weights_projection_, prb->n_layer,
+            prb->n_dir(), prb->dhc * prb->dic);
     AOC<const float> weights_projection_compensation(
-            weights_projection_compensation_, prb.n_layer, prb.n_dir(),
-            prb.dic);
-    AOC<const float> bias(bias_ptr, prb.n_layer, prb.n_dir(),
-            (prb.n_gates() + is_lbr) * prb.dhc);
-    AOC<const float> weights_layer(weights_layer_, prb.n_layer, prb.n_dir(),
-            prb.n_gates() * prb.dhc, prb.slc);
-    AOC<const float> weights_iter(weights_iter_, prb.n_layer, prb.n_dir(),
-            prb.n_gates() * prb.dhc, prb.sic);
+            weights_projection_compensation_, prb->n_layer, prb->n_dir(),
+            prb->dic);
+    AOC<const float> bias(bias_ptr, prb->n_layer, prb->n_dir(),
+            (prb->n_gates() + is_lbr) * prb->dhc);
+    AOC<const float> weights_layer(weights_layer_, prb->n_layer, prb->n_dir(),
+            prb->n_gates() * prb->dhc, prb->slc);
+    AOC<const float> weights_iter(weights_iter_, prb->n_layer, prb->n_dir(),
+            prb->n_gates() * prb->dhc, prb->sic);
 
     AOC<const float> src_layer_attention(
-            src_layer_attention_, prb.n_iter, prb.mb, 1);
+            src_layer_attention_, prb->n_iter, prb->mb, 1);
 
-    int64_t cell_scratchpad_size = is_lbr * prb.mb * prb.n_gates() * prb.dhc;
+    int64_t cell_scratchpad_size = is_lbr * prb->mb * prb->n_gates() * prb->dhc;
     float *cell_scratchpad_
             = (float *)zmalloc(cell_scratchpad_size * sizeof(float), 4096);
     SAFE_V(cell_scratchpad_ != nullptr ? OK : FAIL);
@@ -320,12 +324,12 @@ void rnn_linear_fwd(const prb_t &prb, const args_t &args,
                 iter_dir, lay_dir, dir_val);
 
         // We run the grid of computation
-        for (int64_t il = 0; il < prb.n_layer; il++) {
-            for (int64_t it = 0; it < prb.n_iter; it++) {
+        for (int64_t il = 0; il < prb->n_layer; il++) {
+            for (int64_t it = 0; it < prb->n_iter; it++) {
                 BENCHDNN_PRINT(80,
                         "==== layer = " IFMT " iter = " IFMT " ===\n", il, it);
                 int64_t iter
-                        = (iter_dir == left2right) ? it + 1 : prb.n_iter - it;
+                        = (iter_dir == left2right) ? it + 1 : prb->n_iter - it;
                 int64_t prev_iter
                         = (iter_dir == left2right) ? iter - 1 : iter + 1;
                 int64_t lay = il + 1;
@@ -356,7 +360,7 @@ void rnn_linear_fwd(const prb_t &prb, const args_t &args,
                 iter_dir, lay_dir, dir_val, action);
     };
 
-    switch (prb.direction) {
+    switch (prb->direction) {
         case dnnl_unidirectional_left2right:
             process_direction(left2right, bottom2top, 0, action_copy);
             break;
@@ -379,8 +383,8 @@ void rnn_linear_fwd(const prb_t &prb, const args_t &args,
     delete[] weights_projection_compensation_;
 }
 
-void compute_ref_fwd(const prb_t &prb, const args_t &args) {
-    float *ws_fwd_buffer = (float *)zmalloc(prb.get_ws_size(FLAG_FWD), 64);
+void compute_ref_fwd(const prb_t *prb, const args_t &args) {
+    float *ws_fwd_buffer = (float *)zmalloc(prb->get_ws_size(FLAG_FWD), 64);
 
     AOC<float> ws_src_layer, ws_src_iter, ws_src_iter_c, ws_gates, ws_ht;
     prepare_ws_fwd(prb, ws_fwd_buffer, ws_src_layer, ws_src_iter, ws_src_iter_c,

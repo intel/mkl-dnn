@@ -318,7 +318,7 @@ std::string prb_t::set_repro_line() {
 }
 
 dnnl_status_t init_rnn_fwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
-        const prb_t &prb, dnnl_prop_kind_t prop_kind,
+        const prb_t *prb, dnnl_prop_kind_t prop_kind,
         const_dnnl_memory_desc_t src_layer_d,
         const_dnnl_memory_desc_t src_iter_d,
         const_dnnl_memory_desc_t src_iter_c_d,
@@ -331,50 +331,51 @@ dnnl_status_t init_rnn_fwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
         const_dnnl_memory_desc_t dst_iter_d,
         const_dnnl_memory_desc_t dst_iter_c_d, dnnl_primitive_attr_t attr,
         res_t *res) {
-    dnnl_alg_kind_t kind = alg2kind(prb.alg);
-    dnnl_alg_kind_t f = activation2kind(prb.activation);
+    dnnl_alg_kind_t kind = alg2kind(prb->alg);
+    dnnl_alg_kind_t f = activation2kind(prb->activation);
 
     switch (kind) {
         case dnnl_vanilla_rnn:
             TIME_C_PD(DNN_SAFE_STATUS(
                     dnnl_vanilla_rnn_forward_primitive_desc_create(pd, engine,
-                            prop_kind, f, prb.direction, src_layer_d,
+                            prop_kind, f, prb->direction, src_layer_d,
                             src_iter_d, weights_layer_d, weights_iter_d, bias_d,
-                            dst_layer_d, dst_iter_d, prb.flags, prb.alpha,
-                            prb.beta, attr)));
+                            dst_layer_d, dst_iter_d, prb->flags, prb->alpha,
+                            prb->beta, attr)));
             break;
         case dnnl_vanilla_lstm:
             TIME_C_PD(DNN_SAFE_STATUS(dnnl_lstm_forward_primitive_desc_create(
-                    pd, engine, prop_kind, prb.direction, src_layer_d,
+                    pd, engine, prop_kind, prb->direction, src_layer_d,
                     src_iter_d, src_iter_c_d, weights_layer_d, weights_iter_d,
                     weights_peephole_d, weights_projection_d, bias_d,
-                    dst_layer_d, dst_iter_d, dst_iter_c_d, prb.flags, attr)));
+                    dst_layer_d, dst_iter_d, dst_iter_c_d, prb->flags, attr)));
             break;
         case dnnl_vanilla_gru:
             TIME_C_PD(DNN_SAFE_STATUS(dnnl_gru_forward_primitive_desc_create(pd,
-                    engine, prop_kind, prb.direction, src_layer_d, src_iter_d,
+                    engine, prop_kind, prb->direction, src_layer_d, src_iter_d,
                     weights_layer_d, weights_iter_d, bias_d, dst_layer_d,
-                    dst_iter_d, prb.flags, attr)));
+                    dst_iter_d, prb->flags, attr)));
             break;
         case dnnl_lbr_gru:
             TIME_C_PD(
                     DNN_SAFE_STATUS(dnnl_lbr_gru_forward_primitive_desc_create(
-                            pd, engine, prop_kind, prb.direction, src_layer_d,
+                            pd, engine, prop_kind, prb->direction, src_layer_d,
                             src_iter_d, weights_layer_d, weights_iter_d, bias_d,
-                            dst_layer_d, dst_iter_d, prb.flags, attr)));
+                            dst_layer_d, dst_iter_d, prb->flags, attr)));
             break;
         case dnnl_vanilla_augru:
             TIME_C_PD(DNN_SAFE_STATUS(dnnl_augru_forward_primitive_desc_create(
-                    pd, engine, prop_kind, prb.direction, src_layer_d,
+                    pd, engine, prop_kind, prb->direction, src_layer_d,
                     src_iter_d, attention_d, weights_layer_d, weights_iter_d,
-                    bias_d, dst_layer_d, dst_iter_d, prb.flags, attr)));
+                    bias_d, dst_layer_d, dst_iter_d, prb->flags, attr)));
             break;
         case dnnl_lbr_augru:
             TIME_C_PD(DNN_SAFE_STATUS(
                     dnnl_lbr_augru_forward_primitive_desc_create(pd, engine,
-                            prop_kind, prb.direction, src_layer_d, src_iter_d,
+                            prop_kind, prb->direction, src_layer_d, src_iter_d,
                             attention_d, weights_layer_d, weights_iter_d,
-                            bias_d, dst_layer_d, dst_iter_d, prb.flags, attr)));
+                            bias_d, dst_layer_d, dst_iter_d, prb->flags,
+                            attr)));
             break;
         default: DNN_SAFE_STATUS(dnnl_unimplemented);
     }
@@ -382,7 +383,7 @@ dnnl_status_t init_rnn_fwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
 }
 
 dnnl_status_t init_rnn_bwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
-        const prb_t &prb, dnnl_prop_kind_t prop_kind,
+        const prb_t *prb, dnnl_prop_kind_t prop_kind,
         const_dnnl_memory_desc_t src_layer_d,
         const_dnnl_memory_desc_t src_iter_d,
         const_dnnl_memory_desc_t src_iter_c_d,
@@ -408,70 +409,71 @@ dnnl_status_t init_rnn_bwd_pd(dnnl_primitive_desc_t *pd, dnnl_engine_t engine,
         const_dnnl_memory_desc_t diff_dst_iter_c_d,
         const_dnnl_primitive_desc_t hint, dnnl_primitive_attr_t attr,
         res_t *res) {
-    dnnl_alg_kind_t kind = alg2kind(prb.alg);
-    dnnl_alg_kind_t f = activation2kind(prb.activation);
+    dnnl_alg_kind_t kind = alg2kind(prb->alg);
+    dnnl_alg_kind_t f = activation2kind(prb->activation);
 
     switch (kind) {
         case dnnl_vanilla_rnn:
             TIME_C_PD(DNN_SAFE_STATUS(
                     dnnl_vanilla_rnn_backward_primitive_desc_create(pd, engine,
-                            prop_kind, f, prb.direction, src_layer_d,
+                            prop_kind, f, prb->direction, src_layer_d,
                             src_iter_d, weights_layer_d, weights_iter_d, bias_d,
                             dst_layer_d, dst_iter_d, diff_src_layer_d,
                             diff_src_iter_d, diff_weights_layer_d,
                             diff_weights_iter_d, diff_bias_d, diff_dst_layer_d,
-                            diff_dst_iter_d, prb.flags, prb.alpha, prb.beta,
+                            diff_dst_iter_d, prb->flags, prb->alpha, prb->beta,
                             hint, attr)));
             break;
         case dnnl_vanilla_lstm:
             TIME_C_PD(DNN_SAFE_STATUS(dnnl_lstm_backward_primitive_desc_create(
-                    pd, engine, prop_kind, prb.direction, src_layer_d,
+                    pd, engine, prop_kind, prb->direction, src_layer_d,
                     src_iter_d, src_iter_c_d, weights_layer_d, weights_iter_d,
                     weights_peephole_d, weights_projection_d, bias_d,
                     dst_layer_d, dst_iter_d, dst_iter_c_d, diff_src_layer_d,
                     diff_src_iter_d, diff_src_iter_c_d, diff_weights_layer_d,
                     diff_weights_iter_d, diff_weights_peephole_d,
                     diff_weights_projection_d, diff_bias_d, diff_dst_layer_d,
-                    diff_dst_iter_d, diff_dst_iter_c_d, prb.flags, hint,
+                    diff_dst_iter_d, diff_dst_iter_c_d, prb->flags, hint,
                     attr)));
             break;
         case dnnl_vanilla_gru:
             TIME_C_PD(DNN_SAFE_STATUS(dnnl_gru_backward_primitive_desc_create(
-                    pd, engine, prop_kind, prb.direction, src_layer_d,
+                    pd, engine, prop_kind, prb->direction, src_layer_d,
                     src_iter_d, weights_layer_d, weights_iter_d, bias_d,
                     dst_layer_d, dst_iter_d, diff_src_layer_d, diff_src_iter_d,
                     diff_weights_layer_d, diff_weights_iter_d, diff_bias_d,
-                    diff_dst_layer_d, diff_dst_iter_d, prb.flags, hint, attr)));
+                    diff_dst_layer_d, diff_dst_iter_d, prb->flags, hint,
+                    attr)));
             break;
         case dnnl_lbr_gru:
             TIME_C_PD(
                     DNN_SAFE_STATUS(dnnl_lbr_gru_backward_primitive_desc_create(
-                            pd, engine, prop_kind, prb.direction, src_layer_d,
+                            pd, engine, prop_kind, prb->direction, src_layer_d,
                             src_iter_d, weights_layer_d, weights_iter_d, bias_d,
                             dst_layer_d, dst_iter_d, diff_src_layer_d,
                             diff_src_iter_d, diff_weights_layer_d,
                             diff_weights_iter_d, diff_bias_d, diff_dst_layer_d,
-                            diff_dst_iter_d, prb.flags, hint, attr)));
+                            diff_dst_iter_d, prb->flags, hint, attr)));
             break;
         case dnnl_vanilla_augru:
             TIME_C_PD(DNN_SAFE_STATUS(dnnl_augru_backward_primitive_desc_create(
-                    pd, engine, prop_kind, prb.direction, src_layer_d,
+                    pd, engine, prop_kind, prb->direction, src_layer_d,
                     src_iter_d, attention_d, weights_layer_d, weights_iter_d,
                     bias_d, dst_layer_d, dst_iter_d, diff_src_layer_d,
                     diff_src_iter_d, diff_attention_d, diff_weights_layer_d,
                     diff_weights_iter_d, diff_bias_d, diff_dst_layer_d,
-                    diff_dst_iter_d, prb.flags, hint, attr)));
+                    diff_dst_iter_d, prb->flags, hint, attr)));
             break;
         case dnnl_lbr_augru:
             TIME_C_PD(DNN_SAFE_STATUS(
                     dnnl_lbr_augru_backward_primitive_desc_create(pd, engine,
-                            prop_kind, prb.direction, src_layer_d, src_iter_d,
+                            prop_kind, prb->direction, src_layer_d, src_iter_d,
                             attention_d, weights_layer_d, weights_iter_d,
                             bias_d, dst_layer_d, dst_iter_d, diff_src_layer_d,
                             diff_src_iter_d, diff_attention_d,
                             diff_weights_layer_d, diff_weights_iter_d,
                             diff_bias_d, diff_dst_layer_d, diff_dst_iter_d,
-                            prb.flags, hint, attr)));
+                            prb->flags, hint, attr)));
             break;
         default: DNN_SAFE_STATUS(dnnl_unimplemented);
     }
@@ -484,38 +486,38 @@ void init_buffer(float *buf, int64_t size, float value) {
 }
 
 // If needed, dequantize u8 data to f32 via data scale and shift
-float maybe_deq(const prb_t &prb, const float in) {
-    if (!prb.cfg.is_int8()) return in;
-    return (in - prb.data_shift) * (1.0f / prb.data_scale);
+float maybe_deq(const prb_t *prb, const float in) {
+    if (!prb->cfg.is_int8()) return in;
+    return (in - prb->data_shift) * (1.0f / prb->data_scale);
 }
 
 // If needed, dequantize s32 accumulators to f32 via data and weights scales
 // (no data shift is needed as it is handled by the compensation in the bias)
-float maybe_deq(const prb_t &prb, const float in, int64_t oc) {
-    if (!prb.cfg.is_int8()) return in;
-    float scale = prb.get_wei_scale(oc);
-    return in * (1.0f / (scale * prb.data_scale));
+float maybe_deq(const prb_t *prb, const float in, int64_t oc) {
+    if (!prb->cfg.is_int8()) return in;
+    float scale = prb->get_wei_scale(oc);
+    return in * (1.0f / (scale * prb->data_scale));
 }
 
 // If needed, dequantize s32 accumulators to f32 via data, weights scales
 // and compensation.
 float maybe_deq(
-        const prb_t &prb, const float in, float scale, float compensation) {
-    if (!prb.cfg.is_int8()) return in;
-    return (in - compensation * prb.data_shift)
-            * (1.0f / (scale * prb.data_scale));
+        const prb_t *prb, const float in, float scale, float compensation) {
+    if (!prb->cfg.is_int8()) return in;
+    return (in - compensation * prb->data_shift)
+            * (1.0f / (scale * prb->data_scale));
 }
 
 float maybe_deq_proj(
-        const prb_t &prb, const float in, float compensation, int64_t oc) {
-    return maybe_deq(prb, in, prb.get_wei_proj_scale(oc), compensation);
+        const prb_t *prb, const float in, float compensation, int64_t oc) {
+    return maybe_deq(prb, in, prb->get_wei_proj_scale(oc), compensation);
 }
 
-float maybe_q(const prb_t &prb, float h) {
-    if (!prb.cfg.is_int8()) return h;
-    float fp = prb.data_scale * h + prb.data_shift;
-    if (fp > prb.cfg[SRC_LAYER].max) fp = prb.cfg[SRC_LAYER].max;
-    if (fp < prb.cfg[SRC_LAYER].min) fp = prb.cfg[SRC_LAYER].min;
+float maybe_q(const prb_t *prb, float h) {
+    if (!prb->cfg.is_int8()) return h;
+    float fp = prb->data_scale * h + prb->data_shift;
+    if (fp > prb->cfg[SRC_LAYER].max) fp = prb->cfg[SRC_LAYER].max;
+    if (fp < prb->cfg[SRC_LAYER].min) fp = prb->cfg[SRC_LAYER].min;
     fp = mxcsr_cvt(fp);
     return fp;
 }
