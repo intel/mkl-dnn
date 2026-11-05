@@ -177,6 +177,7 @@ private:
     std::string version_;
     std::string fpmath_mode_;
     std::string fpmath_mode_apply_to_int_;
+    std::string deterministic_;
     std::vector<size_t> input_ports_;
     std::vector<size_t> output_ports_;
 

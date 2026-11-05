@@ -421,6 +421,7 @@ void deserialized_graph_t::load(const std::string &pass_config_json) {
     helper.declare_field("fpmath_mode", &fpmath_mode_);
     helper.declare_field(
             "fpmath_mode_apply_to_int", &fpmath_mode_apply_to_int_);
+    helper.declare_field("deterministic", &deterministic_);
     helper.declare_field("input_ports", &input_ports_);
     helper.declare_field("output_ports", &output_ports_);
     helper.read_fields(&read);
@@ -650,6 +651,7 @@ dnnl::graph::graph deserialized_graph_t::to_graph(
     g.set_fpmath_mode(static_cast<dnnl::fpmath_mode>(
                               str2fpmath_mode(fpmath_mode.mode_.c_str())),
             fpmath_mode.apply_to_int_);
+    g.set_deterministic(deterministic_ == "true");
 
     for (const auto &aop : ops_) {
         try {
