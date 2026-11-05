@@ -89,24 +89,28 @@ enum class schedule_t { looped, unrolled };
 
 // Loop nest configuration.
 //
-//   schedule    - how the loop nest is emitted
-//   batch_kind  - how a batch element gives the address of its A and B
-//   max_bs      - maximum batch size known at IR generation time
-//   load_dim    - N, the columns of C
-//   lda/ldb/ldc - leading dimensions of A, B, and C, in elements
-//   bd_block    - M rows per block
-//   ld_block    - N elements per vector register or tile
-//   ld_block2   - vector registers or tiles of N per block
-//   rd_block    - K elements reduced per K block
-//   bdb         - number of full M blocks
-//   ldb2        - number of full N blocks
-//   rdb         - number of full K blocks
-//   bdb_tail    - M rows left over after the full M blocks
-//   ldb2_tail   - full N registers or tiles left over after the full N blocks
-//   ldb_tail    - N columns left over after every full N register
-//   rdb_tail    - K elements left over after the full K blocks
+//   schedule       - how the loop nest is emitted
+//   innermost_loop - which of the M and N levels the unrolled schedule emits
+//                    inside the other
+//   batch_kind     - how a batch element gives the address of its A and B
+//   max_bs         - maximum batch size known at IR generation time
+//   load_dim       - N, the columns of C
+//   lda/ldb/ldc    - leading dimensions of A, B, and C, in elements
+//   bd_block       - M rows per block
+//   ld_block       - N elements per vector register or tile
+//   ld_block2      - vector registers or tiles of N per block
+//   rd_block       - K elements reduced per K block
+//   bdb            - number of full M blocks
+//   ldb2           - number of full N blocks
+//   rdb            - number of full K blocks
+//   bdb_tail       - M rows left over after the full M blocks
+//   ldb2_tail      - full N registers or tiles left over after the full N
+//                    blocks
+//   ldb_tail       - N columns left over after every full N register
+//   rdb_tail       - K elements left over after the full K blocks
 struct loop_conf_t {
     schedule_t schedule = schedule_t::looped;
+    brgemm_kernel_innermost_loop_t innermost_loop = brgemm_ld_loop_innermost;
     brgemm_batch_kind_t batch_kind = brgemm_addr;
     dim_t max_bs = 0;
     dim_t load_dim = 0;

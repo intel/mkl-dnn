@@ -650,9 +650,10 @@ void emit_looped_nest(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
 // Emits the loop nest of the unrolled schedule, as `jit_brgemm_amx_uker_t`
 // does.
 //
-// Every M, N, and K block is emitted at its position, so no pointer moves. N is
-// inside M. The kernel always runs `max_bs` batch elements and does not read
-// `BS`, as the uker does without `var_bs`.
+// Every M, N, and K block is emitted at its position, so no pointer moves.
+// `innermost_loop` decides which of the M and N levels is inside the other, as
+// in `top_loop()` of the uker. The kernel always runs `max_bs` batch elements
+// and does not read `BS`, as the uker does without `var_bs`.
 //
 // There are no output stages yet. The accumulators of a block start at zero,
 // or at C when beta is 1, and are stored to C unchanged. The uker also loads C
@@ -702,11 +703,19 @@ void emit_unrolled_nest(ir::ir_t &ir, const conf_t &cfg,
     const std::vector<block_run_t> m = m_runs(cfg.loop);
     const std::vector<block_run_t> n = n_runs(cfg.loop);
 
-    emit_unrolled_level(m, [&](dim_t bd_block, dim_t bd_start) {
-        emit_unrolled_level(n, [&](dim_t ld_elems, dim_t ld_start) {
-            emit_block(bd_block, bd_start, ld_elems, ld_start);
+    if (cfg.loop.innermost_loop == brgemm_ld_loop_innermost) {
+        emit_unrolled_level(m, [&](dim_t bd_block, dim_t bd_start) {
+            emit_unrolled_level(n, [&](dim_t ld_elems, dim_t ld_start) {
+                emit_block(bd_block, bd_start, ld_elems, ld_start);
+            });
         });
-    });
+    } else {
+        emit_unrolled_level(n, [&](dim_t ld_elems, dim_t ld_start) {
+            emit_unrolled_level(m, [&](dim_t bd_block, dim_t bd_start) {
+                emit_block(bd_block, bd_start, ld_elems, ld_start);
+            });
+        });
+    }
 }
 
 // Builds IR for BRGEMM.
@@ -792,8 +801,6 @@ status_t init_loop_conf(
                     || prf.dist2 >= 0 || prf.distNTA >= 0;
         };
 
-        VCONDCHECK_BRGEMM_IR(brg.innermost_loop == brgemm_ld_loop_innermost,
-                VERBOSE_UNSUPPORTED_FEATURE, "M loop innermost");
         VCONDCHECK_BRGEMM_IR(!brg.interleave_tilestores_,
                 VERBOSE_UNSUPPORTED_FEATURE, "interleaved tile stores");
         VCONDCHECK_BRGEMM_IR(!prefetches(brg.prfA), VERBOSE_UNSUPPORTED_FEATURE,
@@ -805,6 +812,7 @@ status_t init_loop_conf(
                 VERBOSE_UNSUPPORTED_FEATURE, "C prefetch");
     }
 
+    loop.innermost_loop = brg.innermost_loop;
     loop.batch_kind = brg.type;
     loop.max_bs = brgattr.max_bs;
     loop.load_dim = brg.load_dim;
