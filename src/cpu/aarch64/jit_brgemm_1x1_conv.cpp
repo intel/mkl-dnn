@@ -26,7 +26,6 @@
 #include "cpu/scale_utils.hpp"
 
 #include "cpu/aarch64/brgemm/brgemm_utils.hpp"
-#include "cpu/aarch64/injectors/jit_uni_binary_injector.hpp"
 #include "cpu/aarch64/jit_brgemm_1x1_conv.hpp"
 
 namespace dnnl {
@@ -98,7 +97,7 @@ status_t brgemm_1x1_convolution_fwd_t<isa>::pd_t::init(const engine_t *engine) {
     // TODO: fix failing post ops for bf16 on sve 128
     const bool is_bf16
             = src_type == data_type::bf16 && wei_type == data_type::bf16;
-    if (is_bf16 && get_max_cpu_isa() == sve_128) {
+    if (is_bf16 && isa == sve_128) {
         for (auto const &entry : p.entry_) {
             const bool is_failing_po = entry.is_eltwise()
                     && one_of(entry.eltwise.alg,

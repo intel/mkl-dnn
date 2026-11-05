@@ -1,7 +1,7 @@
 /*******************************************************************************
 * Copyright 2018 Intel Corporation
 * Copyright 2020-2023 FUJITSU LIMITED
-* Copyright 2022, 2025 Arm Ltd. and affiliates
+* Copyright 2022, 2025-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -229,8 +229,6 @@ private:
     int itype_sz_;
     int otype_sz_;
     int stype_sz_;
-
-    const cpu_isa_t isa_;
 
     const XReg reg_ptr_in_ = x6;
     const XReg reg_ptr_out_ = x2;

@@ -140,12 +140,11 @@ bool post_ops_ok(brgemm_matmul_conf_t &bgmmc, const primitive_attr_t &attr,
             ? limited_bcast_set
             : default_bcast_set;
     return supported_binary_bcast
-            && injector::post_ops_ok(post_ops_ok_args_t(get_max_cpu_isa(),
-                    {sum, eltwise, binary}, post_ops, &dst_d,
-                    false /*sum_at_pos_0_only*/,
+            && injector::post_ops_ok({bgmmc.isa, {sum, eltwise, binary},
+                    post_ops, &dst_d, false /*sum_at_pos_0_only*/,
                     false /*sum_requires_scale_one*/,
                     false /*sum_requires_zp_zero*/,
-                    true /*sum_requires_same_params*/, bcast_set));
+                    true /*sum_requires_same_params*/, bcast_set});
 }
 
 status_t check_datatype(const brgemm_matmul_conf_utils_t &bm_conf_utils) {

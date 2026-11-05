@@ -20,12 +20,11 @@
 #include "common/memory_tracking.hpp"
 #include "common/utils.hpp"
 
-#include "cpu/cpu_primitive.hpp"
-#include "cpu/scale_utils.hpp"
-
+#include "cpu/aarch64/cpu_isa_traits.hpp"
 #include "cpu/aarch64/injectors/jit_uni_postops_injector.hpp"
 #include "cpu/aarch64/jit_brdgmm_dw_conv.hpp"
-#include <cpu/aarch64/cpu_isa_traits.hpp>
+#include "cpu/cpu_primitive.hpp"
+#include "cpu/scale_utils.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -74,20 +73,6 @@ inline status_t init_tag(memory_desc_t &md, const memory_desc_wrapper &mdw,
     if (tag != tag_value) { return status::unimplemented; }
 
     return status::success;
-}
-
-bool post_ops_ok(jit_brdgmm_conv_conf_t &jcp, const primitive_attr_t &attr,
-        const memory_desc_wrapper &dst_d) {
-    using namespace injector;
-
-    const auto &post_ops = attr.post_ops_;
-
-    return injector::post_ops_ok(post_ops_ok_args_t(get_max_cpu_isa(),
-            {sum, eltwise, binary}, post_ops, &dst_d,
-            false /*sum_at_pos_0_only*/, false /*sum_requires_scale_one*/,
-            false /*sum_requires_zp_zero*/, true /*sum_requires_same_params*/,
-            {broadcasting_strategy_t::per_oc, broadcasting_strategy_t::scalar,
-                    broadcasting_strategy_t::no_broadcast}));
 }
 
 template <cpu_isa_t isa>
@@ -205,8 +190,17 @@ status_t brdgmm_dw_convolution_fwd_t<isa>::pd_t::init(const engine_t *engine) {
     }
 
     CHECK(attr_.set_default_formats(dst_md()));
-    VDISPATCH_CONV(
-            post_ops_ok(jcp, *attr(), dst_d), VERBOSE_UNSUPPORTED_POSTOP);
+
+    VDISPATCH_CONV(injector::post_ops_ok({isa,
+                           {injector::sum, injector::eltwise, injector::binary},
+                           attr_.post_ops_, &dst_d, false /*sum_at_pos_0_only*/,
+                           false /*sum_requires_scale_one*/,
+                           false /*sum_requires_zp_zero*/,
+                           true /*sum_requires_same_params*/,
+                           {broadcasting_strategy_t::per_oc,
+                                   broadcasting_strategy_t::scalar,
+                                   broadcasting_strategy_t::no_broadcast}}),
+            VERBOSE_UNSUPPORTED_POSTOP);
     jcp.with_post_ops = attr()->post_ops_.len() > 0;
 
     jcp.isa = isa;
