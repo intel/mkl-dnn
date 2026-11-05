@@ -211,6 +211,9 @@ status_t conv_attr_check(const convolution_desc_t &desc, const engine_t *engine,
 
         // Check scales
         if (!attr->scales_.has_default_values()) {
+            VCHECK_CONV_UNIMPL(attr->scales_.has_default_qmode(),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             const auto &sc = attr->scales_;
             const bool with_groups
                     = desc.src_desc.ndims != desc.weights_desc.ndims;
@@ -230,6 +233,9 @@ status_t conv_attr_check(const convolution_desc_t &desc, const engine_t *engine,
 
         // Check zero points
         if (!attr->zero_points_.has_default_values()) {
+            VCHECK_CONV_UNIMPL(attr->zero_points_.has_default_qmode(),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+
             const auto &zp = attr->zero_points_;
 
             VCHECK_CONV_UNIMPL(IMPLICATION(!zp.has_default_values(DNNL_ARG_SRC),

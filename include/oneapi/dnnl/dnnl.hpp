@@ -326,8 +326,9 @@ inline dnnl_rounding_mode_t convert_to_c(rounding_mode mode) {
 enum class quantization_mode {
     /// used for unspecified quantization kind
     undef = dnnl_quantization_mode_undef,
-    /// static quantization mode: quantization parameter is computed
-    /// ahead of time and passed to oneDNN as an input.
+    /// static quantization mode with scale applied after zero-point:
+    /// quantization parameter is computed ahead of time and passed to
+    /// oneDNN as an input.
     static_sazp = dnnl_quantization_mode_static_sazp,
     /// dynamic quantization mode following OCP MX spec: quantization
     /// parameter is computed by oneDNN following the OCP MX spec
@@ -337,6 +338,10 @@ enum class quantization_mode {
     /// oneDNN as \f$scale\_dt(amax(X) / max(dst\_dt))\f$ in `f32` then
     /// converted to a scale type and written as an output.
     dynamic_fp = dnnl_quantization_mode_dynamic_fp,
+    /// static quantization mode with scale applied before zero-point:
+    /// quantization parameter is computed ahead of time and passed to
+    /// oneDNN as an input.
+    static_sbzp = dnnl_quantization_mode_static_sbzp,
 };
 
 /// Converts a quantization kind enum value from C++ API to C API type.
@@ -4374,8 +4379,9 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     ///     Use `1` for no sub-blocking. `{}` indicates no grouping.
     /// @param data_type Scaling factors data_type.
     /// @param is_on_host Indicates whether the scaling factor is a host-side scalar.
-    /// @param qmode Quantization mode, can be #quantization_mode::static_sazp
-    ///     or #quantization_mode::dynamic_mx
+    /// @param qmode Quantization mode, can be #quantization_mode::static_sazp,
+    ///     #quantization_mode::static_sbzp, #quantization_mode::dynamic_mx,
+    ///     or #quantization_mode::dynamic_fp
     void set_scales(int arg, int mask, const memory::dims &groups,
             memory::data_type data_type = memory::data_type::f32,
             bool is_on_host = false,
@@ -4436,7 +4442,7 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     /// passed as a host scalar memory object at execution time with index
     /// #DNNL_ARG_ATTR_ZERO_POINTS | arg.
     ///
-    /// @sa dnnl_primitive_attr_set_zero_points
+    /// @sa dnnl_primitive_attr_set_zero_points_v3
     ///
     /// @param arg Parameter argument index as passed to the
     ///     primitive::execute() call.
@@ -4451,12 +4457,18 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     ///     Use `1` for no sub-blocking. `{}` indicates no grouping.
     /// @param data_type Zero point factors data_type.
     /// @param is_on_host Indicates whether the zero point is a host-side scalar.
+    /// @param qmode Quantization mode, can be
+    ///     #quantization_mode::static_sazp or
+    ///     #quantization_mode::static_sbzp. It must match the quantization
+    ///     mode of the scales set for the same argument.
     void set_zero_points(int arg, int mask, const memory::dims &groups,
             memory::data_type data_type = memory::data_type::s32,
-            bool is_on_host = false) {
-        error::wrap_c_api(dnnl_primitive_attr_set_zero_points_v2(get(), arg,
+            bool is_on_host = false,
+            quantization_mode qmode = quantization_mode::static_sazp) {
+        error::wrap_c_api(dnnl_primitive_attr_set_zero_points_v3(get(), arg,
                                   mask, (int)groups.size(), groups.data(),
-                                  memory::convert_to_c(data_type), is_on_host),
+                                  memory::convert_to_c(data_type), is_on_host,
+                                  convert_to_c(qmode)),
                 "could not set zero points primitive attribute");
     }
 

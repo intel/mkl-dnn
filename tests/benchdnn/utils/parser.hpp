@@ -73,6 +73,8 @@ bool str2bool(const std::string &s);
 
 execution_mode_t str2execution_mode(const std::string &s);
 
+dnnl_quantization_mode_t str2quantization_mode(const std::string &s);
+
 } // namespace parsers
 
 // `parse_vector_str` is a heart parser routine which splits input string `str`

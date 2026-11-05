@@ -476,6 +476,11 @@ class ParserImpl:
                     if spec.read_literal(":") is None:
                         break
                     item = spec.read_str()
+                    if item == "":
+                        # An empty groups slot, printed when a later field
+                        # such as the quantization mode is present. It may
+                        # follow host_scalar, so it does not advance the state.
+                        continue
                     if state <= GROUPS and is_groups(item):
                         param.groups = item
                         state = GROUPS

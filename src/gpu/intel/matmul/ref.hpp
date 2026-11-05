@@ -73,12 +73,14 @@ struct ref_t : public primitive_t {
             CHECK(attr_scales_ok(engine,
                     {DNNL_ARG_SRC, DNNL_ARG_WEIGHTS, DNNL_ARG_DST},
                     {quantization_mode::static_sazp,
+                            quantization_mode::static_sbzp,
                             quantization_mode::dynamic_mx,
                             quantization_mode::dynamic_fp},
                     {{DNNL_ARG_SRC, {any_mask}}}));
             CHECK(attr_zero_points_ok(engine,
                     {DNNL_ARG_SRC, DNNL_ARG_WEIGHTS, DNNL_ARG_DST},
-                    {quantization_mode::static_sazp}));
+                    {quantization_mode::static_sazp,
+                            quantization_mode::static_sbzp}));
             VDISPATCH_MATMUL(
                     precomputed_reductions_ok(), VERBOSE_UNSUPPORTED_PR_CFG);
             VDISPATCH_MATMUL(set_default_formats(), VERBOSE_UNSUPPORTED_TAG);
@@ -285,6 +287,9 @@ struct ref_t : public primitive_t {
         def_data_type(kernel_ctx,
                 pd()->attr()->zero_points_.get_data_type(DNNL_ARG_WEIGHTS),
                 "WEI_ZP");
+        // Weights scales applied before zero-points.
+        kernel_ctx.define_int("WITH_WEI_SBZP",
+                pd()->attr()->zero_points_.get(DNNL_ARG_WEIGHTS).is_sbzp());
         def_data_type(kernel_ctx,
                 pd()->attr()->scales_.get_data_type(DNNL_ARG_SRC),
                 "SRC_SCALES");

@@ -203,9 +203,15 @@ class Converter(metaclass=ConverterMeta):
                 result += f":{def_value}"
             dt = param.data_type
             groups = param.groups
-            if dt != def_type or groups:
+            sbzp = param.quantization_mode == "static_sbzp"
+            if dt != def_type or groups or sbzp:
                 result += f":{dt}"
-            if groups:
+            if sbzp:
+                # Keep the quantization mode in its own trailing slot; emit an
+                # (empty) groups slot when groups are absent so it is not
+                # misread as the groups field.
+                result += f":{groups}:static_sbzp"
+            elif groups:
                 result += f":{groups}"
             results.append(result)
         return "+".join(results)

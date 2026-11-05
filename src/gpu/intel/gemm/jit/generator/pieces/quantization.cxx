@@ -76,9 +76,14 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
 
     auto wgTileMN = strategy.wgTile(isA ? LoopM : LoopN);
 
+    // Offsets applied after the scales (x = q * scale - offset) are fused with the scales into one mad.
+    // bf16 data uses f32 quantization data (mixed mode), except on Xe3p+ which has pure bf16 mad.
+    bool offsetAfterScale = isA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
+    bool pureBf16 = (hw >= HW::Xe3p) && offsetAfterScale && Tx == Type::bf16 && Txs == Tx && Txo == Tx;
+
     Txo_int = Txo.isInteger() ? Tx.asSignedInt() : Tx;
     Txs_int = Tx;
-    if (Tx == Type::bf16)
+    if (Tx == Type::bf16 && !pureBf16)
         Txs_int = Type::f32;
     Txg_int = Txg;
 
@@ -97,6 +102,9 @@ bool Generator<hw>::gemmMake2DQuantizationLayouts(bool isA, const GEMMProblem &p
         Txs_int = Tx;
         if (Tx == Type::bf16) Txs_int = Type::f16;
     }
+
+    if (offsetAfterScale)
+        Txo_int = Txs_int;
 
     if (lateOffset && (Txo.isSubByteInt() || Txo.isInt8()))
         Txo_int = Type::s32;
@@ -340,7 +348,8 @@ void Generator<hw>::gemmRepack2DQuantizationData(const RegisterLayout &layoutSrc
 template <HW hw>
 void Generator<hw>::gemmRepack2DOffsetData(Type Text, const RegisterLayout &layoutSrc, const RegisterLayout &layoutDst,
                                            const GRFMultirange &src, const GRFMultirange &dst,
-                                           const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state)
+                                           const GEMMProblem &problem, const GEMMStrategy &strategy, GEMMState &state,
+                                           bool offsetAfterScale)
 {
     auto Ts = layoutSrc.type(), Td = layoutDst.type();
 
@@ -349,7 +358,9 @@ void Generator<hw>::gemmRepack2DOffsetData(Type Text, const RegisterLayout &layo
     bool s8 = (Ts == Type::s8);
     bool u8 = (Ts == Type::u8);
 
-    bool subByteIntSpecialPath = Text.isSubByteInt() && Td == Type::f16;
+    // Offsets applied after the scales are subtracted from dequantized values as they are,
+    // so they don't take part in the sub-byte integer rescaling below.
+    bool subByteIntSpecialPath = Text.isSubByteInt() && Td == Type::f16 && !offsetAfterScale;
     auto tmpType = Td;
 
     if (subByteIntSpecialPath) {
@@ -396,8 +407,13 @@ template <HW hw>
 void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp op,
                                             const RegisterLayout &layout, const RegisterLayout &qlayout,
                                             const GRFMultirange &regs, const GRFMultirange &qregs,
-                                            int h, int kab_load, int kq_load, const GEMMProblem &problem, const CommonStrategy &strategy, CommonState &state)
+                                            int h, int kab_load, int kq_load, const GEMMProblem &problem, const CommonStrategy &strategy, CommonState &state,
+                                            const RegisterLayout *olayout, const GRFMultirange *oregs)
 {
+    // MulSub (x = x * scale - offset in one mad) takes the scales as the quantization data and the offsets,
+    // which have the same groups and type, as a second operand.
+    if ((op == BinaryOp::MulSub) != (olayout && oregs)) stub();
+
     int xqGroupK  = doA ? problem.aqGroupK : problem.bqGroupK;
     int xqGroupMN = doA ? problem.aqGroupM : problem.bqGroupN;
     int qCopies = doA ? state.aqCopies : state.bqCopies;
@@ -418,6 +434,11 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
         }
         if (qPairs.empty()) throw out_of_registers_exception();
     }
+
+    // MulSub on bf16 data: mixed mode with f32 quantization data (pre-Xe3p), otherwise pure bf16 mad (Xe3p+).
+    bool bfMixed = (T == Type::bf16) && (Tq == Type::f32);
+    if (op == BinaryOp::MulSub && (bfMixed ? hw >= HW::Xe3p : (T != Tq || !one_of(T, {Type::f16, Type::f32, Type::bf16}))))
+        stub("Unsupported MulSub types");
 
     for (auto &block: layout) {
         auto crosspack = block.crosspack;
@@ -478,6 +499,13 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
 
             if (!qbroadcastX) ne = std::min(ne, neq);
 
+            Subregister odata;
+            if (op == BinaryOp::MulSub) {
+                int neo;
+                odata = olayout->find(io0, jo0, *oregs, &neo);
+                if (!qbroadcastX) ne = std::min(ne, neo);
+            }
+
             // If a group lies along the X-direction, limit ne to the end of the current group
             if (xqGroupX > 1) ne = std::min(ne, xqGroupX - x0 % xqGroupX);
 
@@ -510,6 +538,15 @@ void Generator<hw>::gemmDequantizeOperation(bool doA, Type T, Type Tq, BinaryOp 
                 case BinaryOp::ScaleSub:
                     if (T != Type::f16) stub();
                     mad(simd, data(strided), -qdata(strideq), data(strided), Immediate::hf(0x6C00));  /* 0x6C00 = 2^12 */
+                    break;
+                case BinaryOp::MulSub:
+                    // Mixed mode: packed bf16 must start at sub-GRF offset 0 or 16.
+                    if (bfMixed && strided == 1 && data.getOffset() % 16)
+                        stub("Unsupported bf16 mixed-mode mad");
+                    // Pure bf16 mad: vector sources must share the destination's sub-GRF offset.
+                    if (T == Type::bf16 && !bfMixed && strideq && (qdata.getOffset() != data.getOffset() || odata.getOffset() != data.getOffset()))
+                        stub("Misaligned bf16 quantization data");
+                    mad(simd, data(strided), -odata(strideq), data(strided), qdata(strideq));
                     break;
                 default: stub();
             }
@@ -544,6 +581,13 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     if (!canDequantizeSubByteInt(layoutSrc, layoutDst, layoutOffset, layoutScale))
         stub("Cannot perform dequantizeSubByteInt");
 
+    // Offsets applied after the scales (x = q * scale - offset) go into the scale mad.
+    bool offsetAfterScale = problem && (doA ? problem->aOffsetAfterScale : problem->bOffsetAfterScale);
+    bool earlyOffset = !layoutOffset.empty() && !offsetAfterScale;
+    auto scaleOp = offsetAfterScale ? BinaryOp::MulSub : BinaryOp::Mul;
+    auto lateOffsetLayout = offsetAfterScale ? &layoutOffset : nullptr;
+    auto lateOffsetRegs = offsetAfterScale ? &offset : nullptr;
+
     bool signedInt = Tsrc.isSigned();
     bool i4 = (Tsrc.bits() == 4);
     bool f32 = (Tdst == Type::f32);
@@ -574,7 +618,7 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     // 3) Reinterpret u16 data as denormal f16, scale into normal range and subtract (rescaled) offsets if available.
     //     The required rescaling factor (2^24) is necessarily outside f16 range,
     //     so two multiplications are needed.
-    if (!layoutOffset.empty()) {
+    if (earlyOffset) {
         if (!problem) stub();
         gemmDequantizeOperation(doA, Type::f16, Type::f16, BinaryOp::ScaleSub, *effLayoutDst, layoutOffset, *effDst, offset, h, kab_load, kq_load, *problem, strategy, state);
     } else {
@@ -593,7 +637,7 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     //      this could be merged into the previous multiplication.
     if (!f32 && !layoutScale.empty()) {
         if (!problem) stub();
-        gemmDequantizeOperation(doA, Type::f16, Type::f16, BinaryOp::Mul, *effLayoutDst, layoutScale, *effDst, scale, h, kab_load, kq_load, *problem, strategy, state);
+        gemmDequantizeOperation(doA, Type::f16, Type::f16, scaleOp, *effLayoutDst, layoutScale, *effDst, scale, h, kab_load, kq_load, *problem, strategy, state, lateOffsetLayout, lateOffsetRegs);
     }
 
     // 6) Convert to dst type if needed.
@@ -605,7 +649,7 @@ void Generator<hw>::dequantizeSubByteInt(bool doA, const RegisterLayout& layoutS
     // 7) Apply scales for f32 after f16->f32 upconversion.
     if (f32 && !layoutScale.empty()) {
         if (!problem) stub();
-        gemmDequantizeOperation(doA, Type::f32, Type::f32, BinaryOp::Mul, layoutDst, layoutScale, dst, scale, h, kab_load, kq_load, *problem, strategy, state);
+        gemmDequantizeOperation(doA, Type::f32, Type::f32, scaleOp, layoutDst, layoutScale, dst, scale, h, kab_load, kq_load, *problem, strategy, state, lateOffsetLayout, lateOffsetRegs);
     }
 }
 
@@ -637,14 +681,17 @@ void Generator<hw>::gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, 
 
     bool xo2D = !oLayout.empty() && !lateOffset;
     bool xs2D = !sLayout.empty() && !lateScale;
+    // Offsets applied after the scales (x = q * scale - offset) go into the scale mad.
+    bool offsetAfterScale = doA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
+    bool xo2DEarly = xo2D && !offsetAfterScale;
 
     bool copy = !layoutDst0.empty();
     auto layoutDst = copy ? layoutDst0 : layoutSrc;
     auto dst       = copy ? dst0 : src;
 
-    auto Tx_int = xo2D ? Txo_int : Tdst;
+    auto Tx_int = xo2DEarly ? Txo_int : Tdst;
 
-    if (xo2D && !xs2D && (Txo_int.bits() > Tdst.bits()))
+    if (xo2DEarly && !xs2D && (Txo_int.bits() > Tdst.bits()))
         Tx_int = Tdst;
 
     int offR = doA ? 0 : h % kab_repack;
@@ -671,7 +718,7 @@ void Generator<hw>::gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, 
         else if (Tsrc.asSigned() != Tx_int.asSigned())
             convert(src, Tsrc, Tx_int, strategy, state);
 
-        if (xo2D) {
+        if (xo2DEarly) {
             if (!state.useBDPAS)
             {
                 gemmDequantizeOperation(doA, Tx_int, Txo_int, BinaryOp::Sub, layoutDst, oLayout, dst, oRegs, h, kab_load, kq_load, problem, strategy, state);
@@ -682,7 +729,8 @@ void Generator<hw>::gemmDequantizeAB(bool doA, const RegisterLayout &layoutSrc, 
         if (xs2D)
             if (!state.useBDPAS)
             {
-                gemmDequantizeOperation(doA, Tdst, Txs_int, BinaryOp::Mul, layoutDst, sLayout, dst, sRegs, h, kab_load, kq_load, problem, strategy, state);
+                gemmDequantizeOperation(doA, Tdst, Txs_int, offsetAfterScale ? BinaryOp::MulSub : BinaryOp::Mul, layoutDst, sLayout, dst, sRegs, h, kab_load, kq_load, problem, strategy, state,
+                                        offsetAfterScale ? &oLayout : nullptr, offsetAfterScale ? &oRegs : nullptr);
 	        }
     }
 

@@ -63,16 +63,26 @@ std::string quant_entry_t::get_verbose() const {
     std::string s;
     s.append(std::to_string(mask_));
     s.append(":").append(dnnl_dt2str(data_type_));
-    if (group_ndims_ > 0) {
-        s.append(":")
-                .append(std::to_string(group_dims_[0]))
-                .append("x")
-                .append(std::to_string(group_dims_[1]));
-    }
     if (is_host_scalar_) { s.append(":host_scalar"); }
-    if (qmode_ != quantization_mode::static_sazp) {
-        s.append(":").append(dnnl_quantization_mode2str(qmode_));
+
+    // Dump the optional trailing fields (groups, quantization mode) in backward
+    // direction so that a present later field forces earlier slots to be
+    // emitted (empty when unset). This keeps the quantization mode in its own
+    // slot instead of being misread as the groups field, and avoids nesting a
+    // condition for each next dumping part.
+    std::string str, str_tmp;
+    if (!has_default_qmode()) {
+        str_tmp = std::string(":") + dnnl_quantization_mode2str(qmode_);
+        str = str_tmp + str;
     }
+    if (!str.empty() || !has_default_groups()) {
+        str_tmp = std::string(":")
+                + (!has_default_groups() ? std::to_string(group_dims_[0]) + "x"
+                                        + std::to_string(group_dims_[1])
+                                         : std::string());
+        str = str_tmp + str;
+    }
+    s.append(str);
     return s;
 }
 

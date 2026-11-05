@@ -55,6 +55,9 @@ status_t binary_attr_check(const binary_desc_t &desc, const engine_t *engine,
 
     // Check scales
     if (!attr->scales_.has_default_values()) {
+        VCHECK_BINARY_UNIMPL(attr->scales_.has_default_qmode(),
+                VERBOSE_UNSUPPORTED_SCALES_CFG);
+
         // By default, host scalar scales are not supported for GPU
         // as the value should be accessed differently in the kernel
         VCHECK_BINARY_UNIMPL(IMPLICATION(engine->kind() == engine_kind::gpu,

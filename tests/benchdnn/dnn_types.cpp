@@ -145,8 +145,6 @@ policy_t attr_t::str2policy(const std::string &str) {
     if (s.compare(STRINGIFY(_plc)) == 0) return _plc
     CASE(COMMON);
     CASE(HOST_SCALAR);
-    CASE(MX);
-    CASE(DYNAMIC_FP);
     CASE(PER_OC);
     CASE(PER_OCIC);
     CASE(PER_DIM_0);
@@ -163,8 +161,6 @@ policy_t attr_t::str2policy(const std::string &str) {
 const char *attr_t::policy2str(policy_t policy) {
     if (policy == COMMON) return "common";
     if (policy == HOST_SCALAR) return "host_scalar";
-    if (policy == MX) return "mx";
-    if (policy == DYNAMIC_FP) return "dynamic_fp";
     if (policy == PER_OC) return "per_oc";
     if (policy == PER_OCIC) return "per_ocic";
     if (policy == PER_DIM_0) return "per_dim_0";
@@ -198,8 +194,6 @@ static int get_default_mask(policy_t policy, int ndims) {
         case attr_t::policy_t::PER_DIM_01: return (1 << 0) + (1 << 1);
         case attr_t::policy_t::PER_DIM_2: return (1 << 2);
         case attr_t::policy_t::PER_DIM_3: return (1 << 3);
-        case attr_t::policy_t::MX:
-        case attr_t::policy_t::DYNAMIC_FP:
         case attr_t::policy_t::PER_TENSOR:
             assert(ndims > 0 && ndims <= DNNL_MAX_NDIMS);
             return (1 << ndims) - 1;
@@ -208,14 +202,6 @@ static int get_default_mask(policy_t policy, int ndims) {
         case attr_t::policy_t::HOST_SCALAR: return 0;
         default: SAFE(FAIL, CRIT); return INT_MIN;
     }
-}
-
-dnnl_quantization_mode_t attr_t::policy2quantization_mode(policy_t policy) {
-    if (policy == policy_t::MX) return dnnl_quantization_mode_dynamic_mx;
-    if (policy == policy_t::DYNAMIC_FP)
-        return dnnl_quantization_mode_dynamic_fp;
-
-    return dnnl_quantization_mode_static_sazp;
 }
 
 int attr_t::policy2mask(int arg, policy_t policy, int ndims,
@@ -250,8 +236,6 @@ int attr_t::policy2mask(int arg, policy_t policy, int ndims,
             case PER_DIM_1:
             case PER_OC: return (1 << (ndims - 1));
             case PER_OCIC: return (1 << (ndims - 1)) + (1 << (ndims - 2));
-            case MX:
-            case DYNAMIC_FP:
             case PER_TENSOR: return get_default_mask(policy, ndims);
             default: SAFE_V(FAIL); return -1;
         }
@@ -311,13 +295,23 @@ int attr_t::arg_scales_t::entry_t::from_str(const std::string &s) {
         this->mask_input = attr_t::mask_input_t::mask;
         this->mask = parser::utils::stoll_safe(mask_input_str);
     } else {
-        // Otherwise, re-direct to policy parsing.
+        // `mx` and `dynamic_fp` select dynamic quantization modes that imply a
+        // per_tensor mask. They are accepted in the policy token as a shorthand
+        // and mapped onto a per_tensor policy plus the matching mode.
+        const auto first_token_qmode
+                = parser::parsers::str2quantization_mode(mask_input_str);
         this->mask_input = attr_t::mask_input_t::policy;
-        this->policy = attr_t::str2policy(mask_input_str);
-        if (this->policy == POLICY_TOTAL) {
-            BENCHDNN_PRINT(0, "%s \'%s\' %s\n", "Error: Scale entry policy",
-                    mask_input_str.c_str(), "is not recognized.");
-            SAFE_V(FAIL);
+        if (first_token_qmode == dnnl_quantization_mode_dynamic_mx
+                || first_token_qmode == dnnl_quantization_mode_dynamic_fp) {
+            this->policy = attr_t::policy_t::PER_TENSOR;
+            this->qmode = first_token_qmode;
+        } else {
+            this->policy = attr_t::str2policy(mask_input_str);
+            if (this->policy == POLICY_TOTAL) {
+                BENCHDNN_PRINT(0, "%s \'%s\' %s\n", "Error: Scale entry policy",
+                        mask_input_str.c_str(), "is not recognized.");
+                SAFE_V(FAIL);
+            }
         }
     }
     HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
@@ -353,6 +347,18 @@ int attr_t::arg_scales_t::entry_t::from_str(const std::string &s) {
     if (!this->groups.empty() && this->groups.size() != 2) {
         BENCHDNN_PRINT(
                 0, "%s\n", "Error: the number of groups is expected to be 2.");
+        SAFE_V(FAIL);
+    }
+    HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
+
+    // process the quantization mode; it always follows a (possibly empty)
+    // groups field, so it is parsed as the trailing token
+    const auto qmode_str = parser::get_substr(s, start_pos, ':');
+    this->qmode = parser::parsers::str2quantization_mode(qmode_str);
+    if (this->qmode == dnnl_quantization_mode_undef) {
+        BENCHDNN_PRINT(0,
+                "Error: quantization mode \'%s\' was not recognized.\n",
+                qmode_str.c_str());
         SAFE_V(FAIL);
     }
     HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
@@ -415,6 +421,18 @@ int attr_t::zero_points_t::entry_t::from_str(const std::string &s) {
     if (!this->groups.empty() && this->groups.size() != 2) {
         BENCHDNN_PRINT(
                 0, "%s\n", "Error: the number of groups is expected to be 2.");
+        SAFE_V(FAIL);
+    }
+    HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
+
+    // process the quantization mode; it always follows a (possibly empty)
+    // groups field, so it is parsed as the trailing token
+    const auto qmode_str = parser::get_substr(s, start_pos, ':');
+    this->qmode = parser::parsers::str2quantization_mode(qmode_str);
+    if (this->qmode == dnnl_quantization_mode_undef) {
+        BENCHDNN_PRINT(0,
+                "Error: quantization mode \'%s\' was not recognized.\n",
+                qmode_str.c_str());
         SAFE_V(FAIL);
     }
     HANDLE_DANGLING_SYMBOL_AND_END_OF_STRING();
@@ -887,6 +905,31 @@ std::ostream &operator<<(std::ostream &s, const policy_t &policy) {
     return s;
 }
 
+// A single optional trailing field of an attribute dump: `chunk` is its text and
+// `non_default` tells whether it carries information worth emitting.
+struct dump_field_t {
+    bool non_default;
+    std::string chunk;
+};
+
+// Assembles the trailing ':'-separated portion of an attribute dump. Fields are
+// listed from the right-most (last parsed) to the left-most; each is emitted
+// when `canonical` requests the fully explicit form, when it is non-default, or
+// when any field already emitted (hence any field to its right) is present.
+// Building right-to-left keeps each condition flat, so a new trailing parser
+// field only needs a new entry at the front of the list.
+static std::string dump_fields_backward(
+        std::initializer_list<dump_field_t> fields) {
+    std::string str;
+    for (const auto &f : fields) {
+        if (canonical || f.non_default || !str.empty()) {
+            str.insert(0, f.chunk);
+            str.insert(0, 1, ':');
+        }
+    }
+    return str;
+}
+
 std::ostream &operator<<(
         std::ostream &s, const attr_t::arg_scales_t::entry_t &scale) {
     using ::operator<<;
@@ -898,8 +941,13 @@ std::ostream &operator<<(
         s << scale.policy;
     }
     if (scale.has_single_element()) s << ":" << scale.scale;
-    if (scale.dt != dnnl_f32 || !scale.groups.empty()) s << ':' << scale.dt;
-    if (!scale.groups.empty()) s << ":" << dims2str(scale.groups);
+
+    s << dump_fields_backward({
+            {scale.qmode != dnnl_quantization_mode_static_sazp,
+                    quantization_mode2str(scale.qmode)},
+            {!scale.groups.empty(), dims2str(scale.groups)},
+            {scale.dt != dnnl_f32, dt2str(scale.dt)},
+    });
     return s;
 }
 
@@ -909,18 +957,22 @@ std::ostream &operator<<(
 
     const char *delim = "";
     for (const auto &point : zero_points.points) {
+        const auto &e = point.second;
         s << delim << arg2str(point.first);
-        if (point.second.mask_input == attr_t::mask_input_t::mask) {
-            s << ":" << point.second.mask;
+        if (e.mask_input == attr_t::mask_input_t::mask) {
+            s << ":" << e.mask;
         } else {
-            assert(point.second.mask_input == attr_t::mask_input_t::policy);
-            s << ":" << point.second.policy;
+            assert(e.mask_input == attr_t::mask_input_t::policy);
+            s << ":" << e.policy;
         }
-        if (point.second.has_single_element()) s << ":" << point.second.value;
-        if (point.second.dt != dnnl_s32 || !point.second.groups.empty())
-            s << ':' << point.second.dt;
-        if (!point.second.groups.empty())
-            s << ":" << dims2str(point.second.groups);
+        if (e.has_single_element()) s << ":" << e.value;
+
+        s << dump_fields_backward({
+                {e.qmode != dnnl_quantization_mode_static_sazp,
+                        quantization_mode2str(e.qmode)},
+                {!e.groups.empty(), dims2str(e.groups)},
+                {e.dt != dnnl_s32, dt2str(e.dt)},
+        });
         delim = "+";
     }
 
@@ -933,17 +985,19 @@ std::ostream &operator<<(std::ostream &s,
 
     const char *delim = "";
     for (const auto &entry : precomputed_reductions.entries) {
+        const auto &e = entry.second;
         s << delim << arg2str(entry.first);
-        if (entry.second.mask_input == attr_t::mask_input_t::mask) {
-            s << ":" << entry.second.mask;
+        if (e.mask_input == attr_t::mask_input_t::mask) {
+            s << ":" << e.mask;
         } else {
-            assert(entry.second.mask_input == attr_t::mask_input_t::policy);
-            s << ":" << entry.second.policy;
+            assert(e.mask_input == attr_t::mask_input_t::policy);
+            s << ":" << e.policy;
         }
-        if (entry.second.dt != dnnl_s32 || !entry.second.groups.empty())
-            s << ':' << entry.second.dt;
-        if (!entry.second.groups.empty())
-            s << ":" << dims2str(entry.second.groups);
+
+        s << dump_fields_backward({
+                {!e.groups.empty(), dims2str(e.groups)},
+                {e.dt != dnnl_s32, dt2str(e.dt)},
+        });
         delim = "+";
     }
 
@@ -1078,27 +1132,14 @@ std::ostream &operator<<(std::ostream &s, const attr_t::deterministic_t &d) {
 }
 
 std::ostream &operator<<(std::ostream &s, const attr_t::dropout_t &drop) {
-    // Update the string in backward direction to prevent multiple nesting
-    // condition for each next dumping part.
-    std::string str, str_tmp;
-    if (drop.use_host_scalars) {
-        str_tmp = ":" + std::to_string(drop.use_host_scalars);
-        str = str_tmp + str;
-    }
-    if (!str.empty() || drop.offset != 0) {
-        str_tmp = ":" + std::to_string(drop.offset);
-        str = str_tmp + str;
-    }
-    if (!str.empty() || drop.tag != tag::any) {
-        str_tmp = ":" + drop.tag;
-        str = str_tmp + str;
-    }
-    if (!str.empty() || drop.seed != 0) {
-        str_tmp = ":" + std::to_string(drop.seed);
-        str = str_tmp + str;
-    }
     // Use ostream to dump `p` for nicer output.
-    s << drop.p << str;
+    s << drop.p
+      << dump_fields_backward({
+                 {drop.use_host_scalars, std::to_string(drop.use_host_scalars)},
+                 {drop.offset != 0, std::to_string(drop.offset)},
+                 {drop.tag != tag::any, drop.tag},
+                 {drop.seed != 0, std::to_string(drop.seed)},
+         });
     return s;
 }
 
@@ -1528,7 +1569,6 @@ dnnl_primitive_attr_t create_dnnl_attr(
             if (as.is_def(arg_name)) continue;
 
             const auto &e = arg.second;
-            int is_on_host = e.is_host_scalar();
 
             // Check if there's a arg with pre-defined mask in `attr_args`...
             int args_mask = attr_args.get_mask(DNNL_ARG_ATTR_SCALES | arg_name);
@@ -1539,8 +1579,7 @@ dnnl_primitive_attr_t create_dnnl_attr(
 
             DNN_SAFE_V(dnnl_primitive_attr_set_scales_v3(dnnl_attr, arg_name,
                     mask, static_cast<int>(e.groups.size()), e.groups.data(),
-                    e.dt, is_on_host,
-                    attr_t::policy2quantization_mode(e.policy)));
+                    e.dt, e.is_host_scalar(), e.qmode));
         }
     }
 
@@ -1552,15 +1591,7 @@ dnnl_primitive_attr_t create_dnnl_attr(
 
             const auto &e = arg.second;
 
-            if (e.policy == policy_t::HOST_SCALAR) {
-                DNN_SAFE_V(dnnl_primitive_attr_set_zero_points_v2(dnnl_attr,
-                        arg_name, 0 /* mask */, 0 /* ndims */, nullptr, e.dt,
-                        true /* is_on_host = true*/));
-
-                continue;
-            }
-
-            // Check if there's a arg with pre-defined mask in `attr_args`...
+            // Check if there's an arg with pre-defined mask in `attr_args`...
             int args_mask
                     = attr_args.get_mask(DNNL_ARG_ATTR_ZERO_POINTS | arg_name);
             // If it's non-default, use it, otherwise, deduce it.
@@ -1568,12 +1599,9 @@ dnnl_primitive_attr_t create_dnnl_attr(
                     ? args_mask
                     : zp.get_mask(arg_name, dnnl_undefined_primitive, ndims);
 
-            int group_ndims = static_cast<int>(e.groups.size());
-            const auto &groups = e.groups.data();
-            const auto dt = e.dt;
-
-            DNN_SAFE_V(dnnl_primitive_attr_set_zero_points(
-                    dnnl_attr, arg_name, mask, group_ndims, groups, dt));
+            DNN_SAFE_V(dnnl_primitive_attr_set_zero_points_v3(dnnl_attr,
+                    arg_name, mask, static_cast<int>(e.groups.size()),
+                    e.groups.data(), e.dt, e.is_host_scalar(), e.qmode));
         }
     }
 
@@ -1592,12 +1620,9 @@ dnnl_primitive_attr_t create_dnnl_attr(
                     ? args_mask
                     : pr.get_mask(arg_name, dnnl_undefined_primitive, ndims);
 
-            int group_ndims = static_cast<int>(e.groups.size());
-            const auto &groups = e.groups.data();
-            const auto dt = e.dt;
-
-            DNN_SAFE_V(dnnl_primitive_attr_set_precomputed_reductions(
-                    dnnl_attr, arg_name, mask, group_ndims, groups, dt));
+            DNN_SAFE_V(dnnl_primitive_attr_set_precomputed_reductions(dnnl_attr,
+                    arg_name, mask, static_cast<int>(e.groups.size()),
+                    e.groups.data(), e.dt));
         }
     }
 

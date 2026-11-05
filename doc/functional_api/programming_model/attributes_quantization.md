@@ -22,7 +22,9 @@ See also:
 oneDNN supports two main categories of quantization:
 - Static Quantization (see @ref quantization_mode::dnnl_quantization_mode_static_sazp)
   with scales only (symmetric) or scales and zero-points (asymmetric),
-  where scales are applied after zero-point.
+  where scales are applied after zero-point. For weight-only quantization,
+  scales can also be applied before a floating-point zero-point (see
+  @ref quantization_mode::dnnl_quantization_mode_static_sbzp).
 - Dynamic Quantization, where the library computes the scales at execution time,
   in two modes:
   - `dynamic_mx`
@@ -53,8 +55,32 @@ Refer to the materials in the [Introduction](@ref dgaq_intro).
 
 ### Static Quantization
 
-The only formula for static quantization currently supported
-by oneDNN is with scales applied after zero-point as follows:
+In static quantization, oneDNN assumes that quantization parameters are inputs
+provided by the user and the library does not compute those scaling
+factors and zero-points as part of primitive computation.
+
+These quantization parameters can either be computed ahead of time
+using calibration tools or at runtime based on the actual minimum and
+maximum values of a tensor. Either method can be used in conjunction
+with oneDNN static quantization, as long as the quantization
+parameters are passed as input to the oneDNN primitives at execution
+time.
+
+oneDNN supports two formulas for static quantization, selected by the
+quantization mode. Both are defined in the dequantization direction (from the
+quantized value to the floating-point one):
+
+| Mode | Formula | Zero-point data types |
+|:-----|:--------|:----------------------|
+| `static_sazp` (default) | \f$scale \cdot (x_{quant} - zp)\f$ | `s32`, `s8`, `u8`, `s4`, `u4`, `u2` |
+| `static_sbzp` | \f$scale \cdot x_{quant} - zp\f$ | `f16`, `bf16` |
+
+@warning The scales and the zero-points of an argument must use the same mode.
+
+#### Scales Applied After Zero-Points
+
+The main formula for integer quantization applies the scales after the
+zero-point:
 
 \f[
 x_{f32}[:] = scale_{x} \cdot (x_{quant}[:] - zp_{x})
@@ -66,16 +92,40 @@ scaling factor in a floating-point format, \f$zp_{x}\f$ is a zero
 point (typically in integral format), and \f$[:]\f$ is used to denote
 element-wise application of the formula to the arrays.
 
-In this model, oneDNN assumes that quantization parameters are inputs
-provided by the user and the library does not compute those scaling
-factors and zero-points as part of primitive computation.
+#### Scales Applied Before Zero-Points
 
-These quantization parameters can either be computed ahead of time
-using calibration tools or at runtime based on the actual minimum and
-maximum values of a tensor. Either method can be used in conjunction
-with oneDNN static quantization, as long as the quantization
-parameters are passed as input to the oneDNN primitives at execution
-time.
+Some weight quantization formats define the dequantized value as the scaled
+quantized value plus an offset, rather than as a scaled difference with an
+integer zero-point. For
+[weight-only quantization](#matrix-multiplication-with-weight-only-quantization-woq),
+oneDNN supports this formula with the `static_sbzp` quantization mode:
+
+\f[
+x_{f32}[:] = scale_{x} \cdot x_{quant}[:] - zp_{x}
+\f]
+
+The zero-point applies to a value already multiplied by the scale, so it is a
+floating-point number (`f16` or `bf16`) rather than an integer. The
+quantization of the destination,
+\f$\dst = x_{f32} / scale_{\dst} + zp_{\dst}\f$, is the inverse of
+`static_sazp` and is not affected by this mode.
+
+Restrictions:
+- Only the weights of a matmul with
+  [weight-only quantization](#matrix-multiplication-with-weight-only-quantization-woq)
+  support `static_sbzp`; see that section for its requirements.
+- Scales and zero-points are `f16` or `bf16`.
+- Zero-points require `static_sbzp` scales.
+
+Examples of formats that map to `static_sbzp`:
+- GGUF K-quants (for example, Q4_K and Q5_K) dequantize a group of weights as
+  \f$d \cdot q - m\f$: the scale is \f$d\f$ and the zero-point is the stored
+  minimum \f$m\f$. Formats that add the minimum instead (Q4_1, Q5_1) use
+  \f$-m\f$ as the zero-point.
+- PyTorch int4 weight-only quantization dequantizes as
+  \f$(q - 8) \cdot scale + zero\f$ with `uint4` values \f$q\f$: flipping the top
+  bit of each value gives the `s4` value \f$q - 8\f$, and the zero-point is
+  \f$-zero\f$.
 
 ### Dynamic Quantization
 
@@ -264,7 +314,7 @@ Key parameters of the scaling API methods are summarized below:
 | `groups` | `{}`, `{G0, G1}` | Block quantization: none, or two group sizes for the last two tensor dimensions |
 | `data_type` | `f32`, `bf16`, `f16`, `f8_e5m2`, `f8_e4m3`, `e8m0` | Scaling factor data type |
 | `is_on_host` | `true`/`false` | Host vs device memory location of scaling factor |
-| `qmode` | `static_sazp`, `dynamic_mx`, `dynamic_fp` | Quantization mode: static with scales and zero-points, dynamic (MXFP8 compatible), dynamic (NVFP4 compatible) |
+| `qmode` | `static_sazp`, `static_sbzp`, `dynamic_mx`, `dynamic_fp` | Quantization mode: static with scales applied after zero-points, static with scales applied before zero-points, dynamic (MXFP8 compatible), dynamic (NVFP4 compatible) |
 
 (*) Support for quantization options varies based on individual primitive and
 target hardware. Refer to primitives documentation for the details.
@@ -429,7 +479,8 @@ void dnnl::primitive_attr::set_zero_points_mask(int arg, int mask);
 void dnnl::primitive_attr::set_zero_points(int arg, int mask,
                                           const dnnl::memory::dims &groups,
                                           dnnl::memory::data_type data_type = dnnl::memory::data_type::s32,
-                                          bool is_on_host = false);
+                                          bool is_on_host = false,
+                                          quantization_mode qmode = quantization_mode::static_sazp);
 
 // Convenience method for single host-side scalar
 void dnnl::primitive_attr::set_host_zero_point(int arg,
@@ -444,8 +495,10 @@ Key parameters of the zero-point API methods are summarized below:
 | `arg` | `DNNL_ARG_SRC`, `DNNL_ARG_WEIGHTS`, `DNNL_ARG_DST` | Tensor to apply zero-point |
 | `mask` | `0`, `1<<dim`, `(1<<d1)+(1<<d2)` | Zero-point granularity: global, per-dimension, multi-dimensional |
 | `groups` | `{}`, `{G0, G1}` | Block quantization: none, or two group sizes for the last two tensor dimensions |
-| `data_type` | `s32`, `s8`, `u8`, `s4`, `u4` | Zero-point data type |
+| `data_type` | `s32`, `s8`, `u8`, `s4`, `u4` | Zero-point data type with the `static_sazp` quantization mode |
+| \ | `f16`, `bf16` | Zero-point data type with the `static_sbzp` quantization mode |
 | `is_on_host` | `true`/`false` | Host vs device memory location of zero-point |
+| `qmode` | `static_sazp`, `static_sbzp` | Quantization mode: zero-point subtracted before the scale is applied (integer), or after (floating-point); must match the scales of the same argument |
 
 (*) Support for quantization options varies based on individual primitive and
 target hardware. Refer to primitives documentation for the details.

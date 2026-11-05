@@ -85,6 +85,9 @@ struct quant_entry_t {
     bool has_default_groups() const {
         return this->group_ndims_ == default_quant_entry().group_ndims_;
     }
+    bool has_default_qmode() const {
+        return qmode_ == default_quant_entry().get_quantization_mode();
+    }
 
     int get_mask() const { return mask_; }
     data_type_t get_data_type() const { return data_type_; }
@@ -112,6 +115,7 @@ struct quant_entry_t {
     bool is_dynamic_fp() const {
         return qmode_ == quantization_mode::dynamic_fp;
     }
+    bool is_sbzp() const { return qmode_ == quantization_mode::static_sbzp; }
 
     status_t get_md(memory_desc_t &out_md, const memory_desc_t &base_md) const {
         if (has_default_values()) {
@@ -175,7 +179,7 @@ private:
     int group_ndims_ = 0;
     dims_t group_dims_ {};
     bool is_host_scalar_ = false;
-    quantization_mode_t qmode_ = quantization_mode::undef;
+    quantization_mode_t qmode_ = quantization_mode::static_sazp;
 };
 
 std::ostream &operator<<(std::ostream &ss, const quant_entry_t &e);
@@ -248,9 +252,21 @@ struct quant_entries_t {
         return has_default_property(supported_args, predicate);
     }
 
+    // This interface is used by implementations that only handle the default
+    // quantization mode (scales after an integer zero-point) to reject any
+    // argument set with another mode.
+    bool has_default_qmode(const std::vector<int> &supported_args = {}) const {
+        auto predicate
+                = [](const quant_entry_t &s) { return s.has_default_qmode(); };
+        return has_default_property(supported_args, predicate);
+    }
+
     int get_mask(int arg) const { return get(arg).get_mask(); }
     data_type_t get_data_type(int arg) const {
         return get(arg).get_data_type();
+    }
+    quantization_mode_t get_quantization_mode(int arg) const {
+        return get(arg).get_quantization_mode();
     }
 
     dim_t get_group(int arg, int d) const {

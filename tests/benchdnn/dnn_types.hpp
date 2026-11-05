@@ -74,8 +74,6 @@ struct attr_t {
         PER_DIM_3, // ... dims[3] point.
         PER_TENSOR, // ... point in the tensor.
         HOST_SCALAR, // same as COMMON, but uses host-side scalar memory
-        MX, // uses {1, ..., 32} groups and dynamic_mx formula
-        DYNAMIC_FP, // uses {1, ..., 16} groups and dynamic_fp formula
         POLICY_TOTAL // guard
     };
 
@@ -90,19 +88,21 @@ struct attr_t {
     static int policy2mask(int arg, policy_t policy, int ndims = -1,
             dnnl_primitive_kind_t prim_kind = dnnl_undefined_primitive,
             bool has_groups = false);
-    static dnnl_quantization_mode_t policy2quantization_mode(policy_t policy);
 
     struct zero_points_t {
         struct entry_t {
             entry_t(policy_t apolicy = POLICY_TOTAL, int avalue = 0,
                     dnnl_data_type_t adt = dnnl_s32,
-                    const std::vector<dnnl_dim_t> &agroups = {})
+                    const std::vector<dnnl_dim_t> &agroups = {},
+                    dnnl_quantization_mode_t aqmode
+                    = dnnl_quantization_mode_static_sazp)
                 : policy(apolicy)
                 , value(avalue)
                 , dt(adt)
                 , groups(agroups)
                 , mask_input(policy == POLICY_TOTAL ? mask_input_t::none
-                                                    : mask_input_t::policy) {}
+                                                    : mask_input_t::policy)
+                , qmode(aqmode) {}
 
             int from_str(const std::string &s);
 
@@ -121,6 +121,7 @@ struct attr_t {
             std::vector<dnnl_dim_t> groups;
             int64_t mask = INT_MIN;
             mask_input_t mask_input = mask_input_t::none;
+            dnnl_quantization_mode_t qmode = dnnl_quantization_mode_static_sazp;
         };
 
         int from_str(const std::string &s);
@@ -229,24 +230,32 @@ struct attr_t {
         struct entry_t {
             entry_t(policy_t apolicy = POLICY_TOTAL, float ascale = 1.f,
                     dnnl_data_type_t adt = dnnl_f32,
-                    const std::vector<dnnl_dim_t> &agroups = {})
+                    const std::vector<dnnl_dim_t> &agroups = {},
+                    dnnl_quantization_mode_t aqmode
+                    = dnnl_quantization_mode_static_sazp)
                 : policy(apolicy)
                 , scale(ascale)
                 , dt(adt)
                 , groups(agroups)
                 , mask_input(policy == POLICY_TOTAL ? mask_input_t::none
-                                                    : mask_input_t::policy) {}
+                                                    : mask_input_t::policy)
+                , qmode(aqmode) {}
 
             int from_str(const std::string &s);
 
             bool is_def() const { return mask_input == mask_input_t::none; }
 
             bool is_host_scalar() const { return policy == HOST_SCALAR; }
-            bool is_dynamic() const {
-                return policy == MX || policy == DYNAMIC_FP;
+            bool is_mx() const {
+                return qmode == dnnl_quantization_mode_dynamic_mx;
             }
-            bool is_mx() const { return policy == MX; }
-            bool is_dynamic_fp() const { return policy == DYNAMIC_FP; }
+            bool is_dynamic_fp() const {
+                return qmode == dnnl_quantization_mode_dynamic_fp;
+            }
+            bool is_dynamic() const { return is_mx() || is_dynamic_fp(); }
+            bool is_sbzp() const {
+                return qmode == dnnl_quantization_mode_static_sbzp;
+            }
             bool has_single_element() const {
                 if (mask_input == mask_input_t::mask) return mask == 0;
                 assert(mask_input == mask_input_t::policy);
@@ -259,6 +268,7 @@ struct attr_t {
             std::vector<dnnl_dim_t> groups;
             int64_t mask = INT_MIN;
             mask_input_t mask_input = mask_input_t::none;
+            dnnl_quantization_mode_t qmode = dnnl_quantization_mode_static_sazp;
         };
 
         void set(int arg, const entry_t &scale) { scales[arg] = scale; }

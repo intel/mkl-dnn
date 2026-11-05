@@ -181,31 +181,24 @@ int fill_zero_points(const attr_t &attr, int arg, dnn_mem_t &mem_dt,
         mem_fp.set_f32_elem(0, e.value);
         // TODO: replace reorder with `fill` that takes any pattern unlike
         // memset.
+        if (mem_dt) SAFE(mem_dt.reorder(mem_fp, res), WARN);
     } else {
-        /* Do fixed partitioning to have same filling for any number of threads */
-        static constexpr int64_t chunk_size = 64;
-        const int64_t n_chunks = div_up(nelems, chunk_size);
+        // Negative values are valid only for signed data types.
         const int min_val = MAX2(-2, static_cast<int>(lowest_dt(mem_dt.dt())));
-        benchdnn_parallel_nd(n_chunks, [&](int64_t idx_chunk) {
-            int64_t idx_start = idx_chunk * chunk_size;
-            int64_t idx_end = MIN2(idx_start + chunk_size, nelems);
-            // Note: we use a different seed for each chunk to avoid
-            // repeating patterns. We could use discard(idx_start) too but
-            // it has a complexity in O(idx_start). We also add 1 to avoid
-            // seeding with 0.
-            std::minstd_rand int_seed(idx_start + 1);
-            int_seed.discard(1);
-
-            std::uniform_int_distribution<> gen(min_val, 2);
-
-            for (int64_t idx = idx_start; idx < idx_end; ++idx) {
-                const float zp_val = gen(int_seed);
-                mem_fp.set_f32_elem(idx, zp_val);
-            }
-        });
+        std::vector<float> zero_points_set {0, 1, 2};
+        if (min_val < 0) {
+            zero_points_set.insert(zero_points_set.end(), {-2.f, -1.f});
+        }
+        // Fractional half and quarter steps stay exact in floating-point data
+        // types.
+        if (!is_integral_dt(mem_dt.dt())) {
+            zero_points_set.insert(
+                    zero_points_set.end(), {-0.5f, -0.25f, 0.25f, 0.5f});
+        }
+        fill_cfg_t fill_cfg(
+                zero_points_set, /* density = */ 1.f, "zero_points");
+        SAFE(fill_random_real(mem_dt, mem_fp, res, fill_cfg), WARN);
     }
-
-    if (mem_dt) SAFE(mem_dt.reorder(mem_fp, res), WARN);
 
     return OK;
 }

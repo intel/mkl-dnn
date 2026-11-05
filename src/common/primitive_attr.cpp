@@ -655,6 +655,7 @@ status_t dnnl_primitive_attr_set_scales_v3(primitive_attr_t *attr, int arg,
     VCHECK_ATTR(attr, VERBOSE_NULL_ARG);
     VCHECK_ATTR(arg >= 0, VERBOSE_BAD_PARAM, "arg");
     VCHECK_ATTR(utils::one_of(qmode, quantization_mode::static_sazp,
+                        quantization_mode::static_sbzp,
                         quantization_mode::dynamic_mx,
                         quantization_mode::dynamic_fp),
             VERBOSE_BAD_PARAM, "qmode");
@@ -698,11 +699,25 @@ status_t dnnl_primitive_attr_set_zero_points(dnnl_primitive_attr_t attr,
 status_t dnnl_primitive_attr_set_zero_points_v2(dnnl_primitive_attr_t attr,
         int arg, int mask, int group_ndims, const dnnl_dims_t group_dims,
         dnnl_data_type_t data_type, int is_on_host) {
+    return dnnl_primitive_attr_set_zero_points_v3(attr, arg, mask, group_ndims,
+            group_dims, data_type, is_on_host, quantization_mode::static_sazp);
+}
+
+status_t dnnl_primitive_attr_set_zero_points_v3(dnnl_primitive_attr_t attr,
+        int arg, int mask, int group_ndims, const dnnl_dims_t group_dims,
+        dnnl_data_type_t data_type, int is_on_host,
+        dnnl_quantization_mode_t qmode) {
     using namespace data_type;
 
     VCHECK_ATTR(attr, VERBOSE_NULL_ARG);
     VCHECK_ATTR(arg >= 0, VERBOSE_BAD_PARAM, "arg");
-    VCHECK_ATTR(utils::one_of(data_type, s32, s8, u8, s4, u4, u2),
+    VCHECK_ATTR(utils::one_of(qmode, quantization_mode::static_sazp,
+                        quantization_mode::static_sbzp),
+            VERBOSE_BAD_PARAM, "qmode");
+    // static_sbzp zero-points are scaled values of a floating-point type.
+    const bool sbzp = qmode == quantization_mode::static_sbzp;
+    VCHECK_ATTR(sbzp ? utils::one_of(data_type, bf16, f16)
+                     : utils::one_of(data_type, s32, s8, u8, s4, u4, u2),
             VERBOSE_INVALID_DATATYPE, "zero points");
     VCHECK_ATTR(IMPLICATION(utils::one_of(data_type, s4, u4, u2), mask > 0),
             VERBOSE_BAD_PARAM, "mask with sub-byte data type");
@@ -719,14 +734,14 @@ status_t dnnl_primitive_attr_set_zero_points_v2(dnnl_primitive_attr_t attr,
     if (is_on_host) { // host-side zero point is only supported as single scalar value
         VCHECK_ATTR(mask == 0, VERBOSE_BAD_PARAM, "mask");
         VCHECK_ATTR(group_ndims == 0, VERBOSE_BAD_PARAM, "group_ndims");
-        return attr->zero_points_.set(arg, 0, data_type, 0, {}, true);
+        return attr->zero_points_.set(arg, 0, data_type, 0, {}, true, qmode);
     } else {
         VCHECK_ATTR(mask >= 0, VERBOSE_BAD_PARAM, "mask");
         VCHECK_ATTR(group_ndims >= 0, VERBOSE_BAD_PARAM, "group_ndims");
         VCHECK_ATTR(IMPLICATION(group_ndims > 0, mask > 0), VERBOSE_BAD_PARAM,
                 "mask incompatible with group_dims");
         return attr->zero_points_.set(
-                arg, mask, data_type, group_ndims, group_dims);
+                arg, mask, data_type, group_ndims, group_dims, false, qmode);
     }
 }
 

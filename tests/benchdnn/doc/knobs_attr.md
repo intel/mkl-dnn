@@ -9,9 +9,9 @@
     --attr-deterministic=BOOL
     --attr-dropout=PROBABILITY[:SEED[:TAG[:OFFSET[:HOST_SCALARS]]]]
     --attr-scales=ARG:MASK_INPUT[:SCALE[:DATA_TYPE]][+...]
-                  ARG:MASK_INPUT[:DATA_TYPE[:GROUPS]][+...]
+                  ARG:MASK_INPUT[:DATA_TYPE[:GROUPS][:QUANT_MODE]][+...]
     --attr-zero-points=ARG:MASK_INPUT[:ZEROPOINT[:DATA_TYPE]][+...]
-                       ARG:MASK_INPUT[:DATA_TYPE[:GROUPS]][+...]
+                       ARG:MASK_INPUT[:DATA_TYPE[:GROUPS][:QUANT_MODE]][+...]
     --attr-precomputed-reductions=ARG:MASK_INPUT:DATA_TYPE:GROUPS[+...]
     --attr-post-ops=SUM[:SCALE[:ZERO_POINT[:DATA_TYPE]]]
                     ELTWISE[:ALPHA[:BETA[:SCALE]]]
@@ -151,6 +151,20 @@ value for any other policies will trigger an error.
 `GROUPS` specifies how scales are grouped along dimensions where multiple scale
 factors are used.
 
+`QUANT_MODE` specifies the quantization mode and maps directly to a library
+`dnnl_quantization_mode_t` value. Supported values are:
+  - `sazp`       (the default) static mode with the scale applied after the
+                 zero-point: `x = scale * (q - zp)`. Zero-points are integers.
+  - `sbzp`       static mode with the scale applied before the zero-point:
+                 `x = scale * q - zp`. Zero-points are floating-point and the
+                 mode must be set on both the scales and the zero-points of the
+                 weights.
+  - `mx`         dynamic mode computed by the primitive following the OCP MX
+                 specification. Applicable only to destination scales.
+  - `dynamic_fp` dynamic mode computed by the primitive as
+                 `to_scale_dt(amax(x) / max(dst_dt))`. Applicable only to
+                 destination scales.
+
 To specify more than one memory argument for this attribute, `+` delimiter is
 used.
 
@@ -183,10 +197,15 @@ specifies an integer value which is passed for execution at runtime. Specifying
 a value for any other policies will trigger an error.
 
 `DATA_TYPE` specifies data type for zero points. Supported values are
-`s32` (the default), `s8`, `u8`, `s4`, `u4`.
+`s32` (the default), `s8`, `u8`, `s4`, `u4`, and `f16`, `bf16` with the `sbzp`
+quantization mode (see `QUANT_MODE` below).
 
 `GROUPS` specifies how zero points are grouped along dimensions where multiple
 zero points are used.
+
+`QUANT_MODE` has the same semantics as for `--attr-scales`. Only `sazp` (the
+default) and `sbzp` values are supported. The `sbzp` mode must be set with a
+matching mode on the scales for the same argument.
 
 To specify more than one memory argument for this attribute, `+` delimiter is
 used.
@@ -417,4 +436,14 @@ Run a matmul problem with NVFP4 semantics:
   ./benchdnn --matmul --dt=f4_e2m1 \
              --attr-scales=src:per_tensor:f8_e4m3:1x16+wei:per_tensor:f8_e4m3:16x1+dst:dynamic_fp:f8_e4m3:1x16 \
              32x32:32x64
+```
+
+Run a matmul problem with weights decompression using the `sbzp` quantization
+mode, where `f16` weights scales and floating-point zero-points are applied as
+`x = scale * q - zp` and grouped along the `K` dimension:
+``` sh
+  ./benchdnn --matmul --dt=f16:u4:f16 --attr-fpmath=f16:true \
+             --attr-scales=wei:per_ocic:f16:32x1:sbzp \
+             --attr-zero-points=wei:per_ocic:f16:32x1:sbzp \
+             128x1024:1024x512
 ```

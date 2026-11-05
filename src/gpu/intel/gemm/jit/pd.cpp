@@ -293,6 +293,8 @@ status_t pd_t::init_attrs(const impl::engine_t *engine) {
     auto ndims = d->c_desc.ndims;
     a_quant.zp_ndims = quant_entry_ndims(a_zps, a_zp_md_, ndims - 2);
     b_quant.zp_ndims = quant_entry_ndims(b_zps, b_zp_md_, ndims - 1);
+    a_quant.zp_after_scale = a_zps.is_sbzp();
+    b_quant.zp_after_scale = b_zps.is_sbzp();
     c_quant.zp_ndims = quant_entry_ndims(c_zps, c_zp_md_, -1);
     a_quant.gs_ndims = quant_entry_ndims(a_gs, a_gs_md_, ndims - 2);
     b_quant.gs_ndims = quant_entry_ndims(b_gs, b_gs_md_, ndims - 1);
@@ -327,6 +329,23 @@ status_t pd_t::init_attrs(const impl::engine_t *engine) {
     CHECK(set_a_groups(a_quant, a_zps));
     CHECK(set_a_groups(a_quant, a_gs));
     CHECK(set_a_groups(a_quant, a_scales));
+
+    // static_sbzp needs 2D quantization. Parameters that do not vary over K are
+    // passed as small groups with a zero K stride: one group spanning K is read
+    // past its row and slows down kernel generation. A fallback: the row is
+    // reloaded per group, which source reductions would avoid.
+    const dim_t k_broadcast_group = 32;
+    const dim_t k = desc()->k();
+    if (a_quant.zp_after_scale && a_quant.zp_ndims > 0
+            && k != DNNL_RUNTIME_DIM_VAL
+            && utils::one_of(dim_t(a_quant.group_k), dim_t(0), k)) {
+        // gemmstone expects the K group to divide K.
+        a_quant.group_k = into<int>(math::gcd(k, k_broadcast_group));
+        a_quant.group_m = std::max(a_quant.group_m, 1);
+        a_quant.k_broadcast = true;
+        a_quant.zp_ndims = 2;
+        if (a_quant.scale_ndims > 0) a_quant.scale_ndims = 2;
+    }
 
     b_quant.scales_type = b_scales.get_data_type();
     b_quant.zp_type = b_zps.get_data_type();
@@ -371,6 +390,12 @@ status_t pd_t::zp_ok(const impl::engine_t *engine) {
     const bool b_smallint = utils::one_of(desc()->b_type(), s4, u4, u2);
     const bool weights_upconversion
             = wei_decomp_ || (a_smallint && dy_quant_enabled_);
+
+    // static_sbzp: weights decompression with grouped scales and zero-points.
+    VDISPATCH_GEMM(!b_quant.zp_after_scale, VERBOSE_UNSUPPORTED_ZP_CFG);
+    VDISPATCH_GEMM(IMPLICATION(a_quant.zp_after_scale,
+                           wei_decomp_ && a_zp_2d() && a_scales_2d()),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
 
     if (!a_zps.has_default_values()) {
         VDISPATCH_GEMM(a_zps.get_data_type() != u3,
@@ -747,6 +772,8 @@ status_t pd_t::init_GEMMProblem(
         problem.bOffset = ABOffset::Calc;
     problem.aoPtrDims = a_quant.zp_host_scalar ? -1 : a_quant.zp_ndims;
     problem.boPtrDims = b_quant.zp_host_scalar ? -1 : b_quant.zp_ndims;
+    problem.aOffsetAfterScale = a_quant.zp_after_scale;
+    problem.bOffsetAfterScale = b_quant.zp_after_scale;
     problem.asPtrDims = a_quant.scale_ndims;
     problem.bsPtrDims = b_quant.scale_ndims;
 
@@ -883,6 +910,14 @@ status_t pd_t::init_GEMMProblem(
         problem.Ag.transpose();
         problem.Bg.transpose();
     }
+
+    // A zero K stride needs the quantization rows laid out along M (A) or N (B).
+    VDISPATCH_GEMM(
+            IMPLICATION(a_quant.k_broadcast, isColMajor(problem.AO.layout)),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
+    VDISPATCH_GEMM(
+            IMPLICATION(b_quant.k_broadcast, !isColMajor(problem.BO.layout)),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
 
     return status::success;
 }

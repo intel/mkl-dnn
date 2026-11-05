@@ -256,6 +256,7 @@ status_t grouped_matmul_attr_check(
 status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
         const primitive_attr_t *attr) {
     using smask_t = primitive_attr_t::skip_mask_t;
+    using namespace quantization_mode;
 
     if (attr == nullptr) return status::success;
     if (attr->has_default_values()) return status::success;
@@ -342,6 +343,12 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
     if (!attr->scales_.has_default_values()) {
         const auto &sc = attr->scales_;
 
+        // Only weights and destination scales support a non-default
+        // quantization mode.
+        VCHECK_MATMUL_UNIMPL(
+                sc.has_default_qmode({DNNL_ARG_WEIGHTS, DNNL_ARG_DST}),
+                VERBOSE_UNSUPPORTED_SCALES_CFG);
+
         dim_t src_scale_group_k = 1;
         if (!sc.has_default_values(DNNL_ARG_SRC)) {
             const int mask_src = sc.get_mask(DNNL_ARG_SRC);
@@ -376,6 +383,22 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
         dim_t wei_scale_group_k = 1;
         dim_t wei_scale_group_n = 1;
         if (!sc.has_default_values(DNNL_ARG_WEIGHTS)) {
+            const auto wei_sc_qmode
+                    = sc.get_quantization_mode(DNNL_ARG_WEIGHTS);
+            VCHECK_MATMUL_UNIMPL(
+                    utils::one_of(wei_sc_qmode, static_sazp, static_sbzp),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+            // static_sbzp scales are floating-point values, f16 or bf16.
+            VCHECK_MATMUL_UNIMPL(
+                    IMPLICATION(wei_sc_qmode == static_sbzp,
+                            utils::one_of(sc.get_data_type(DNNL_ARG_WEIGHTS),
+                                    data_type::bf16, data_type::f16)),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+            // static_sbzp is a weights decompression mode.
+            VCHECK_MATMUL_UNIMPL(IMPLICATION(wei_sc_qmode == static_sbzp,
+                                         attr->fpmath_.apply_to_int_),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             const int mask_wei = sc.get_mask(DNNL_ARG_WEIGHTS);
 
             VCHECK_MATMUL(mask_fits_ndims(mask_wei, ndims_wei),
@@ -401,6 +424,11 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
         }
 
         if (!sc.has_default_values(DNNL_ARG_DST)) {
+            VCHECK_MATMUL_UNIMPL(
+                    utils::one_of(sc.get_quantization_mode(DNNL_ARG_DST),
+                            static_sazp, dynamic_mx, dynamic_fp),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             const int mask_dst = sc.get_mask(DNNL_ARG_DST);
             VCHECK_MATMUL_UNIMPL(
                     IMPLICATION(mask_dst > 0, dst_is_fp8 || dst_is_fp4),
@@ -462,6 +490,10 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
     if (!attr->zero_points_.has_default_values()) {
         const auto &zp = attr->zero_points_;
 
+        // Only weights zero-points support a non-default quantization mode.
+        VCHECK_MATMUL_UNIMPL(zp.has_default_qmode({DNNL_ARG_WEIGHTS}),
+                VERBOSE_UNSUPPORTED_ZP_CFG);
+
         dim_t src_zp_group_k = 1;
         if (!zp.has_default_values(DNNL_ARG_SRC)) {
             const int mask_src = zp.get_mask(DNNL_ARG_SRC);
@@ -498,6 +530,27 @@ status_t matmul_attr_check(const matmul_desc_t &desc, const engine_t *engine,
         dim_t wei_zp_group_k = 1;
         dim_t wei_zp_group_n = 1;
         if (!zp.has_default_values(DNNL_ARG_WEIGHTS)) {
+            const auto wei_zp_qmode
+                    = zp.get_quantization_mode(DNNL_ARG_WEIGHTS);
+            VCHECK_MATMUL_UNIMPL(
+                    utils::one_of(wei_zp_qmode, static_sazp, static_sbzp),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+            // static_sbzp zero-points are floating-point values, f16 or bf16.
+            VCHECK_MATMUL_UNIMPL(
+                    IMPLICATION(wei_zp_qmode == static_sbzp,
+                            utils::one_of(zp.get_data_type(DNNL_ARG_WEIGHTS),
+                                    data_type::bf16, data_type::f16)),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+            // Weights scales and zero-points must share the quantization mode.
+            // Unset scales have the default mode, so static_sbzp zero-points
+            // also require static_sbzp scales.
+            // TODO: (postponed till more similar places appear) consolidate
+            // cross-argument checks in a common space.
+            VCHECK_MATMUL_UNIMPL(wei_zp_qmode
+                            == attr->scales_.get_quantization_mode(
+                                    DNNL_ARG_WEIGHTS),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+
             const int mask_wei = zp.get_mask(DNNL_ARG_WEIGHTS);
 
             VCHECK_MATMUL(mask_fits_ndims(mask_wei, ndims_wei),

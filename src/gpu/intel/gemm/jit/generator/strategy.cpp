@@ -129,6 +129,17 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
     if (kParallelVariable && lateScaleHazard)
         C.atomic = CO.atomic = kParallelVariable = kParallelLocal = false;
 
+    // Offsets applied after the scales are fused with early 2D scales into one mad.
+    for (bool isA: {true, false}) {
+        bool offsetAfterScale = isA ? problem.aOffsetAfterScale : problem.bOffsetAfterScale;
+        bool xo2D = isA ? problem.aOffset2D() : problem.bOffset2D();
+        bool xs2D = isA ? problem.aScale2D() : problem.bScale2D();
+        bool lateOffset = isA ? problem.needsBGroupSums() : problem.needsAGroupSums();
+        bool lateScale = isA ? aLateScale : bLateScale;
+        if (offsetAfterScale && (!xo2D || !xs2D || lateOffset || lateScale))
+            stub("Offsets after scales require early 2D offsets and scales");
+    }
+
     C.atomic |= useAutoAtomic(hw, problem, *this);
 
     if (C.atomic && !C.base.isStateless() && !C.newDP)

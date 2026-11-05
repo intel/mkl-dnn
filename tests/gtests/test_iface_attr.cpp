@@ -265,6 +265,126 @@ TEST_F(attr_test_t, TestZeroPointsExpectFailure) {
     }
 }
 
+TEST_F(attr_test_t, TestScalesBeforeZeroPoints) {
+    dnnl::primitive_attr attr;
+    const auto sbzp = quantization_mode::static_sbzp;
+    const int wei = DNNL_ARG_WEIGHTS;
+    const int mask = (1 << 0) | (1 << 1);
+
+    // Floating-point scales and zero-points on weights.
+    for (auto dt : {data_type::f16, data_type::bf16}) {
+        EXPECT_NO_THROW(attr.set_scales(wei, mask, {32, 1}, dt, false, sbzp));
+        EXPECT_NO_THROW(
+                attr.set_zero_points(wei, mask, {32, 1}, dt, false, sbzp));
+    }
+
+    // Zero-points applied after the scales are floating-point f16 or bf16.
+    for (auto dt : {data_type::s32, data_type::s8, data_type::u8, data_type::u4,
+                 data_type::f32}) {
+        EXPECT_ANY_THROW(
+                attr.set_zero_points(wei, mask, {32, 1}, dt, false, sbzp));
+    }
+
+    // Integer zero-points keep the default mode.
+    EXPECT_ANY_THROW(attr.set_zero_points(wei, mask, {32, 1}, data_type::f16));
+
+    // Host-side scalar zero-points follow the same data type rules.
+    EXPECT_NO_THROW(
+            attr.set_zero_points(wei, 0, {}, data_type::f16, true, sbzp));
+    EXPECT_ANY_THROW(
+            attr.set_zero_points(wei, 0, {}, data_type::s32, true, sbzp));
+}
+
+HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestScalesBeforeZeroPointsMatmul) {
+    engine eng = get_test_engine();
+    const auto sbzp = quantization_mode::static_sbzp;
+    const int wei = DNNL_ARG_WEIGHTS;
+    const memory::dim M = 4, K = 128, N = 64;
+    const int mask_kn = (1 << 0) | (1 << 1);
+
+    auto make_pd = [&](data_type src_dt, data_type wei_dt,
+                           const primitive_attr &attr,
+                           data_type dst_dt = data_type::undef) {
+        memory::desc src_md({M, K}, src_dt, tag::ab);
+        memory::desc wei_md({K, N}, wei_dt, tag::any);
+        memory::desc dst_md(
+                {M, N}, dst_dt == data_type::undef ? src_dt : dst_dt, tag::ab);
+        return matmul::primitive_desc(eng, src_md, wei_md, dst_md, attr);
+    };
+    auto base_attr = [&]() {
+        primitive_attr attr;
+        attr.set_fpmath_mode(fpmath_mode::f16, true);
+        return attr;
+    };
+
+    // Scales and zero-points with different modes.
+    {
+        auto attr = base_attr();
+        attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        attr.set_zero_points(wei, mask_kn, {32, 1}, data_type::u8);
+        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    }
+    // Zero-points without scales.
+    {
+        auto attr = base_attr();
+        attr.set_zero_points(
+                wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    }
+    // Weights only.
+    for (auto arg : {DNNL_ARG_SRC, DNNL_ARG_DST}) {
+        EXPECT_ANY_THROW({
+            auto attr = base_attr();
+            attr.set_zero_points(
+                    arg, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+            make_pd(data_type::f16, data_type::u4, attr);
+        });
+    }
+    EXPECT_ANY_THROW({
+        auto attr = base_attr();
+        attr.set_scales(
+                DNNL_ARG_SRC, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        make_pd(data_type::f16, data_type::u4, attr);
+    });
+    // f32 scales.
+    {
+        auto attr = base_attr();
+        attr.set_scales(wei, mask_kn, {32, 1}, data_type::f32, false, sbzp);
+        attr.set_zero_points(
+                wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    }
+    // Integer weights without fpmath applied to them.
+    {
+        primitive_attr attr;
+        attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        attr.set_zero_points(
+                wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+        EXPECT_ANY_THROW(make_pd(data_type::f16, data_type::u4, attr));
+    }
+    // Supported configurations.
+    if (get_test_engine_kind() == engine::kind::gpu) {
+        // Grouped, per-channel, and one group spanning K.
+        for (const memory::dims &groups :
+                {memory::dims {32, 1}, memory::dims {}, memory::dims {K, 1}}) {
+            const int mask = groups.empty() ? 1 << 1 : mask_kn;
+            auto attr = base_attr();
+            attr.set_scales(wei, mask, groups, data_type::f16, false, sbzp);
+            attr.set_zero_points(
+                    wei, mask, groups, data_type::f16, false, sbzp);
+            for (auto wei_dt : {data_type::u4, data_type::s4, data_type::u8})
+                EXPECT_NO_THROW(make_pd(data_type::f16, wei_dt, attr));
+        }
+        // Host-side scalar zero-point keeps its mode.
+        {
+            auto attr = base_attr();
+            attr.set_scales(wei, mask_kn, {32, 1}, data_type::f16, false, sbzp);
+            attr.set_zero_points(wei, 0, {}, data_type::f16, true, sbzp);
+            EXPECT_NO_THROW(make_pd(data_type::f16, data_type::u4, attr));
+        }
+    }
+}
+
 TEST_F(attr_test_t, TestPrecomputedReductionsWithGroups) {
     dnnl::primitive_attr attr;
 
