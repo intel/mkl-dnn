@@ -180,8 +180,9 @@ Notes:
   native reference, so the modifier is a no-op in that case (it does not disable
   `--fast-ref`). This avoids regressing configs that already have a fast CPU
   reference.
-- The panel width is at least 128 and is aligned to the destination scale/zero-point
-  groups so no block/group quantization parameter straddles a panel boundary.
+- The panel width is at least 128 and is aligned to the `M`/`N`-direction
+  scale/zero-point groups of all quantization tensors so no block/group
+  quantization parameter straddles a panel boundary.
 - The driver prints whether the periodic fill was selected (and the chosen
   `panel_m`/`panel_n`), or the reason it fell back to the normal reference, at
   verbose level >= 0.
@@ -189,7 +190,8 @@ Notes:
   intended for speeding up local validation of large shapes, not as a replacement
   for the default reference in CI. It is disabled by default.
 - Unsupported configurations (dropout/stochastic rounding, sparse/grouped
-  dimensions, and shapes too small to form a 128-wide panel) automatically fall
+  dimensions, the in-place binary post-op, and shapes too small to form a
+  128-wide panel) automatically fall
   back to the normal reference. Runtime dimensions, binary/prelu post-ops, and
   dynamic/derived destination scales (e.g. `dst:dynamic_fp:...`, `dst:mx:e8m0:...`)
   are supported: because the panel is a multiple of the destination-scale group,

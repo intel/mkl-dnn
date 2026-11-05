@@ -593,6 +593,13 @@ tiled_fill_t make_tiled_fill(const prb_t *prb) {
         t.reason = "stochastic rounding is unsupported";
         return t;
     }
+    // The in-place binary post-op (mul_inplace) takes its right-hand side
+    // straight from the initial dst contents, which are only periodized when a
+    // sum post-op is present; without that the output would not be periodic.
+    if (prb->attr.post_ops.has_inplace_binary()) {
+        t.reason = "in-place binary post-op is unsupported";
+        return t;
+    }
     // Dynamic/derived dst scales (mx, dynamic_fp) are supported: the scale is
     // computed per dst block from that block's values, and because the periodic
     // output repeats with a panel-aligned period, the per-block scales are
@@ -603,11 +610,37 @@ tiled_fill_t make_tiled_fill(const prb_t *prb) {
     // post-op result periodic.
 
     // Panel periods must be multiples of the dst scale groups so that no dst
-    // scale group straddles a panel boundary. K-direction groups are irrelevant
+    // scale group straddles a panel boundary, and likewise of any M/N-direction
+    // groups of the other quantization tensors so that their periodized
+    // patterns share the panel period. K-direction groups are irrelevant
     // because K is never tiled.
+    auto lcm = [](int64_t a, int64_t b) {
+        if (a <= 0) a = 1;
+        if (b <= 0) b = 1;
+        int64_t x = a, y = b;
+        while (y > 0) {
+            const int64_t r = x % y;
+            x = y;
+            y = r;
+        }
+        return a / x * b;
+    };
     const auto &dsg = prb->attr.scales.get(DNNL_ARG_DST).groups;
-    const int64_t dst_M_group = !dsg.empty() ? dsg[0] : 1;
-    const int64_t dst_N_group = !dsg.empty() ? dsg[1] : 1;
+    const auto &ssg = prb->attr.scales.get(DNNL_ARG_SRC).groups;
+    const auto &wsg = prb->attr.scales.get(DNNL_ARG_WEIGHTS).groups;
+    const auto &dzg = prb->attr.zero_points.get(DNNL_ARG_DST).groups;
+    const auto &szg = prb->attr.zero_points.get(DNNL_ARG_SRC).groups;
+    const auto &wzg = prb->attr.zero_points.get(DNNL_ARG_WEIGHTS).groups;
+    // src is [.., M, K]: groups[0] is along M. wei is [.., K, N]: groups[1] is
+    // along N. dst is [.., M, N]: groups[0] along M, groups[1] along N.
+    int64_t dst_M_group = !dsg.empty() ? dsg[0] : 1;
+    int64_t dst_N_group = !dsg.empty() ? dsg[1] : 1;
+    if (!ssg.empty()) dst_M_group = lcm(dst_M_group, ssg[0]);
+    if (!szg.empty()) dst_M_group = lcm(dst_M_group, szg[0]);
+    if (!dzg.empty()) dst_M_group = lcm(dst_M_group, dzg[0]);
+    if (!wsg.empty()) dst_N_group = lcm(dst_N_group, wsg[1]);
+    if (!wzg.empty()) dst_N_group = lcm(dst_N_group, wzg[1]);
+    if (!dzg.empty()) dst_N_group = lcm(dst_N_group, dzg[1]);
 
     const int64_t pm = pick_panel(dst_M_group, prb->m);
     const int64_t pn = pick_panel(dst_N_group, prb->n);

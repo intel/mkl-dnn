@@ -929,8 +929,11 @@ static std::vector<int64_t> quant_period(const dnn_mem_t &fp, int owner_ndims,
                 : 1;
         int64_t per;
         switch (role) {
-            case ROLE_M: per = MIN2(tf.panel_m / g, pdims[p]); break;
-            case ROLE_N: per = MIN2(tf.panel_n / g, pdims[p]); break;
+            // div_up: when the dim is untiled (panel == full extent) and the
+            // group does not divide it evenly, the grouped extent rounds up;
+            // flooring would spuriously periodize the trailing partial group.
+            case ROLE_M: per = MIN2(div_up(tf.panel_m, g), pdims[p]); break;
+            case ROLE_N: per = MIN2(div_up(tf.panel_n, g), pdims[p]); break;
             case ROLE_BATCH: per = tf.tile_batch ? 1 : pdims[p]; break;
             default: per = pdims[p]; break; // K: never tiled.
         }
