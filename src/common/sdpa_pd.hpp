@@ -237,6 +237,7 @@ struct sdpa_fwd_pd_t : public sdpa_pd_t {
             case DNNL_ARG_VALUES: return src_md(2);
             case DNNL_ARG_ATTN_MASK: return src_md(3);
             case DNNL_ARG_ATTN_MASK_FILL: return desc()->fill_md();
+            case DNNL_ARG_SCALE: return desc()->scale_md();
             case DNNL_ARG_DST: return dst_md(0, user_input);
             default: return primitive_desc_t::arg_md(arg);
         }
