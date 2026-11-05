@@ -39,6 +39,7 @@
 #include "cpu/x64/cpu_isa_traits.hpp"
 #include "cpu/x64/jit_uni_softmax.hpp"
 #include "cpu/x64/matmul/brgemm_matmul_utils.hpp"
+#include "cpu/x64/sdpa/sdpa_brgemm_copy.hpp"
 #include "cpu/x64/sdpa/sdpa_full_softmax_select_ir.hpp"
 
 namespace dnnl {
@@ -81,7 +82,7 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
         const std::vector<sdpa_mm1_post_op_t> *post_ops = nullptr,
         bool select_as_postop = false, bool *amx_need_config = nullptr,
         char *amx_palette = nullptr, size_t *amx_wsp = nullptr,
-        dim_t full_output_width = 0) {
+        dim_t full_output_width = 0, bool b_is_vnni = false) {
     CHECK(brgemm_desc_init(&brg, isa_undef, brgemm_addr, dt, dt,
             /*transA=*/false, /*transB=*/false, brgemm_row_major,
             /*alpha=*/1.0f, beta, lda, ldb, ldc, M, N, K, /*strides=*/nullptr));
@@ -156,10 +157,11 @@ status_t build_brgemm_desc(brgemm_desc_t &brg, data_type_t dt, float beta,
     const bool amx_vnni_k_tail = mayiuse(avx512_core_amx)
             && (dt == data_type::bf16 || amx_fp16)
             && K % data_type_vnni_granularity(dt) != 0;
-    if (amx_vnni_k_tail) {
+    if (amx_vnni_k_tail || b_is_vnni) {
         brgemm_attr_t brgattr;
-        brgattr.extendable_k = true;
-        brgattr.wary_A_k_tail_read = true;
+        brgattr.b_is_vnni = b_is_vnni;
+        brgattr.extendable_k = amx_vnni_k_tail;
+        brgattr.wary_A_k_tail_read = amx_vnni_k_tail;
         CHECK(brgemm_desc_set_attr(&brg, brgattr));
     }
 
@@ -205,6 +207,16 @@ status_t configure(const sdpa_full_softmax_params_t &params,
         return status::unimplemented;
 
     const size_t qk_dt_sz = types::data_type_size(p_.mm_dt);
+    const dim_t seq_q = p_.seq_q;
+    const dim_t seq_kv = p_.seq_kv;
+    const dim_t hs_qk = p_.head_size_qk;
+    const dim_t hs_v = p_.head_size_v;
+    const int row_dim = p_.ndims - 2;
+    const dim_t k_seq_stride = p_.mm1_transpose_b ? p_.k_strides[row_dim]
+                                                  : p_.k_strides[p_.ndims - 1];
+    const dim_t k_hs_stride = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
+                                                 : p_.k_strides[row_dim];
+    const bool mm1_transpose_k = k_seq_stride != 1;
 
     const bool needs_vnni_b = p_.mm_dt == data_type::bf16
             || (p_.mm_dt == data_type::f16
@@ -214,19 +226,34 @@ status_t configure(const sdpa_full_softmax_params_t &params,
 
     const dim_t k_pack = needs_vnni_b ? 2 : 1;
     const bool pack_b = needs_vnni_b;
+    const bool transpose_v = p_.v_strides[p_.ndims - 1] != 1;
+    const bool need_vt = pack_b || transpose_v;
+    const dim_t vt_k_pack = p_.mm_dt == data_type::f16 && transpose_v
+                    && mayiuse(avx512_core_fp16)
+            ? data_type_vnni_granularity(p_.mm_dt)
+            : k_pack;
+    conf.vt_k_pack = vt_k_pack;
+    const bool mm2_b_is_vnni = p_.mm_dt == data_type::f16 && vt_k_pack > 1
+            && !mayiuse(avx512_core_amx_fp16);
+    const dim_t kt_k_pack = p_.mm_dt == data_type::f16 && mm1_transpose_k
+                    && mayiuse(avx512_core_fp16)
+            ? data_type_vnni_granularity(p_.mm_dt)
+            : k_pack;
+    conf.kt_k_pack = kt_k_pack;
     const bool amx_vnni_pack = pack_b && mayiuse(avx512_core_amx)
             && (p_.mm_dt == data_type::bf16 || mayiuse(avx512_core_amx_fp16));
-    const dim_t b_k_pad
-            = amx_vnni_pack ? matmul::get_wei_k_blk(p_.mm_dt) : k_pack;
+    const dim_t wei_k_blk = matmul::get_wei_k_blk(p_.mm_dt);
+    const dim_t kt_required_block
+            = (amx_vnni_pack || mm1_transpose_k) ? wei_k_blk : dim_t(1);
+    // Both values are lower bounds. Round explicitly so K padding remains a
+    // multiple of the pack step even if the matmul block size changes.
+    const dim_t kt_k_pad
+            = utils::rnd_up(nstl::max(kt_k_pack, kt_required_block), kt_k_pack);
+    const dim_t vt_k_pad = (amx_vnni_pack || transpose_v) ? wei_k_blk : k_pack;
 
     conf.b_k_pack = k_pack;
-    conf.b_k_pad = b_k_pad;
-
-    const dim_t seq_q = p_.seq_q;
-    const dim_t seq_kv = p_.seq_kv;
-    const dim_t hs_qk = p_.head_size_qk;
-    const dim_t hs_v = p_.head_size_v;
-    const int row_dim = p_.ndims - 2;
+    conf.kt_k_pad = kt_k_pad;
+    conf.vt_k_pad = vt_k_pad;
 
     const dim_t l2_budget_bytes
             = static_cast<dim_t>(3 * platform::get_per_core_cache_size(2) / 4);
@@ -258,7 +285,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     dim_t kv_block = b_panel_rows > 0 ? static_cast<dim_t>(b_panel_budget_bytes
                                                 / (b_panel_rows * qk_dt_sz))
                                       : seq_kv;
-    const dim_t min_granule = nstl::max<dim_t>(16, b_k_pad);
+    const dim_t min_granule = nstl::max<dim_t>(16, vt_k_pad);
     const dim_t granule
             = kv_block >= 64 ? 64 : (kv_block >= 32 ? 32 : min_granule);
     kv_block = nstl::max<dim_t>(utils::rnd_dn(kv_block, granule), (dim_t)16);
@@ -297,19 +324,21 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // [hs_qk, seq_kv] transpose is materialised once (see execute); a K that is
     // logically pre-transposed but physically stored with hs_qk contiguous
     // therefore still gets transposed here.
-    const dim_t k_seq_stride = p_.mm1_transpose_b ? p_.k_strides[row_dim]
-                                                  : p_.k_strides[p_.ndims - 1];
-    const dim_t k_hs_stride = p_.mm1_transpose_b ? p_.k_strides[p_.ndims - 1]
-                                                 : p_.k_strides[row_dim];
     conf.k_seq_stride = k_seq_stride;
     conf.k_hs_stride = k_hs_stride;
-    const bool mm1_transpose_k = k_seq_stride != 1;
     conf.mm1_transpose_k = mm1_transpose_k;
     // mm1 materialises a dense (and, for bf16/f16, VNNI-packed) [hs_qk, seq_kv]
     // B tile whenever it must transpose K or pack it; its ldb is then the dense
     // seq_kv. Only the plain-f32, already-[hs_qk, seq_kv] case reads K in place.
     const bool need_kt = mm1_transpose_k || pack_b;
-    const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride;
+    const dim_t kt_ld = need_kt
+            ? sdpa_brgemm_copy::b_packer_t::packed_ld(seq_kv)
+            : seq_kv;
+    const dim_t vt_ld
+            = need_vt ? sdpa_brgemm_copy::b_packer_t::packed_ld(hs_v) : hs_v;
+    conf.kt_ld = kt_ld;
+    conf.vt_ld = vt_ld;
+    const dim_t mm1_ldb = need_kt ? kt_ld : k_hs_stride;
 
     // Build the mm1/mm2 BRGEMM descriptors (no JIT) into `descs`, plus each
     // kernel's AMX palette + tile-store wsp into the conf (the per-thread
@@ -325,15 +354,19 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 m, kv, hs_qk, /*lda=*/p_.q_strides[row_dim], /*ldb=*/mm1_ldb,
                 /*ldc=*/seq_kv, &p_.mm1_post_ops, select_postop,
                 &mm1_amx.need_config, mm1_amx.palette, &mm1_amx.wsp_size,
-                /*full_output_width=*/seq_kv));
-        // mm2 B is the user V in place for f32 (ldb = its row stride), or a
-        // dense VNNI-packed [seq_kv, hs_v] buffer for bf16/f16 (ldb = hs_v).
+                /*full_output_width=*/seq_kv,
+                /*b_is_vnni=*/p_.mm_dt == data_type::f16 && kt_k_pack > 1
+                        && !mayiuse(avx512_core_amx_fp16)));
+        // mm2 B is V in place when its columns are contiguous and no VNNI
+        // packing is needed; otherwise it uses the materialized V buffer.
         // K = kv (one kv-block of the reduction); beta accumulates across them.
         CHECK(build_brgemm_desc(descs.mm2_desc[qi][ki], p_.mm_dt, mm2_beta, m,
                 hs_v, kv, /*lda=*/seq_kv,
-                /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim], /*ldc=*/mm2_ldc,
+                /*ldb=*/need_vt ? vt_ld : p_.v_strides[row_dim],
+                /*ldc=*/mm2_ldc,
                 /*post_ops=*/nullptr, /*select_postop=*/false,
-                &mm2_amx.need_config, mm2_amx.palette, &mm2_amx.wsp_size));
+                &mm2_amx.need_config, mm2_amx.palette, &mm2_amx.wsp_size, 0,
+                mm2_b_is_vnni));
         descs.mm_valid[qi][ki] = true;
         return status::success;
     };
@@ -371,8 +404,9 @@ status_t configure(const sdpa_full_softmax_params_t &params,
             if (mm2_beta != 0.0f) {
                 CHECK(build_brgemm_desc(descs.mm2_desc_beta0[qi], p_.mm_dt,
                         /*beta=*/0.0f, ms[qi], hs_v, kv_block, /*lda=*/seq_kv,
-                        /*ldb=*/pack_b ? hs_v : p_.v_strides[row_dim],
-                        /*ldc=*/mm2_ldc));
+                        /*ldb=*/need_vt ? vt_ld : p_.v_strides[row_dim],
+                        /*ldc=*/mm2_ldc, nullptr, false, nullptr, nullptr,
+                        nullptr, 0, mm2_b_is_vnni));
                 descs.beta0_valid[qi] = true;
             }
         }
@@ -441,21 +475,21 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // ONCE (see execute) into a shared [batch x num_head_kv x hs_qk x seq_kv]
     // buffer that follows the per-thread blocks; kt_global_bytes sizes it. For
     // bf16/f16 the tile is VNNI-packed over hs_qk (K padded to k_pack), so the
-    // buffer uses rnd_up(hs_qk, b_k_pad) rows.
+    // buffer uses rnd_up(hs_qk, kt_k_pad) rows.
     const dim_t num_head_kv
             = p_.group_head > 0 ? p_.num_head_q / p_.group_head : 0;
     conf.num_head_kv = num_head_kv;
-    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, b_k_pad);
-    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, b_k_pad);
+    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, kt_k_pad);
+    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, vt_k_pad);
     if (need_kt && num_head_kv > 0)
         conf.kt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
-                * hs_qk_pad * seq_kv * qk_dt_sz;
-    // bf16/f16: mm2's V is VNNI-packed once per (batch, kv_head) into a shared
-    // [batch x num_head_kv x rnd_up(seq_kv, b_k_pad) x hs_v] buffer following the
+                * hs_qk_pad * kt_ld * qk_dt_sz;
+    // mm2's V is packed once per (batch, kv_head) into a shared
+    // [batch x num_head_kv x rnd_up(seq_kv, vt_k_pad) x hs_v] buffer following the
     // transposed-K buffer.
-    if (pack_b && num_head_kv > 0)
+    if (need_vt && num_head_kv > 0)
         conf.vt_global_bytes = static_cast<size_t>(p_.batch) * num_head_kv
-                * seq_kv_pad * hs_v * qk_dt_sz;
+                * seq_kv_pad * vt_ld * qk_dt_sz;
 
     return status::success;
 }
@@ -468,6 +502,7 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
     const dim_t q_block_ = conf.q_block, q_tail_ = conf.q_tail;
     const dim_t kv_block_ = conf.kv_block, kv_tail_ = conf.kv_tail;
     const dim_t b_k_pack_ = conf.b_k_pack;
+    const dim_t kt_k_pack_ = conf.kt_k_pack;
     const bool mm1_transpose_k_ = conf.mm1_transpose_k;
     const dim_t k_hs_stride_ = conf.k_hs_stride;
     auto &mm1_kernels_ = kernels.mm1_kernels;
@@ -481,12 +516,27 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
 
     const dim_t seq_kv = p_.seq_kv;
     const dim_t hs_qk = p_.head_size_qk;
+    const dim_t hs_v = p_.head_size_v;
     const int row_dim = p_.ndims - 2;
     // Packing / transpose / leading-dim decisions mirror configure(); needed
     // only for the (rare) select-post-op compile-failure rebuild below.
     const bool pack_b = b_k_pack_ == 2;
+    const bool need_vt = pack_b || p_.v_strides[p_.ndims - 1] != 1;
     const bool need_kt = mm1_transpose_k_ || pack_b;
-    const dim_t mm1_ldb = need_kt ? seq_kv : k_hs_stride_;
+    const dim_t mm1_ldb = need_kt ? conf.kt_ld : k_hs_stride_;
+
+    if (need_kt) {
+        kernels.k_packer.reset(new sdpa_brgemm_copy::b_packer_t());
+        CHECK(kernels.k_packer->init(hs_qk, seq_kv, conf.k_hs_stride,
+                conf.k_seq_stride, conf.kt_ld, conf.kt_k_pad, p_.mm_dt));
+    }
+    if (need_vt) {
+        const dim_t v_row = p_.v_strides[row_dim];
+        const dim_t v_col = p_.v_strides[p_.ndims - 1];
+        kernels.v_packer.reset(new sdpa_brgemm_copy::b_packer_t());
+        CHECK(kernels.v_packer->init(seq_kv, hs_v, v_row, v_col, conf.vt_ld,
+                conf.vt_k_pad, p_.mm_dt));
+    }
 
     auto destroy_kernels = [&]() {
         for (int qi = 0; qi < 2; ++qi) {
@@ -545,7 +595,10 @@ status_t create_kernels(cpu_isa_t isa, const sdpa_full_softmax_conf_t &conf,
                         /*ldb=*/mm1_ldb, /*ldc=*/seq_kv, &p_.mm1_post_ops,
                         /*select_postop=*/false,
                         /*amx_need_config=*/nullptr, /*amx_palette=*/nullptr,
-                        /*amx_wsp=*/nullptr, /*full_output_width=*/seq_kv));
+                        /*amx_wsp=*/nullptr, /*full_output_width=*/seq_kv,
+                        /*b_is_vnni=*/p_.mm_dt == data_type::f16
+                                && kt_k_pack_ > 1
+                                && !mayiuse(avx512_core_amx_fp16)));
                 CHECK(brgemm_kernel_create(&mm1_kernels_[qi][ki], mm1_brg));
                 CHECK(brgemm_kernel_create(
                         &mm2_kernels_[qi][ki], descs.mm2_desc[qi][ki]));
@@ -647,7 +700,6 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     const dim_t b_k_pack_ = conf.b_k_pack;
     const bool mm1_transpose_k_ = conf.mm1_transpose_k;
     const dim_t k_seq_stride_ = conf.k_seq_stride;
-    const dim_t k_hs_stride_ = conf.k_hs_stride;
     const dim_t num_head_kv_ = conf.num_head_kv;
     const size_t amx_wsp_bytes_ = conf.amx_wsp_bytes;
     const size_t scratch_per_thread_ = conf.scratch_per_thread;
@@ -722,20 +774,20 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // VNNI-pack factor decided in init from dtype AND ISA (b_k_pack_ == 1 for
     // f32 and the non-AMX f16 FMA path, 2 for bf16 / AMX-FP16 f16).
     const dim_t k_pack = b_k_pack_;
-    const dim_t b_k_pad = conf.b_k_pad;
+    const dim_t kt_k_pack_ = conf.kt_k_pack;
+    const dim_t kt_k_pad = conf.kt_k_pad;
+    const dim_t vt_k_pad = conf.vt_k_pad;
     const bool pack_b = k_pack > 1;
+    const bool need_vt = pack_b || p_.v_strides[ndims - 1] != 1;
     // mm1 materialises a dense (VNNI-packed for bf16/f16) [hs_qk, seq_kv] B
     // tile whenever it must transpose or pack K; f32 with contiguous seq_kv
     // reads K in place.
     const bool need_kt = transpose_b || pack_b;
-    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, b_k_pad);
-    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, b_k_pad);
+    const dim_t hs_qk_pad = utils::rnd_up(hs_qk, kt_k_pad);
+    const dim_t seq_kv_pad = utils::rnd_up(seq_kv, vt_k_pad);
     // Element strides to walk the K tensor's seq_kv / hs_qk axes when
     // materialising the dense [hs_qk, seq_kv] transpose (see init: derived from
     // the physical layout, so this handles both natural and pre-transposed K).
-    const dim_t k_row = k_seq_stride_;
-    const dim_t k_col = k_hs_stride_;
-
     // Materialise mm1's B (transposed K) and, for bf16/f16, mm2's B (V) ONCE
     // per (batch, kv_head) up front, into shared buffers that follow the
     // per-thread blocks. Each mm1 B tile is a dense [hs_qk, seq_kv] transpose
@@ -746,12 +798,14 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
     // avoids the redundant per-query-tile pack. The copy is dtype-agnostic
     // (memcpy of qk_dt_sz bytes per element).
     const dim_t num_head_kv = num_head_kv_;
-    const size_t kt_head_elems = static_cast<size_t>(hs_qk_pad) * seq_kv;
-    const size_t vt_head_elems = static_cast<size_t>(seq_kv_pad) * hs_v;
+    const size_t kt_head_elems = static_cast<size_t>(hs_qk_pad) * conf.kt_ld;
+    const size_t vt_head_elems = static_cast<size_t>(seq_kv_pad) * conf.vt_ld;
     char *kt_all = need_kt ? static_cast<char *>(scratch_base)
                     + static_cast<size_t>(nthr) * block_size
                            : nullptr;
-    char *vt_all = pack_b ? kt_all + kt_global_bytes_ : nullptr;
+    char *vt_all = need_vt ? static_cast<char *>(scratch_base)
+                    + static_cast<size_t>(nthr) * block_size + kt_global_bytes_
+                           : nullptr;
     if (need_kt) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
@@ -762,22 +816,10 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                     + (static_cast<size_t>(batch_idx) * num_head_kv
                               + kv_head_idx)
                             * kt_head_elems * qk_dt_sz;
-            // Zero padded reduction rows for BRGEMM's VNNI/AMX K block.
-            if (pack_b && hs_qk_pad > hs_qk)
-                std::memset(kt, 0, kt_head_elems * qk_dt_sz);
-            for (dim_t kv = 0; kv < seq_kv; ++kv)
-                for (dim_t h = 0; h < hs_qk; ++h) {
-                    const size_t dst = pack_b ? (h / k_pack) * seq_kv * k_pack
-                                    + kv * k_pack + h % k_pack
-                                              : h * seq_kv + kv;
-                    std::memcpy(kt + dst * qk_dt_sz,
-                            kp + (kv * k_row + h * k_col) * qk_dt_sz, qk_dt_sz);
-                }
+            kernels.k_packer->execute(kp, kt);
         });
     }
-    if (pack_b) {
-        const dim_t v_row = p_.v_strides[row_dim];
-        const dim_t v_col = p_.v_strides[ndims - 1];
+    if (need_vt) {
         parallel_nd(
                 p_.batch, num_head_kv, [&](dim_t batch_idx, dim_t kv_head_idx) {
             const char *vp = v_base
@@ -787,15 +829,7 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                     + (static_cast<size_t>(batch_idx) * num_head_kv
                               + kv_head_idx)
                             * vt_head_elems * qk_dt_sz;
-            if (seq_kv_pad > seq_kv)
-                std::memset(vt, 0, vt_head_elems * qk_dt_sz);
-            for (dim_t kv = 0; kv < seq_kv; ++kv)
-                for (dim_t n = 0; n < hs_v; ++n) {
-                    const size_t dst = (kv / k_pack) * hs_v * k_pack
-                            + n * k_pack + kv % k_pack;
-                    std::memcpy(vt + dst * qk_dt_sz,
-                            vp + (kv * v_row + n * v_col) * qk_dt_sz, qk_dt_sz);
-                }
+            kernels.v_packer->execute(vp, vt);
         });
     }
 
@@ -866,16 +900,16 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
                     + (static_cast<size_t>(batch_idx) * num_head_kv
                               + kv_head_idx)
                             * kt_head_elems * qk_dt_sz;
-        // mm2 B: VNNI-packed V tile for bf16/f16, else the user V in place.
-        const void *v_b_ptr = pack_b ? vt_all
+        // mm2 B: materialized V tile when packing is needed, else V in place.
+        const void *v_b_ptr = need_vt ? vt_all
                         + (static_cast<size_t>(batch_idx) * num_head_kv
                                   + kv_head_idx)
                                 * vt_head_elems * qk_dt_sz
-                                     : static_cast<const void *>(v_ptr);
+                                      : static_cast<const void *>(v_ptr);
         // Element stride to advance one seq_kv column of mm1's B: VNNI pack
         // factor for a packed tile, 1 for a dense transpose, else the K
         // tensor's seq_kv physical stride (== 1 for in-place, non-transposed).
-        const dim_t mm1_bcol = need_kt ? (pack_b ? k_pack : 1) : k_seq_stride_;
+        const dim_t mm1_bcol = need_kt ? kt_k_pack_ : k_seq_stride_;
         const dim_t v_row = p_.v_strides[row_dim];
 
         // Build the binary post-op rhs table ONCE in chain order (it does not
@@ -1013,10 +1047,10 @@ status_t execute(const sdpa_full_softmax_conf_t &conf,
             brgemm_batch_element_t be;
             be.ptr.A = static_cast<const char *>(prob)
                     + static_cast<size_t>(kv0) * qk_dt_sz;
-            be.ptr.B = pack_b ? static_cast<const char *>(v_b_ptr)
-                            + static_cast<size_t>(kv0 / k_pack) * hs_v * k_pack
-                                    * qk_dt_sz
-                              : static_cast<const char *>(v_b_ptr)
+            be.ptr.B = need_vt ? static_cast<const char *>(v_b_ptr)
+                            + static_cast<size_t>(kv0 / conf.vt_k_pack)
+                                    * conf.vt_ld * conf.vt_k_pack * qk_dt_sz
+                               : static_cast<const char *>(v_b_ptr)
                             + static_cast<size_t>(kv0) * v_row * qk_dt_sz;
             brgemm_kernel_execute(k, 1, &be, mm2_c, amx_wsp);
         };
