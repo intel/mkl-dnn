@@ -8,6 +8,72 @@
 --dtag=aBx16b 2x64x14x14
 --dtag=gOIhw16i16o,gOIhw2i4o2i,gOIhw2o4i2o,gOIhw4o8i2o 4x16x16x4x4
 
+# Matmul weights: plain/transposed to FP32-order blocks, with K/N tails.
+--reset
+--sdt=f32,f4_e2m1
+--ddt=f4_e2m1
+--stag=ab,ba
+--dtag=BA16a16b,BA16a32b,BA16a48b,BA16a64b
+32x192 64x64 34x50 1x1 1x17 17x1
+--sdt=f32 33x49
+
+--reset
+--sdt=f4_e2m1
+--ddt=f32,f4_e2m1
+--stag=BA16a16b,BA16a32b,BA16a48b,BA16a64b
+--dtag=ab,ba
+32x192 64x64 34x50 1x1 1x17 17x1
+--ddt=f32 33x49
+
+# Batched weights, including different bytes at batch boundaries.
+--reset
+--sdt=f32,f4_e2m1
+--ddt=f4_e2m1
+--stag=abc,acb
+--dtag=aCB16b16c,aCB16b32c,aCB16b48c,aCB16b64c
+2x32x192 3x34x50 3x1x1
+--sdt=f32 3x33x49 3x1x17 3x17x1
+
+--reset
+--sdt=f4_e2m1
+--ddt=f32,f4_e2m1
+--stag=aCB16b16c,aCB16b32c,aCB16b48c,aCB16b64c
+--dtag=abc,acb
+2x32x192 3x34x50 3x1x1
+--ddt=f32 3x33x49 3x1x17 3x17x1
+
+# Raw FP4 reblocking, same-layout padding, and changed nibble pairing.
+--reset
+--sdt=f4_e2m1
+--ddt=f4_e2m1
+--stag=ab,ba,BA16a16b,BA16a48b
+--dtag=ab,ba,BA16a16b,BA16a64b
+32x192 34x50 1x1 1x17 17x1
+--stag=BA16a16b,BA16a48b
+--dtag=BA16a16b,BA16a64b 33x49
+--stag=abc,acb,aCB16b16c,aCB16b48c
+--dtag=abc,acb,aCB16b16c,aCB16b64c
+2x32x192 3x1x1
+--stag=aCB16b16c,aCB16b48c
+--dtag=aCB16b16c,aCB16b64c 3x33x49 3x1x17 3x17x1
+
+# Odd plain rows require explicit even strides for sub-byte memory descriptors.
+--reset
+--sdt=f4_e2m1
+--ddt=f4_e2m1
+--dtag=BA16a16b,BA16a32b,BA16a48b,BA16a64b
+--strides=50x1:,1x34: 33x49
+--dtag=aCB16b16c,aCB16b32c,aCB16b48c,aCB16b64c
+--strides=1650x50x1:,1666x1x34: 3x33x49
+
+--reset
+--sdt=f4_e2m1
+--ddt=f4_e2m1
+--stag=BA16a16b,BA16a32b,BA16a48b,BA16a64b
+--strides=:50x1,:1x34 33x49
+--stag=aCB16b16c,aCB16b32c,aCB16b48c,aCB16b64c
+--strides=:1650x50x1,:1666x1x34 3x33x49
+
 --reset
 --sdt=f4_e2m1
 --ddt=f32

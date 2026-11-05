@@ -58,8 +58,8 @@ status_t init_kernel_datatype(
             && utils::one_of(dt_b, data_type::u8, data_type::s8);
     brg->is_bf16 = (dt_a == data_type::bf16) && (dt_b == data_type::bf16);
     brg->is_f32 = (dt_a == data_type::f32)
-            && utils::one_of(
-                    dt_b, data_type::f32, data_type::bf16, data_type::f16);
+            && utils::one_of(dt_b, data_type::f32, data_type::bf16,
+                    data_type::f16, data_type::f4_e2m1);
     brg->is_f16 = (dt_a == data_type::f16)
             && utils::one_of(dt_b, data_type::f32, data_type::f16);
     brg->is_fp8 = one_of(dt_a, data_type::f8_e5m2, data_type::f8_e4m3)
@@ -225,7 +225,7 @@ int calculate_ldb_params(brgemm_desc_t *brg, const int try_ld_block2) {
     brg->ldb2_tail = brg->ldb % brg->ld_block2;
 
     if (brg->ldb2 == 0) brg->ld_block2 = nstl::max(1, brg->ldb2_tail);
-    brg->embd_bcst = brg->is_f32
+    brg->embd_bcst = brg->is_f32 && !brg->is_f4_fused_decompress
             && (brg->ldb2_tail <= 1 && brg->ldb2 == 0)
             /*only avx512 or more can bcast*/
             && is_superset(brg->isa_impl, avx512_core);
@@ -268,7 +268,14 @@ int calculate_max_bcast_block(brgemm_desc_t *brg, const int adj_ld_block2) {
             ? 5
             : 0;
 
-    max_isa_regs -= b_vnni_regs + non_int8_vnni_regs + fp8_emu_regs;
+    // fused f4 decompression on non-AMX needs two registers to hold the
+    // f4->f32 lookup table and the permutation indices:
+    // see vmm_f4_lut() and vmm_f4_permd() in brgemm kernel
+    const int f4_decompress_regs
+            = brg->is_f4_fused_decompress_non_amx() ? 2 : 0;
+
+    max_isa_regs -= b_vnni_regs + non_int8_vnni_regs + fp8_emu_regs
+            + f4_decompress_regs;
 
     // --------------- microkernel ---------------
     // see vmm_inp_shift() in brgemm kernel
@@ -1008,11 +1015,14 @@ status_t brgemm_blocking_vmm(brgemm_desc_t *brg) {
     brg->bdb = brg->bcast_dim / brg->bd_block;
     brg->bdb_tail = brg->bcast_dim % brg->bd_block;
 
-    const int rd_unroll = 4;
+    // MXFP4 K-group size (OCP MX spec): one e8m0 scale per 32 f4 elems.
+    // Matches rd_block to the scale group so wei_scales apply once per block.
+    const int rd_unroll = brg->is_f4_fused_decompress ? 32 : 4;
     const bool req_emulation = brg->isa_impl != avx2_vnni_2
             && IMPLICATION(brg->is_fp8, brg->fp8_with_f16_vnni_block);
-    const data_type_t rd_block_dt
-            = get_mac_emu_data_type(brg->dt_a, brg->isa_impl, req_emulation);
+    const data_type_t rd_block_dt = brg->is_f4_fused_decompress
+            ? data_type::f32
+            : get_mac_emu_data_type(brg->dt_a, brg->isa_impl, req_emulation);
     if (rd_block_dt == dnnl_data_type_undef) return status::unimplemented;
     const int vnni_granularity
             = static_cast<int>(data_type_vnni_granularity(rd_block_dt));
@@ -1030,18 +1040,26 @@ status_t brgemm_blocking_vmm(brgemm_desc_t *brg) {
 }
 
 status_t brgemm_blocking(brgemm_desc_t *brg) {
-    const bool req_emulation = brg->isa_impl != avx2_vnni_2
-            && IMPLICATION(brg->is_fp8, brg->fp8_with_f16_vnni_block);
-    const data_type_t ld_step_compute_dt
-            = get_mac_emu_data_type(brg->dt_b, brg->isa_impl, req_emulation);
-    brg->ld_step = brg->is_f16_b_non_amx_vnni()
-            ? 2
-            : static_cast<int>(data_type_vnni_granularity(ld_step_compute_dt));
-    const data_type_t rd_step_compute_dt
-            = get_mac_emu_data_type(brg->dt_b, brg->isa_impl,
-                    IMPLICATION(brg->is_fp8, brg->fp8_with_f16_vnni_block));
-    brg->rd_step
-            = static_cast<int>(data_type_vnni_granularity(rd_step_compute_dt));
+    if (brg->is_f4_fused_decompress) {
+        // Fused f4 loads a single K row at a time (no VNNI packing along K).
+        // A is f32, B is f4 packed nibbles decompressed in the kernel to f32.
+        brg->ld_step = 1;
+        brg->rd_step = 1;
+    } else {
+        const bool req_emulation = brg->isa_impl != avx2_vnni_2
+                && IMPLICATION(brg->is_fp8, brg->fp8_with_f16_vnni_block);
+        const data_type_t ld_step_compute_dt = get_mac_emu_data_type(
+                brg->dt_b, brg->isa_impl, req_emulation);
+        brg->ld_step = brg->is_f16_b_non_amx_vnni()
+                ? 2
+                : static_cast<int>(
+                          data_type_vnni_granularity(ld_step_compute_dt));
+        const data_type_t rd_step_compute_dt
+                = get_mac_emu_data_type(brg->dt_b, brg->isa_impl,
+                        IMPLICATION(brg->is_fp8, brg->fp8_with_f16_vnni_block));
+        brg->rd_step = static_cast<int>(
+                data_type_vnni_granularity(rd_step_compute_dt));
+    }
 
     set_isa_impl(brg);
     if (brg->isa_impl == isa_undef) return status::unimplemented;

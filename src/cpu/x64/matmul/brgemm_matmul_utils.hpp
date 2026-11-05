@@ -244,11 +244,14 @@ struct brgemm_matmul_conf_t {
     bool is_bf16_with_int_wei = false;
     bool is_f16_with_int_wei = false;
     bool is_f32_with_int_wei = false;
+    bool is_f32_with_f4_wei = false;
     bool is_f32_f16 = false;
     bool is_f32_bf16 = false;
     bool is_xf16_fp8 = false;
     bool is_int4_weights = false;
     bool is_f4_via_convert = false;
+    int wei_packed_elems_per_byte = 0;
+    bool is_f4_fused_decompress = false;
     bool with_int8_grouped_quantization = false;
     // Enables the driver-side per-(M, N) f32 compensation tile that captures
     // the symmetric src/wei zero-point + 128-shift correction in the grouped
@@ -373,6 +376,18 @@ struct brgemm_matmul_conf_utils_t {
         if (bgmmc.is_runtime_N) return true;
         if (bgmmc.is_xf16_fp8) return true;
         if (bgmmc.is_bf16_with_int_wei) return true;
+        if (bgmmc.is_f32_with_f4_wei) {
+            // For M<=4 the fused path wins ~2x; for larger M results
+            // are mixed.
+            constexpr dim_t fused_M_threshold = 4;
+            const bool fused_eligible = bgmmc.wei_scales_dt == data_type::e8m0
+                    && bgmmc.wei_scales_k_gsize == 32 && bgmmc.N % 2 == 0
+                    && bgmmc.M <= fused_M_threshold && !get_blocked_B()
+                    && !check_is_transposed(bgmmc.wei_tag)
+                    && bgmmc.wei_tag != format_tag::adbc;
+            if (fused_eligible) return false;
+            return true;
+        }
         if (bgmmc.is_f16_with_int_wei) return true;
         if (bgmmc.is_f32_with_int_wei) return true;
         if (bgmmc.with_int8_grouped_quantization
@@ -475,6 +490,8 @@ struct brgemm_matmul_conf_utils_t {
         return int8_grouped_quantization_dt;
     }
 
+    inline bool is_f32_with_f4_wei() const { return f32_with_f4_wei_dt; }
+
     inline bool with_weights_decompression() const {
         return !utils::one_of(bgmmc.src_dt, data_type::s8, data_type::u8,
                        data_type::s4, data_type::u4)
@@ -495,6 +512,16 @@ struct brgemm_matmul_conf_utils_t {
     inline cpu_isa_t get_isa() const { return isa_; }
 
     int get_default_n_block(format_tag_t matrix_b_tag) const;
+    bool f4_packed_B_layout_allowed() const {
+        return is_f32_with_f4_wei() && bgmmc.ndims <= 3 && !bgmmc.is_runtime_M
+                && !bgmmc.is_runtime_N && !bgmmc.is_runtime_K && bgmmc.M > 4
+                && bgmmc.K % 32 == 0
+                && (bgmmc.is_wei_scale_per_k || bgmmc.K == 32)
+                && bgmmc.is_wei_scale_per_n && bgmmc.wei_scales_k_gsize == 32
+                && bgmmc.wei_scales_dt == data_type::e8m0
+                && !bgmmc.has_zero_point_b && !bgmmc.is_src_scale_per_k
+                && !bgmmc.is_src_zp_per_k;
+    }
     status_t set_or_check_B_tag(memory_desc_t &B_md,
             const dnnl::impl::cpu::matmul::matmul_helper_t &helper,
             bool init_n_tag = true) const;
@@ -517,6 +544,7 @@ private:
 
     const bool f32_dt, bf16_dt, f16_dt, f4_via_convert_dt, f8_dt, bf8_dt,
             int8_dt, bf32_dt;
+    const bool f32_with_f4_wei_dt;
     const bool weights_decompression_support, bf16_with_int_wei_dt, f32_f16_dt,
             f32_bf16_dt, f16_with_int_wei_dt, f32_with_int_wei_dt,
             int8_grouped_quantization_dt, bf16_fp8_dt, f16_fp8_dt;

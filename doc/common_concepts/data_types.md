@@ -177,14 +177,14 @@ table indicates data types support for every supported ISA:
 | ---------------------------------------------------- | ------- | ------- | ------- | ------- | ------- | ------- | ------- | -------- |
 | Intel AVX2                                           |         | `+`     |         |         | `+`(1)  |         |         |          |
 | Intel AVX2 with Intel DL Boost (int8)                |         | `+`     |         |         | `+`     |         |         |          |
-| Intel AVX-512                                        |         | `+`     | `.`(2)  |         | `+`(1)  |         |         |          |
-| Intel AVX-512 with Intel DL Boost (int8)             |         | `+`     | `.`(2)  |         | `+`     |         |         |          |
-| Intel AVX-512 with Intel DL Boost (int8, bf16)       |         | `+`     | `+`     |         | `+`     |         |         |          |
+| Intel AVX-512                                        |         | `+`     | `.`(2)  |         | `+`(1)  |         | `.`(4)  |          |
+| Intel AVX-512 with Intel DL Boost (int8)             |         | `+`     | `.`(2)  |         | `+`     |         | `.`(4)  |          |
+| Intel AVX-512 with Intel DL Boost (int8, bf16)       |         | `+`     | `+`     |         | `+`     |         | `.`(4)  |          |
 | Intel AVX2 with Intel DL Boost (int8) and NE_CONVERT |         | `+`     | `.`     | `.`     | `+`     |         |         |          |
-| Intel AVX10.1 with Intel AMX (int8, bf16)            |         | `+`     | `+`     | `.`(3)  | `+`     |         |         | `.`      |
-| Intel AVX10.1 with Intel AMX (int8, bf16, f16)       |         | `+`     | `+`     | `+`     | `+`     | `.`     |         | `.`      |
-| Intel AVX10.2                                        |         | `+`     | `+`     | `+`     | `+`     | `.`     |         | `.`      |
-| Intel AVX10.2 with Intel AMX (int8, bf16, fp16, fp8) |         | `+`     | `+`     | `+`     | `+`     | `+`     |         | `.`      |
+| Intel AVX10.1 with Intel AMX (int8, bf16)            |         | `+`     | `+`     | `.`(3)  | `+`     |         | `.`(4)  | `.`      |
+| Intel AVX10.1 with Intel AMX (int8, bf16, f16)       |         | `+`     | `+`     | `+`     | `+`     | `.`     | `.`(4)  | `.`      |
+| Intel AVX10.2                                        |         | `+`     | `+`     | `+`     | `+`     | `.`     | `.`(4)  | `.`      |
+| Intel AVX10.2 with Intel AMX (int8, bf16, fp16, fp8) |         | `+`     | `+`     | `+`     | `+`     | `+`     | `.`(4)  | `.`      |
 
 Legend:
 * `+` indicates oneDNN uses hardware-native compute support for this data type.
@@ -202,6 +202,9 @@ Footnotes:
    primitives might up-convert the data to `f32` before performing math operations.
    This can lead to scenarios where an `f16` primitive may perform slower than
    similar `f32` primitive.
+4. `f4_e2m1` weights are supported by MatMul with `f32` source and destination
+   via decompression to `f32` using Intel AVX-512. This includes MXFP4 weights
+   with `e8m0` scales for groups of 32 elements along the reduction dimension.
 
 ### Intel Graphics
 

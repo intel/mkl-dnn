@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/c_types_map.hpp"
+#include "common/math_utils.hpp"
 #include "common/nstl.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
@@ -330,6 +331,9 @@ private:
     // only, so the gemv path is never generated together with it.
     Xbyak::Opmask ace_load_A_mask = Xbyak::Opmask(2);
 
+    Xbyak::Opmask f4_k_hi_mask = Xbyak::Opmask(4);
+    Xbyak::Opmask f4_byte_tail_mask = Xbyak::Opmask(5);
+
     static int get_max_effective_vregs(const brgemm_desc_t &brg) {
         auto used_vregs = 0;
         if (brg.is_int8 && !brg.has_int8_vnni)
@@ -338,6 +342,8 @@ private:
             used_vregs = 5;
         else if (brg.is_f16_b_non_amx_vnni())
             used_vregs = 2;
+        // Fused f4: LUT + permd table.
+        if (brg.is_f4_fused_decompress_non_amx()) used_vregs += 2;
         return isa_num_vregs(brg.isa_impl) - used_vregs;
     }
 
@@ -439,6 +445,13 @@ private:
     Zmm bf16_emu_reserv_3() const noexcept { return Zmm(2); }
     Zmm bf16_emu_reserv_4() const noexcept { return Zmm(3); }
     // note: zmm reserv_5 is not necessary since it's only used for 'vdpbf16ps'
+
+    Vmm vmm_f4_lut() const noexcept {
+        return Vmm(isa_num_vregs(brg.isa_impl) - 1);
+    }
+    Vmm vmm_f4_permd() const noexcept {
+        return Vmm(isa_num_vregs(brg.isa_impl) - 2);
+    }
 
     // fp8 emulation convert
     Vmm vmm_fp8_emu_aux1() const noexcept {
@@ -682,6 +695,9 @@ dim_t jit_brgemm_kernel_t<Wmm>::A_offset(
 template <typename Wmm>
 dim_t jit_brgemm_kernel_t<Wmm>::B_offset(
         int ld, int rd, bool is_amx) const noexcept {
+    if (brg.is_f4_fused_decompress_non_amx()) {
+        return (rd * brg.LDB + ld * brg.ld_block) / 2;
+    }
     if (is_amx) {
         return brg.typesize_B * (brg.rd_step * ld * brg.ld_block);
     } else {
@@ -724,12 +740,17 @@ template <typename Wmm>
 dim_t jit_brgemm_kernel_t<Wmm>::rdb_B_offset() const noexcept {
     if (brg.is_gemv && brg.gemv_acc_is_vector())
         return static_cast<dim_t>(brg.rd_block) * brg.typesize_B;
+    if (brg.is_f4_fused_decompress_non_amx())
+        return static_cast<dim_t>(brg.rd_block) * brg.LDB / 2;
     return brg.rd_block_B_size() * brg.LDB;
 }
 
 template <typename Wmm>
 dim_t jit_brgemm_kernel_t<Wmm>::ldb_B_offset(
         int ld_block2, bool is_tail) const noexcept {
+    if (brg.is_f4_fused_decompress_non_amx())
+        return (is_tail) ? brg.ldb_tail * brg.ld_step / 2
+                         : ld_block2 * brg.ld_block * brg.ld_step / 2;
     // For TMM/AMX with blocked format, use rd_step instead of ld_step
     const auto step = brg.is_tmm ? brg.rd_step : brg.ld_step;
     return (is_tail) ? brg.typesize_B * brg.ldb_tail * step
@@ -1876,6 +1897,11 @@ void jit_brgemm_kernel_t<Wmm>::load_scales_to_vmm(const data_type_t type_in,
                 vcvtph2ps(Xmm(vmm_scales.getIdx()), Xmm(vmm_scales.getIdx()));
                 vbroadcastss(vmm_scales, Xmm(vmm_scales.getIdx()));
                 break;
+            case data_type::e8m0:
+                vpbroadcastb(vmm_scales, op);
+                uni_vpmovzxbd(vmm_scales, Xmm(vmm_scales.getIdx()));
+                uni_vpslld(vmm_scales, vmm_scales, 23);
+                break;
             default: assert(!"unsupported scales data type");
         }
     } else if (IMPLICATION(is_ld_tail, isa_has_masks(brg.isa_impl))) {
@@ -1896,6 +1922,10 @@ void jit_brgemm_kernel_t<Wmm>::load_scales_to_vmm(const data_type_t type_in,
                 uni_vpslld(vmm_scales, vmm_scales, 16);
                 break;
             case data_type::f16: vcvtph2ps(vmm_scales_masked, addr); break;
+            case data_type::e8m0:
+                uni_vpmovzxbd(vmm_scales_masked, addr);
+                uni_vpslld(vmm_scales, vmm_scales, 23);
+                break;
             default: assert(!"unsupported scales data type");
         }
     } else {
@@ -3595,6 +3625,23 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
     };
 
     auto load_B = [this, is_ld_tail](int vmm_load_idx, int rd, int ld) {
+        if (brg.is_f4_fused_decompress_non_amx()) {
+            const Vmm vmm_out = load(vmm_load_idx);
+            using Vmm_lower_t = typename vreg_traits_t<Vmm>::Vmm_lower_t;
+            const auto vmm_out_lower = Vmm_lower_t(vmm_out.getIdx());
+            const auto addr = ptr[reg_aux_B + B_offset(ld, rd)];
+            const bool use_byte_tail = is_ld_tail && brg.ldb_tail > 0;
+            if (use_byte_tail) {
+                vpmovzxbd(vmm_out_lower | f4_byte_tail_mask | T_z, addr);
+            } else {
+                uni_vpmovzxbd(vmm_out_lower, addr);
+            }
+            vpermd(vmm_out, vmm_f4_permd(), vmm_out);
+            vpsrld(vmm_out | f4_k_hi_mask, vmm_out, 4);
+            // ZMM vpermps uses only the low four index bits.
+            vpermps(vmm_out, vmm_out, vmm_f4_lut());
+            return;
+        }
         const bool mem_advice_B
                 = utils::one_of(brg.brgattr.mem_advice,
                           brgemm_hint_mem_advice_B, brgemm_hint_mem_advice_A_B)
@@ -3680,8 +3727,8 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
     // handled with an additional temporary register.
     // `reg_aux_C` and `reg_tmp_microkernel` are aliases for `r14` so we need to
     // save its content.
-    const dim_t max_prefetch_offset = B_offset(ld_block2 - 1, rd_loop - 1)
-            + static_cast<dim_t>(brg.LDB) * brg.rd_block_B_size();
+    const dim_t max_prefetch_offset
+            = B_offset(ld_block2 - 1, rd_loop - 1) + rdb_B_offset();
     if (max_prefetch_offset > INT_MAX) reg_aux_C.save();
 
     if (brg.is_fp8_via_convert()) reg64_fp8_aux.save();
@@ -3730,9 +3777,7 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel(int bd_block2, bool is_bdb_tail,
                     maybe_pre_process_data(brg.dt_a, bcst(), vmm_fp8_bcst());
                 if (prefetch_count_B < ld_block2) {
                     const dim_t prefetch_offset
-                            = B_offset(prefetch_count_B++, rd)
-                            + static_cast<dim_t>(brg.LDB)
-                                    * brg.rd_block_B_size();
+                            = B_offset(prefetch_count_B++, rd) + rdb_B_offset();
                     // Only use EVEX_compress_addr_safe/make_safe_addr
                     // when prefetch_offset > INT_MAX forr perf purpose
                     if (prefetch_offset <= INT_MAX) {
@@ -4317,6 +4362,27 @@ void jit_brgemm_kernel_t<Wmm>::generate() {
         vmovups(f16_perm_even_vreg(), ptr[reg_tmp_gpr]);
         mov(reg_tmp_gpr, f16_perm_odd_table_);
         vmovups(f16_perm_odd_vreg(), ptr[reg_tmp_gpr]);
+    }
+
+    if (brg.is_f4_fused_decompress_non_amx()) {
+        alignas(64) static const float f4_e2m1_lut[16]
+                = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, -0.0f, -0.5f,
+                        -1.0f, -1.5f, -2.0f, -3.0f, -4.0f, -6.0f};
+        mov(reg_tmp_gpr, reinterpret_cast<size_t>(f4_e2m1_lut));
+        vmovups(vmm_f4_lut(), ptr[reg_tmp_gpr]);
+
+        alignas(64) static const uint32_t f4_permd[16]
+                = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
+        mov(reg_tmp_gpr, reinterpret_cast<size_t>(f4_permd));
+        vmovups(vmm_f4_permd(), ptr[reg_tmp_gpr]);
+
+        mov(reg_tmp_gpr.cvt32(), 0xAAAA);
+        kmovw(f4_k_hi_mask, reg_tmp_gpr.cvt32());
+        if (brg.ldb_tail > 0) {
+            const int tail_bytes = (brg.ldb_tail + 1) / 2;
+            mov(reg_tmp_gpr.cvt32(), (1u << tail_bytes) - 1u);
+            kmovw(f4_byte_tail_mask, reg_tmp_gpr.cvt32());
+        }
     }
 
     if (brg.is_tmm && brg.amx_wary_k_tail()) {
