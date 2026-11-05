@@ -22,6 +22,7 @@
 
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
+#include "common/optional.hpp"
 #include "common/sdpa_pd.hpp"
 
 #include "cpu/x64/brgemm/brgemm_types.hpp"
@@ -51,6 +52,7 @@ struct jit_softmax_kernel_base_t;
 // keys, then applies softmax over that axis using the JIT softmax kernel.
 // Parallelize over batch x num_head_q x query-tiles.
 // -----------------------------------------------------------------------------
+
 // One mm1 (QK^T) post-op in chain order, folded into the BRGEMM store: binary
 // entries apply their algorithm to an RHS; eltwise entries apply an activation.
 struct sdpa_mm1_post_op_t {
@@ -61,11 +63,9 @@ struct sdpa_mm1_post_op_t {
     float beta = 0.0f;
     // Binary rhs: a scalar uses a [1 x 1] descriptor and its pointer is not
     // query-tile-offset. A tensor rhs uses a query-row by key-position tile;
-    // axes of extent 1 broadcast.
+    // dimensions and strides are derived from its PD-owned memory descriptor.
     bool rhs_is_scalar = true;
     dnnl::impl::data_type_t rhs_dt = dnnl::impl::data_type::f32;
-    // Full user dims / strides of the rhs (length == ndims), to offset the base
-    // pointer per (batch, head, query-tile). Unused for scalars.
     std::vector<dim_t> rhs_dims, rhs_strides;
 };
 
@@ -87,13 +87,9 @@ struct sdpa_full_softmax_params_t {
     // SDPA output (result) data type; the f32 pv tile is down-converted to it.
     dnnl::impl::data_type_t out_dt = dnnl::impl::data_type::f32;
 
-    // User strides in elements. Q / output / select-condition carry the group
-    // axis; K / V have group extent 1 (broadcast over the group).
+    // Derived source layout metadata used while configuring BRGEMM and packing.
     std::vector<dim_t> q_strides, k_strides, v_strides, o_strides;
-    // Condition strides in elements. Effective strides are zeroed for axes
-    // whose extent is 1 in cond_dims.
-    std::vector<dim_t> cond_strides;
-    std::vector<dim_t> cond_dims;
+    std::vector<dim_t> cond_strides, cond_dims;
 
     bool has_select = false;
     // When true, keep scores where cond == 0; otherwise keep where cond != 0.
@@ -111,13 +107,17 @@ struct sdpa_full_softmax_params_t {
     std::vector<sdpa_mm1_post_op_t> mm1_post_ops;
 };
 
+template <typename T>
+struct sdpa_arg_buf_t {
+    T *buffer = nullptr;
+    const memory_desc_t *md = nullptr;
+};
+
 // Runtime pointers / scalars, resolved per execute call.
 struct sdpa_full_softmax_run_args_t {
-    const void *q = nullptr;
-    const void *k = nullptr;
-    const void *v = nullptr;
-    const void *cond = nullptr; // uint8 select condition, or null
-    void *out = nullptr;
+    sdpa_arg_buf_t<const char> q, k, v, cond;
+    sdpa_arg_buf_t<char> out;
+
     void *scratch = nullptr;
     float fill = 0.0f;
     // Base pointers for the mm1 binary post-op right-hand sides, one per binary
@@ -138,6 +138,15 @@ struct sdpa_amx_cfg_t {
     char palette[64] = {};
 };
 
+struct tensor_copy_desc_t {
+    size_t scratch_offset = 0;
+    size_t batch_stride = 0;
+    size_t head_stride = 0;
+    dim_t padded_k = 0;
+    dim_t packed_ld = 0;
+    dim_t vnni_factor = 1;
+};
+
 // Derived compute configuration: the JIT-free arithmetic (query/KV blocking,
 // per-thread + global scratch layout, AMX palette/wsp). Pure scalar config
 // (mirroring brgemm_matmul_conf_t), computed once by configure() and owned by
@@ -152,30 +161,29 @@ struct sdpa_full_softmax_conf_t {
     float mm2_beta = 0.0f;
     // mm2 writes its f32 result directly into the user output (no pv+scatter).
     bool mm2_direct = false;
-    bool need_copy_k = false, need_copy_v = false;
     bool mm1_needs_vnni_b = false;
     bool mm2_needs_vnni_b = false;
-    // Physical reduction extents required by the K and V copy kernels.
-    dim_t kt_k_pad = 1, vt_k_pad = 1;
     // Materialized B operands use independent 64-column panels.
     dim_t ldk = 0, ldv = 0;
     dim_t v_block = 0, v_tail = 0;
     bool pack_k_for_aliasing = false;
-    dim_t k_seq_stride = 0, k_hs_stride = 0;
     // A non-inverted select mask with a dense condition is folded into mm1 as
     // a binary_select post-op; the descriptors are built accordingly.
     bool mm1_select_postop = false;
     size_t amx_wsp_bytes = 0;
     size_t scratch_per_thread = 0;
-    size_t k_copy_bytes = 0, v_copy_bytes = 0;
+    size_t copy_buffer_bytes = 0;
     int nthr = 0;
+
+    // The optional copy descriptors describe packed representations in scratch.
+    utils::optional_t<tensor_copy_desc_t> q_copy_desc, k_copy_desc, v_copy_desc,
+            o_copy_desc, cond_copy_desc;
 
     // AMX cfg per kernel, indexed [is_q_tail][is_kv_tail].
     sdpa_amx_cfg_t mm1_amx[2][2], mm2_amx[2][2][2];
 
     size_t scratch_total(int n) const {
-        return scratch_per_thread * static_cast<size_t>(n) + k_copy_bytes
-                + v_copy_bytes;
+        return scratch_per_thread * static_cast<size_t>(n) + copy_buffer_bytes;
     }
 };
 

@@ -325,9 +325,8 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
         if (pd()->desc()->invert_scale) scale_val = 1.0f / scale_val;
     }
 
-    // For a select mask the condition tensor is delivered through the attn-mask
-    // arg and the scalar fill through its own arg. The fill can arrive either as
-    // a host scalar or as a runtime f32 buffer, mirroring the scale handling.
+    // The condition tensor is passed as the attention-mask argument.
+    // For select masks, the fill value is a scalar.
     const void *cond = nullptr;
     float fill_val = 0.0f;
     if (pd()->with_select_mask()) {
@@ -349,11 +348,18 @@ status_t brgemm_sdpa_fwd_t::execute(const exec_ctx_t &ctx) const {
     }
 
     sdpa_full_softmax_run_args_t args;
-    args.q = q;
-    args.k = k;
-    args.v = v;
-    args.cond = cond;
-    args.out = out;
+    args.q.md = pd()->desc()->qry_md();
+    args.q.buffer = static_cast<const char *>(q);
+    args.k.md = pd()->desc()->key_md();
+    args.k.buffer = static_cast<const char *>(k);
+    args.v.md = pd()->desc()->val_md();
+    args.v.buffer = static_cast<const char *>(v);
+    if (pd()->with_select_mask()) {
+        args.cond.md = pd()->desc()->attn_mask_md();
+        args.cond.buffer = static_cast<const char *>(cond);
+    }
+    args.out.md = pd()->dst_md();
+    args.out.buffer = static_cast<char *>(out);
     args.scratch = scratch;
     args.fill = fill_val;
     // rhs base pointers for the mm1 binary post-ops, in the same order they
