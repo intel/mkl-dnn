@@ -298,6 +298,27 @@ dim_t max_looped_pos(const std::vector<block_run_t> &runs) {
     return std::max(max_pos, ptr_pos);
 }
 
+// Sets `a_ptr` and `b_ptr` to the A and B of the batch element at `batch_ptr`.
+// Mirrors `set_A_B_matrices()` in `jit_brgemm_kernel.cpp`.
+void emit_batch_element_ptrs(ir::ir_t &ir, const conf_t &cfg,
+        const invariant_regs_t &regs, ir::vreg_t batch_ptr, ir::vreg_t a_ptr,
+        ir::vreg_t b_ptr) {
+
+    switch (cfg.loop.batch_kind) {
+        case brgemm_addr:
+            ir.load(a_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(ptr.A));
+            ir.load(b_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(ptr.B));
+            break;
+        case brgemm_offs:
+            ir.load(a_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(offset.A));
+            ir.add_reg(a_ptr, regs.a_base);
+            ir.load(b_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(offset.B));
+            ir.add_reg(b_ptr, regs.b_base);
+            break;
+        default: assert(!"unsupported batch kind"); break;
+    }
+}
+
 // One batch element.
 //
 // Derives the A and B pointers of the element, shifts them to the current M and
@@ -308,22 +329,7 @@ void emit_bs_body(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
 
     const ir::vreg_t a_ptr = ir.new_gpr();
     const ir::vreg_t b_ptr = ir.new_gpr();
-
-    // Where this element's A and B start. Mirrors `set_A_B_matrices()` in
-    // `jit_brgemm_kernel.cpp`.
-    switch (cfg.loop.batch_kind) {
-        case brgemm_addr:
-            ir.load(a_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(ptr.A));
-            ir.load(b_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(ptr.B));
-            break;
-        case brgemm_offs:
-            ir.load(a_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(offset.A));
-            ir.add_reg(a_ptr, regs.invariant.a_base);
-            ir.load(b_ptr, batch_ptr, GET_OFF_BATCH_ELEMENT(offset.B));
-            ir.add_reg(b_ptr, regs.invariant.b_base);
-            break;
-        default: assert(!"unsupported batch kind"); break;
-    }
+    emit_batch_element_ptrs(ir, cfg, regs.invariant, batch_ptr, a_ptr, b_ptr);
 
     // Shift to the current M and N block.
     ir.add_reg(a_ptr, regs.advancing.a_off);
