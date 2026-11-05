@@ -1,0 +1,8 @@
+# BF16 reduction tails (AMX K padding and non-AMX VNNI tails)
+--reset --dt=bf16 --mask=none 1x2x17x64:1x2x64x65:1x2x65x64
+--reset --dt=bf16 --mask=none 1x2x17x64:1x2x64x129:1x2x129x64
+--reset --dt=bf16 --mask=none 1x2x17x64:1x2x64x193:1x2x193x64
+--reset --dt=bf16 --mask=none 1x2x17x64:1x2x64x2049:1x2x2049x64
+--reset --dt=bf16 --mask=none 1x2x17x64:1x2x64x2050:1x2x2050x64
+--reset --dt=bf16 --mask=none 1x2x17x64:1x2x64x2081:1x2x2081x64
+--reset --dt=bf16 --mask=none 1x2x17x65:1x2x65x65:1x2x65x64
