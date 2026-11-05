@@ -159,13 +159,27 @@ void parse_result(res_t &res, const char *pstr) {
     dump_global_params(ss);
     // Append an `--impl=name` option for better understanding what library
     // implementation executed the case.
-    if (!res.impl_name.empty()) ss << "--impl=" + res.impl_name + " ";
+    std::string prb_str(pstr);
+    if (!res.impl_name.empty()) {
+        ss << "--impl=" + res.impl_name + " ";
+
+        // The fetched implementation name pins the implementation exactly, a
+        // user-provided filter would only conflict with it in the repro line.
+        for (const char *filter_opt : {"--impl=", "--skip-impl="}) {
+            const auto pos = prb_str.find(filter_opt);
+            if (pos == std::string::npos) continue;
+            size_t end_pos = pos;
+            parser::get_substr(
+                    prb_str, end_pos, ' ', /* allow_dangling = */ true);
+            prb_str.erase(pos, end_pos - pos);
+        }
+    }
 
     // This is the common format of the repro line ([] - for optional entries):
     // case_num:status[ (reason)][ (error_stats)] (time) \n
     // __REPRO:[ --impl=impl_name] prb_str
     std::string full_repro = std::to_string(bs.tests) + ":" + std::string(state)
-            + reason + error_stat + tct_str + " __REPRO: " + ss.str() + pstr;
+            + reason + error_stat + tct_str + " __REPRO: " + ss.str() + prb_str;
     if (is_failed) {
         bs.failed++;
         bs.failed_cases.emplace(bs.tests, full_repro);
