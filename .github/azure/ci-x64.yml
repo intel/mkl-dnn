@@ -85,10 +85,10 @@ jobs:
           .github/azure/test.sh --build-dir $(pwd)/build --report-dir $(pwd)/report
         displayName: 'test'
         failOnStderr: true
-  - job: 'macOS14'
+  - job: 'macOS15'
     timeoutInMinutes: 120
     pool:
-      vmImage: 'macOS-14'
+      vmImage: 'macOS-15'
     steps:
       - script: |
           .github/azure/build.sh --threading omp --mode Release --source-dir $(pwd) --build-dir $(pwd)/build
