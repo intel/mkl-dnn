@@ -17,8 +17,9 @@
 // The IR-based BRGEMM kernel converts a brgemm descriptor into IR, then runs
 // the register allocator and code emitter.
 //
-// This kernel uses `jit_brgemm_kernel_t` as a reference and is comparable with
-// the classic kernel instruction for instruction when it comes to compute
+// This kernel uses the classic kernels as a reference: `jit_brgemm_kernel_t`
+// for the looped schedule and `jit_brgemm_amx_uker_t` for the unrolled one. It
+// is comparable with them instruction for instruction when it comes to compute
 // structure.
 //
 // `init_conf()` is the only code that reads the descriptor for the builder. It
@@ -36,6 +37,7 @@
 #include "common/utils.hpp"
 #include "common/verbose.hpp"
 
+#include "cpu/x64/brgemm/brgemm.hpp"
 #include "cpu/x64/brgemm/brgemm_ir.hpp"
 #include "cpu/x64/brgemm/brgemm_ir_compute_path.hpp"
 #include "cpu/x64/brgemm/brgemm_ir_conf.hpp"
@@ -43,6 +45,7 @@
 #include "cpu/x64/injectors/jit_uni_postops_injector.hpp"
 #include "cpu/x64/ir/codegen.hpp"
 #include "cpu/x64/ir/ir.hpp"
+#include "cpu/x64/ir/reg_config.hpp"
 #include "cpu/x64/jit_generator.hpp"
 
 #define GET_OFF(field) offsetof(brgemm_kernel_params_t, field)
@@ -77,6 +80,7 @@ namespace {
 //   are not included here.
 
 // Registers that advance by a fixed byte offset as the nest walks the output.
+// The unrolled schedule does not advance them.
 struct advancing_regs_t {
     // Current C pointer. The N loop advances it by one block per iteration,
     // then the M loop rewinds it and steps to the next M block with one
@@ -90,10 +94,11 @@ struct advancing_regs_t {
     // advances like `c_ptr`.
     ir::vreg_t store_ptr = ir::vreg_t::none;
     // Byte offset into A of the current M block. Starts at 0 and advances by
-    // one block per iteration of the M loop.
+    // one block per iteration of the M loop. `none` in the unrolled schedule.
     ir::vreg_t a_off = ir::vreg_t::none;
     // Byte offset into B of the current N block. Advances by one block per
-    // iteration of the N loop and is set back before the next M block.
+    // iteration of the N loop and is set back before the next M block. `none`
+    // in the unrolled schedule.
     ir::vreg_t b_off = ir::vreg_t::none;
     // Current bias pointer. The bias is indexed by the load dimension only, so
     // it advances with the N loop and is rewound before the next M block.
@@ -157,11 +162,13 @@ m_loop_input_regs_t init_m_loop_input_regs(ir::ir_t &ir, const conf_t &cfg) {
         ir.load_param(regs.invariant.b_base, GET_OFF(ptr_B));
     }
 
-    regs.advancing.a_off = ir.new_gpr();
-    ir.mov_imm(regs.advancing.a_off, 0);
+    if (cfg.loop.schedule == schedule_t::looped) {
+        regs.advancing.a_off = ir.new_gpr();
+        ir.mov_imm(regs.advancing.a_off, 0);
 
-    regs.advancing.b_off = ir.new_gpr();
-    ir.mov_imm(regs.advancing.b_off, 0);
+        regs.advancing.b_off = ir.new_gpr();
+        ir.mov_imm(regs.advancing.b_off, 0);
+    }
 
     if (cfg.output.has_stage(output_stage_t::bias)) {
         regs.advancing.bias_ptr = ir.new_gpr();
@@ -217,8 +224,9 @@ m_loop_input_regs_t init_m_loop_input_regs(ir::ir_t &ir, const conf_t &cfg) {
 //
 // Each level of the loop nest (M, N, and K) has a list of its blocks, stored
 // as runs of blocks with the same size. The code of a block depends only on
-// its size and its position, so the looped schedule emits one body per run.
-// The batch has no list because it is a runtime loop over blocks of one size.
+// its size and its position, so the looped schedule emits one body per run,
+// and the unrolled schedule one body per block. The batch has no list because
+// it is a runtime loop over blocks of one size.
 
 // Consecutive blocks of one loop level with the same size.
 //
@@ -296,6 +304,34 @@ dim_t max_looped_pos(const std::vector<block_run_t> &runs) {
         start += run.count * run.size;
     }
     return std::max(max_pos, ptr_pos);
+}
+
+// Emits one level of the loop nest from its runs, for the unrolled schedule.
+//
+// Each block is emitted at its position, and the pointers never move.
+//
+//   body - `body(size, pos)` emits a block of `size` elements at `pos`
+//          elements from the pointers
+void emit_unrolled_level(const std::vector<block_run_t> &runs,
+        const std::function<void(dim_t, dim_t)> &body) {
+
+    dim_t pos = 0;
+    for (const block_run_t &run : runs) {
+        for (dim_t i = 0; i < run.count; i++) {
+            body(run.size, pos);
+            pos += run.size;
+        }
+    }
+}
+
+// Returns the number of elements a level covers. It bounds every position the
+// unrolled schedule addresses on the level.
+dim_t level_size(const std::vector<block_run_t> &runs) {
+    dim_t size = 0;
+    for (const block_run_t &run : runs) {
+        size += run.count * run.size;
+    }
+    return size;
 }
 
 // Sets `a_ptr` and `b_ptr` to the A and B of the batch element at `batch_ptr`.
@@ -534,23 +570,10 @@ void emit_n_block(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
     }
 }
 
-// Builds IR for BRGEMM.
-//
-// Computes:
-//   C[i][j] = beta * C[i][j] + sum_bs sum_k A[i][k] * B[k][j]
-//   (m = `bcast_dim`, n = `load_dim`, k = `reduce_dim` of the descriptor)
-//
-// A call that asks for post-ops applies the scales, bias and attribute
-// post-ops, and stores to D instead of C:
-//   D[i][j] = post_ops(C[i][j] * src_scale * wei_scale[j] + bias[j])
-//             * dst_scale
-//
-// The output is partitioned into M blocks of `bd_block` rows, each split into
-// N blocks of `ld_block2 * ld_block` columns. Each block keeps its result in
-// registers across the whole batch and K reduction, then stores it once. The
-// looped schedule walks N inside M, as `jit_brgemm_kernel_t` does.
-void build_brgemm(const conf_t &cfg, const compute_path_t &cp, ir::ir_t &ir) {
-    const m_loop_input_regs_t regs = init_m_loop_input_regs(ir, cfg);
+// Emits the loop nest of the looped schedule, which walks N inside M, as
+// `jit_brgemm_kernel_t` does.
+void emit_looped_nest(ir::ir_t &ir, const conf_t &cfg, const compute_path_t &cp,
+        const m_loop_input_regs_t &regs) {
 
     // Every partial N block is the same width, so one mask serves the whole
     // kernel.
@@ -616,22 +639,96 @@ void build_brgemm(const conf_t &cfg, const compute_path_t &cp, ir::ir_t &ir) {
     }, m_step);
 }
 
+// Emits the loop nest of the unrolled schedule, as `jit_brgemm_amx_uker_t`
+// does.
+//
+// Every M, N, and K block is emitted at its position, so no pointer moves. N is
+// inside M. The kernel has one batch element, and its A and B pointers are set
+// once for the whole kernel.
+//
+// There are no output stages yet, and beta is 0. The accumulators of a block
+// start at zero and are stored to C unchanged.
+void emit_unrolled_nest(ir::ir_t &ir, const conf_t &cfg,
+        const compute_path_t &cp, const m_loop_input_regs_t &regs) {
+
+    const ir::vreg_t a_ptr = ir.new_gpr();
+    const ir::vreg_t b_ptr = ir.new_gpr();
+    emit_batch_element_ptrs(
+            ir, cfg, regs.invariant, regs.invariant.batch, a_ptr, b_ptr);
+
+    const std::vector<block_run_t> k = k_runs(cfg.loop);
+
+    auto emit_block = [&](dim_t bd_block, dim_t bd_start, dim_t ld_elems,
+                              dim_t ld_start) {
+        // No N tail reaches this schedule, so a block is whole registers.
+        const int ld_block2 = (int)(ld_elems / cfg.loop.ld_block);
+        const out_block_t blk {
+                (int)bd_block, ld_block2, bd_start, ld_start, ir::vreg_t::none};
+
+        const std::vector<ir::vreg_t> acc = cp.init_accumulators(ir, cfg, blk);
+
+        emit_unrolled_level(k, [&](dim_t rd_block, dim_t rd_start) {
+            cp.emit_microkernel(
+                    ir, cfg, blk, acc, a_ptr, b_ptr, rd_start, (int)rd_block);
+        });
+
+        cp.store_accumulators(ir, cfg, blk, acc, regs.advancing.store_ptr);
+    };
+
+    const std::vector<block_run_t> m = m_runs(cfg.loop);
+    const std::vector<block_run_t> n = n_runs(cfg.loop);
+
+    emit_unrolled_level(m, [&](dim_t bd_block, dim_t bd_start) {
+        emit_unrolled_level(n, [&](dim_t ld_elems, dim_t ld_start) {
+            emit_block(bd_block, bd_start, ld_elems, ld_start);
+        });
+    });
+}
+
+// Builds IR for BRGEMM.
+//
+// Computes:
+//   C[i][j] = beta * C[i][j] + sum_bs sum_k A[i][k] * B[k][j]
+//   (m = `bcast_dim`, n = `load_dim`, k = `reduce_dim` of the descriptor)
+//
+// A call that asks for post-ops applies the scales, bias and attribute
+// post-ops, and stores to D instead of C:
+//   D[i][j] = post_ops(C[i][j] * src_scale * wei_scale[j] + bias[j])
+//             * dst_scale
+//
+// The output is partitioned into M blocks of `bd_block` rows, each split into
+// N blocks of `ld_block2 * ld_block` columns. Each block keeps its result in
+// registers across the whole batch and K reduction, then stores it once. The
+// schedule decides how the loop nest walks the blocks.
+void build_brgemm(const conf_t &cfg, const compute_path_t &cp, ir::ir_t &ir) {
+    const m_loop_input_regs_t regs = init_m_loop_input_regs(ir, cfg);
+
+    switch (cfg.loop.schedule) {
+        case schedule_t::looped: emit_looped_nest(ir, cfg, cp, regs); break;
+        case schedule_t::unrolled: emit_unrolled_nest(ir, cfg, cp, regs); break;
+    }
+}
+
 // Picks the compute path the caller chose when it created the descriptor.
 //
 // The finalized descriptor already holds the choice (`is_ace()`, `is_tmm`), so
-// it is read from there. Only the vector compute path exists so far, and the
-// tile compute paths are rejected.
+// it is read from there. The ACE compute path does not exist yet and is
+// rejected.
 status_t init_compute_path(
         compute_path_kind_t &kind, const brgemm_desc_t &brg) {
-    VCONDCHECK_BRGEMM_IR(!brg.is_tmm && !brg.is_ace(),
-            VERBOSE_UNSUPPORTED_FEATURE, "tile accumulation");
+    VCONDCHECK_BRGEMM_IR(!brg.is_ace(), VERBOSE_UNSUPPORTED_FEATURE, "ACE");
 
-    kind = compute_path_kind_t::vector;
+    kind = brg.is_tmm ? compute_path_kind_t::tmul : compute_path_kind_t::vector;
     return status::success;
 }
 
 // Fills the loop nest configuration.
-status_t init_loop_conf(loop_conf_t &loop, const brgemm_desc_t &brg) {
+//
+// A tile descriptor counts its blocks differently from a vector one. `bdb` and
+// `ldb` include the tail block, and the uker groups `bd_block2` M blocks and
+// `ld_block2` N blocks into one block of the loop nest (`fill_imap()`).
+status_t init_loop_conf(
+        loop_conf_t &loop, compute_path_kind_t kind, const brgemm_desc_t &brg) {
     using namespace utils;
     const brgemm_attr_t &brgattr = brg.brgattr;
 
@@ -655,28 +752,78 @@ status_t init_loop_conf(loop_conf_t &loop, const brgemm_desc_t &brg) {
     VCONDCHECK_BRGEMM_IR(
             brgattr.bd_mask_level == 0, VERBOSE_UNSUPPORTED_FEATURE, "bd_mask");
 
+    // The classic kernels are picked the same way.
+    const bool unrolled = brg.can_dispatch_uker();
+    loop.schedule = unrolled ? schedule_t::unrolled : schedule_t::looped;
+
+    const bool is_tmul = kind == compute_path_kind_t::tmul;
+    VCONDCHECK_BRGEMM_IR(IMPLICATION(is_tmul, unrolled),
+            VERBOSE_UNSUPPORTED_FEATURE, "looped schedule with tiles");
+
+    // Reject the uker features that the unrolled schedule does not have yet,
+    // under the conditions in which the uker uses them.
+    if (unrolled) {
+        auto prefetches = [](const brgemm_prf_t &prf) {
+            return prf.sprinkled || prf.dist0 >= 0 || prf.dist1 >= 0
+                    || prf.dist2 >= 0 || prf.distNTA >= 0;
+        };
+
+        VCONDCHECK_BRGEMM_IR(brgattr.max_bs == 1, VERBOSE_UNSUPPORTED_FEATURE,
+                "batch of more than one element");
+        VCONDCHECK_BRGEMM_IR(brg.innermost_loop == brgemm_ld_loop_innermost,
+                VERBOSE_UNSUPPORTED_FEATURE, "M loop innermost");
+        VCONDCHECK_BRGEMM_IR(!brg.interleave_tilestores_,
+                VERBOSE_UNSUPPORTED_FEATURE, "interleaved tile stores");
+        VCONDCHECK_BRGEMM_IR(!prefetches(brg.prfA), VERBOSE_UNSUPPORTED_FEATURE,
+                "A prefetch");
+        VCONDCHECK_BRGEMM_IR(!prefetches(brg.prfB), VERBOSE_UNSUPPORTED_FEATURE,
+                "B prefetch");
+        // The uker prefetches C only at the first two distances.
+        VCONDCHECK_BRGEMM_IR(brg.prfC.dist0 < 0 && brg.prfC.dist1 < 0,
+                VERBOSE_UNSUPPORTED_FEATURE, "C prefetch");
+    }
+
     loop.batch_kind = brg.type;
     loop.max_bs = brgattr.max_bs;
     loop.load_dim = brg.load_dim;
     loop.lda = brg.LDA;
     loop.ldb = brg.LDB;
     loop.ldc = brg.LDC;
-    loop.bd_block = brg.bd_block;
     loop.ld_block = brg.ld_block;
     loop.ld_block2 = brg.ld_block2;
     loop.rd_block = brg.rd_block;
-    loop.bdb = brg.bdb;
-    loop.ldb2 = brg.ldb2;
     loop.rdb = brg.rdb;
-    loop.bdb_tail = brg.bdb_tail;
-    loop.ldb2_tail = brg.ldb2_tail;
-    loop.ldb_tail = brg.ldb_tail;
     loop.rdb_tail = brg.rdb_tail;
+
+    switch (kind) {
+        case compute_path_kind_t::vector:
+            loop.bd_block = brg.bd_block;
+            loop.bdb = brg.bdb;
+            loop.bdb_tail = brg.bdb_tail;
+            loop.ldb2 = brg.ldb2;
+            loop.ldb2_tail = brg.ldb2_tail;
+            loop.ldb_tail = brg.ldb_tail;
+            break;
+        case compute_path_kind_t::tmul:
+            VCONDCHECK_BRGEMM_IR(
+                    everyone_is(0, brg.bdb_tail, brg.ldb_tail, brg.rdb_tail),
+                    VERBOSE_UNSUPPORTED_FEATURE, "tile tails");
+
+            // A group with fewer blocks than `bd_block2` or `ld_block2` is the
+            // tail of its level.
+            loop.bd_block = brg.bd_block2 * brg.bd_block;
+            loop.bdb = brg.bdb / brg.bd_block2;
+            loop.bdb_tail = (int)(brg.bdb % brg.bd_block2) * brg.bd_block;
+            loop.ldb2 = brg.ldb / brg.ld_block2;
+            loop.ldb2_tail = (int)(brg.ldb % brg.ld_block2);
+            loop.ldb_tail = 0;
+            break;
+    }
     return status::success;
 }
 
 // Fills the configuration of the vector compute path.
-status_t init_compute_path_conf(
+status_t init_vector_conf(
         compute_path_conf_t &compute_path, const brgemm_desc_t &brg) {
     using namespace data_type;
 
@@ -695,11 +842,57 @@ status_t init_compute_path_conf(
     compute_path.dt_a = brg.dt_a;
     compute_path.dt_b = brg.dt_b;
     compute_path.dt_acc = f32;
+    compute_path.vnni_granularity = brg.rd_step;
+    return status::success;
+}
+
+// Fills the configuration of the TMUL compute path.
+//
+// The caller loads the tile configuration from `brgemm_init_tiles()` before it
+// calls the kernel. The kernel converts the same configuration into `tiles`
+// for code generation and takes the shapes of the operand tiles from it.
+status_t init_tmul_conf(compute_path_conf_t &compute_path,
+        ir::tile_config_t &tiles, const brgemm_desc_t &brg) {
+    using namespace data_type;
+
+    VCONDCHECK_BRGEMM_IR(
+            is_superset(brg.isa_impl, amx_bf16), VERBOSE_UNSUPPORTED_ISA);
+    VCONDCHECK_BRGEMM_IR(utils::everyone_is(bf16, brg.dt_a, brg.dt_b),
+            VERBOSE_UNSUPPORTED_DT);
+    VCONDCHECK_BRGEMM_IR(
+            !brg.fused_copy_a, VERBOSE_UNSUPPORTED_FEATURE, "fused copy A");
+    VCONDCHECK_BRGEMM_IR(brg.brgattr.mem_advice == brgemm_hint_mem_advice_undef,
+            VERBOSE_UNSUPPORTED_FEATURE, "memory advice");
+
+    palette_config_t palette;
+    const status_t st = brgemm_init_tiles(brg, (char *)&palette);
+    VCONDCHECK_BRGEMM_IR(st == status::success, VERBOSE_UNSUPPORTED_FEATURE,
+            "tile configuration");
+
+    std::vector<ir::tile_shape_t> &shapes = tiles.shapes;
+    for (int t = 0; t < brgemm_desc_t::AMX_TILES_NUM; t++) {
+        shapes.push_back({palette.rows[t], palette.cols[t]});
+    }
+
+    compute_path.dt_a = brg.dt_a;
+    compute_path.dt_b = brg.dt_b;
+    compute_path.dt_acc = f32;
+    compute_path.vnni_granularity = brg.rd_step;
+    compute_path.a_tile = shapes[brg.get_A_tensor(0)];
+    compute_path.b_tile = shapes[brg.get_B_tensor(0)];
+    compute_path.c_tile = shapes[brg.get_C_tensor(0, 0)];
+
+    auto load_hint = [](bool nt) {
+        return nt ? ir::mem_hint_t::non_temporal : ir::mem_hint_t::none;
+    };
+    compute_path.a_load_hint = load_hint(brg.load_nt_A);
+    compute_path.b_load_hint = load_hint(brg.load_nt_B);
     return status::success;
 }
 
 // Fills the output path configuration.
-status_t init_output_conf(output_conf_t &output, const brgemm_desc_t &brg) {
+status_t init_output_conf(output_conf_t &output, compute_path_kind_t kind,
+        const brgemm_desc_t &brg) {
     using namespace data_type;
     using namespace utils;
     const brgemm_attr_t &brgattr = brg.brgattr;
@@ -797,6 +990,14 @@ status_t init_output_conf(output_conf_t &output, const brgemm_desc_t &brg) {
     // A post-ops call stores to D through the C displacements.
     VCONDCHECK_BRGEMM_IR(IMPLICATION(output.has_post_ops(), brg.LDC == brg.LDD),
             VERBOSE_UNSUPPORTED_FEATURE, "LDC != LDD");
+
+    // The TMUL compute path stores its accumulators only with tile stores so
+    // far, so no output stage can act on them, and it cannot load C yet.
+    const bool is_tmul = kind == compute_path_kind_t::tmul;
+    VCONDCHECK_BRGEMM_IR(IMPLICATION(is_tmul, !output.has_post_ops()),
+            VERBOSE_UNSUPPORTED_FEATURE, "output stages on tiles");
+    VCONDCHECK_BRGEMM_IR(IMPLICATION(is_tmul, output.beta == 0.0f),
+            VERBOSE_UNSUPPORTED_FEATURE, "beta == 1 on tiles");
     return status::success;
 }
 
@@ -805,15 +1006,20 @@ status_t init_output_conf(output_conf_t &output, const brgemm_desc_t &brg) {
 // Every address the builder emits is a base register plus a build-time
 // displacement encoded in the instruction, and every pointer move is a
 // build-time immediate, so both have to fit in int32. `max_looped_pos()`
-// bounds the positions and moves along each level. Checking the offset at the
+// bounds the positions and moves along each level of the looped schedule, and
+// `level_size()` the positions of the unrolled one. Checking the offset at the
 // bounds of all levels covers every displacement and move, including the M
 // step, which moves C along M and N in one `add`. The B prefetch is not
 // checked here, see `emit_microkernel()`.
 status_t check_displacements(const conf_t &conf) {
     auto fits = [](dim_t v) { return jit_generator_t::imm_fits_int32(v); };
-    const dim_t m = max_looped_pos(m_runs(conf.loop));
-    const dim_t n = max_looped_pos(n_runs(conf.loop));
-    const dim_t k = max_looped_pos(k_runs(conf.loop));
+    const bool looped = conf.loop.schedule == schedule_t::looped;
+    auto max_pos = [&](const std::vector<block_run_t> &runs) {
+        return looped ? max_looped_pos(runs) : level_size(runs);
+    };
+    const dim_t m = max_pos(m_runs(conf.loop));
+    const dim_t n = max_pos(n_runs(conf.loop));
+    const dim_t k = max_pos(k_runs(conf.loop));
 
     VCONDCHECK_BRGEMM_IR(fits(conf.a_off(m, k)), VERBOSE_UNSUPPORTED_FEATURE,
             "A displacement overflows int32");
@@ -830,7 +1036,7 @@ status_t check_displacements(const conf_t &conf) {
     return status::success;
 }
 
-// Reads the descriptor into `conf`.
+// Reads the descriptor into `conf` and `tiles`.
 //
 // Returns `status::success` if the kernel supports the descriptor, otherwise
 // `status::unimplemented`. This is the only code that reads the descriptor for
@@ -838,18 +1044,31 @@ status_t check_displacements(const conf_t &conf) {
 // what its module does not support. A descriptor the kernel rejects falls back
 // to the classic kernel.
 //
+// `tiles` is the tile configuration, which only code generation reads. It is
+// kept out of `conf`, so the builder never receives it. It stays empty for the
+// vector compute path.
+//
 // TODO: reject `mem_advice` or implement it. For the vector compute path the
 // classic kernel loads B with `vmovrsd` when it is set, and matmul sets it on
 // avx10_2.
-status_t init_conf(conf_t &conf, const brgemm_desc_t &brg) {
+status_t init_conf(
+        conf_t &conf, ir::tile_config_t &tiles, const brgemm_desc_t &brg) {
     // GEMV and DGMM have kernels of their own.
     VCONDCHECK_BRGEMM_IR(!brg.is_gemv, VERBOSE_UNSUPPORTED_FEATURE, "gemv");
     VCONDCHECK_BRGEMM_IR(!brg.is_dgmm, VERBOSE_UNSUPPORTED_FEATURE, "dgmm");
 
     CHECK(init_compute_path(conf.compute_path.kind, brg));
-    CHECK(init_loop_conf(conf.loop, brg));
-    CHECK(init_compute_path_conf(conf.compute_path, brg));
-    CHECK(init_output_conf(conf.output, brg));
+    const compute_path_kind_t kind = conf.compute_path.kind;
+    CHECK(init_loop_conf(conf.loop, kind, brg));
+    switch (kind) {
+        case compute_path_kind_t::vector:
+            CHECK(init_vector_conf(conf.compute_path, brg));
+            break;
+        case compute_path_kind_t::tmul:
+            CHECK(init_tmul_conf(conf.compute_path, tiles, brg));
+            break;
+    }
+    CHECK(init_output_conf(conf.output, kind, brg));
     return check_displacements(conf);
 }
 
@@ -857,18 +1076,23 @@ status_t init_conf(conf_t &conf, const brgemm_desc_t &brg) {
 struct jit_brgemm_ir_kernel_t : public brgemm_kernel_t {
     DECLARE_CPU_JIT_AUX_FUNCTIONS(jit_brgemm_ir_kernel_t)
 
-    jit_brgemm_ir_kernel_t(cpu_isa_t isa, const conf_t &conf)
-        : brgemm_kernel_t(jit_name(), isa), conf_(conf) {}
+    jit_brgemm_ir_kernel_t(
+            cpu_isa_t isa, const conf_t &conf, const ir::tile_config_t &tiles)
+        : brgemm_kernel_t(jit_name(), isa), conf_(conf), tiles_(tiles) {}
 
     void generate() override {
+        ir::ir_t ir;
+
         std::unique_ptr<compute_path_t> cp;
         switch (conf_.compute_path.kind) {
             case compute_path_kind_t::vector:
                 cp = make_vector_compute_path();
                 break;
+            case compute_path_kind_t::tmul:
+                cp = make_tmul_compute_path(ir, conf_);
+                break;
         }
 
-        ir::ir_t ir;
         build_brgemm(conf_, *cp, ir);
 
         ir::codegen_config_t codegen_cfg;
@@ -879,12 +1103,14 @@ struct jit_brgemm_ir_kernel_t : public brgemm_kernel_t {
             postops.rhs_arg_offset = GET_OFF(post_ops_binary_rhs_arg_vec);
             postops.dst_orig_off = GET_OFF(data_C_ptr_);
         }
+        codegen_cfg.tiles = tiles_;
 
         ir::generate_kernel(*this, ir, codegen_cfg);
     }
 
 private:
     conf_t conf_;
+    ir::tile_config_t tiles_;
 };
 
 } // namespace
@@ -892,8 +1118,10 @@ private:
 
 brgemm_kernel_t *create_brgemm_ir_kernel(const brgemm_desc_t &brg) {
     brgemm_ir::conf_t conf;
-    if (brgemm_ir::init_conf(conf, brg) != status::success) return nullptr;
-    return new brgemm_ir::jit_brgemm_ir_kernel_t(brg.isa_impl, conf);
+    ir::tile_config_t tiles;
+    if (brgemm_ir::init_conf(conf, tiles, brg) != status::success)
+        return nullptr;
+    return new brgemm_ir::jit_brgemm_ir_kernel_t(brg.isa_impl, conf, tiles);
 }
 
 } // namespace x64

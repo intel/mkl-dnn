@@ -39,7 +39,7 @@ namespace brgemm_ir {
 // The block of the output one N-block emission computes.
 //
 //   bd_block     - rows of the broadcast dimension the block covers
-//   ld_block2    - vector registers of the load dimension it covers
+//   ld_block2    - vector registers or tiles of the load dimension it covers
 //   bd_start     - row the block starts at, counted from where the A and C
 //                  pointers stand
 //   ld_start     - load-dimension element the block starts at, counted from
@@ -76,26 +76,37 @@ struct out_block_t {
 //
 //   vector - broadcasts one A element and multiply-adds it with B vectors into
 //            vector accumulators
-enum class compute_path_kind_t { vector };
+//   tmul   - multiplies tiles of A and B into tile accumulators
+enum class compute_path_kind_t { vector, tmul };
+
+// How the loop nest is emitted.
+//
+//   looped   - a run of more than one block is a runtime loop that moves the
+//              pointers, as in `jit_brgemm_kernel_t`
+//   unrolled - every block is emitted at its position and no pointer moves, as
+//              in `jit_brgemm_amx_uker_t`
+enum class schedule_t { looped, unrolled };
 
 // Loop nest configuration.
 //
+//   schedule    - how the loop nest is emitted
 //   batch_kind  - how a batch element gives the address of its A and B
 //   max_bs      - maximum batch size known at IR generation time
 //   load_dim    - N, the columns of C
 //   lda/ldb/ldc - leading dimensions of A, B, and C, in elements
 //   bd_block    - M rows per block
-//   ld_block    - N elements per vector register
-//   ld_block2   - vector registers of N per block
+//   ld_block    - N elements per vector register or tile
+//   ld_block2   - vector registers or tiles of N per block
 //   rd_block    - K elements reduced per K block
 //   bdb         - number of full M blocks
 //   ldb2        - number of full N blocks
 //   rdb         - number of full K blocks
 //   bdb_tail    - M rows left over after the full M blocks
-//   ldb2_tail   - full N registers left over after the full N blocks
+//   ldb2_tail   - full N registers or tiles left over after the full N blocks
 //   ldb_tail    - N columns left over after every full N register
 //   rdb_tail    - K elements left over after the full K blocks
 struct loop_conf_t {
+    schedule_t schedule = schedule_t::looped;
     brgemm_batch_kind_t batch_kind = brgemm_addr;
     dim_t max_bs = 0;
     dim_t load_dim = 0;
@@ -107,14 +118,22 @@ struct loop_conf_t {
 
 // Compute path configuration.
 //
-//   kind      - how the product is computed
-//   dt_a/dt_b - element data type of A and B in memory
-//   dt_acc    - accumulation data type
+//   kind                    - how the product is computed
+//   dt_a/dt_b               - element data type of A and B in memory
+//   dt_acc                  - accumulation data type
+//   vnni_granularity        - K elements of a column that B stores together,
+//                             1 for a plain B
+//   a_tile/b_tile/c_tile    - shapes of the tiles of A, B, and the accumulators
+//   a_load_hint/b_load_hint - hints of the A and B tile loads
 struct compute_path_conf_t {
     compute_path_kind_t kind = compute_path_kind_t::vector;
     data_type_t dt_a = data_type::undef;
     data_type_t dt_b = data_type::undef;
     data_type_t dt_acc = data_type::undef;
+    int vnni_granularity = 1;
+    ir::tile_shape_t a_tile = {}, b_tile = {}, c_tile = {};
+    ir::mem_hint_t a_load_hint = ir::mem_hint_t::none;
+    ir::mem_hint_t b_load_hint = ir::mem_hint_t::none;
 };
 
 // A stage of the output path. Each one acts on the complete sum, so it runs
@@ -210,7 +229,8 @@ struct conf_t {
     // Byte offset of an element of A, B, C, the bias, or a per-N weights
     // scale. `bd` is the row, `rd` the K index, and `ld` the N index of the
     // element, counted from where the pointers stand. The immediate of a
-    // pointer move comes from the same functions.
+    // pointer move comes from the same functions. B keeps `vnni_granularity` K
+    // elements of a column together, and `rd` of B is a multiple of it.
     //
     // These are the constants the builder encodes into the operation, the
     // `disp` of `ir::mem_t`. They are functions rather than expressions written
@@ -222,7 +242,7 @@ struct conf_t {
     }
 
     dim_t b_off(dim_t rd, dim_t ld) const {
-        return dt_sz_b() * (rd * loop.ldb + ld);
+        return dt_sz_b() * (rd * loop.ldb + ld * compute_path.vnni_granularity);
     }
 
     dim_t c_off(dim_t bd, dim_t ld) const {

@@ -20,6 +20,7 @@
 // The interface between the builder of the IR-based BRGEMM kernel
 // (`brgemm_ir.cpp`) and its compute paths.
 
+#include <cassert>
 #include <memory>
 #include <vector>
 
@@ -39,6 +40,7 @@ namespace brgemm_ir {
 //
 // For each output block the builder calls `init_accumulators()` before the
 // batch loop, then `emit_microkernel()` for each K run of each batch element.
+// The unrolled schedule calls `store_accumulators()` at the end of the block.
 // The compute path chooses the layout of the accumulators.
 struct compute_path_t {
     virtual ~compute_path_t() = default;
@@ -47,6 +49,17 @@ struct compute_path_t {
     virtual std::vector<ir::vreg_t> init_accumulators(
             ir::ir_t &ir, const conf_t &cfg, const out_block_t &blk) const
             = 0;
+
+    // Stores the accumulators of `blk` to C at `c_ptr` unchanged.
+    //
+    // Only the unrolled schedule calls it, and that schedule runs only the
+    // TMUL compute path (`init_conf()`). The other compute paths keep this
+    // default.
+    virtual void store_accumulators(ir::ir_t &ir, const conf_t &cfg,
+            const out_block_t &blk, const std::vector<ir::vreg_t> &acc,
+            ir::vreg_t c_ptr) const {
+        assert(!"store_accumulators: not supported by the compute path");
+    }
 
     // Reduces `rd_loop` elements of K into `acc`, starting at K index
     // `rd_start`, counted from where `a_ptr` and `b_ptr` stand.
@@ -58,6 +71,11 @@ struct compute_path_t {
 };
 
 std::unique_ptr<compute_path_t> make_vector_compute_path();
+
+// The TMUL compute path sets the row strides of its tiles once, at the end of
+// `ir`, so it is created before the loop nest is built.
+std::unique_ptr<compute_path_t> make_tmul_compute_path(
+        ir::ir_t &ir, const conf_t &cfg);
 
 } // namespace brgemm_ir
 } // namespace x64
