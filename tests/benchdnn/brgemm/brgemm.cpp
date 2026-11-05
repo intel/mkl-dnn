@@ -388,7 +388,9 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
     if (res->state == SKIPPED) return OK;
 
     attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dst_dims.data());
+    DNN_SAFE(attr_args.prepare_post_ops_mds(
+                     prb->attr, prb->ndims, prb->dst_dims.data()),
+            WARN);
     const auto &wei_scale = prb->attr.scales.get(DNNL_ARG_WEIGHTS);
     if (wei_scale.policy == policy_t::PER_OC) {
         attr_args.prepare_quant(
@@ -398,8 +400,10 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
     DNN_SAFE(create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims),
             WARN);
     dims_t dst_strides = {prb->get_ldd(), 1};
-    auto dst_md = dnn_mem_t::init_md(
-            prb->ndims, prb->dst_dims.data(), prb->dst_dt(), "", dst_strides);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_md;
+    DNN_SAFE(dnn_mem_t::init_md(dst_md, prb->ndims, prb->dst_dims.data(),
+                     prb->dst_dt(), "", dst_strides),
+            WARN);
 
     SAFE(check_dnnl_status(brgemm_desc_set_postops(&brgemm_desc, dnnl_attr,
                                    dst_md, prb->get_ldd(), prb->bia_dt),
@@ -457,7 +461,9 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
     kernel_args.scratchpad_size_ = brgemm_desc.get_wsp_buffer_size();
 #else // !defined(DNNL_EXPERIMENTAL_UKERNEL)
     attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dst_dims.data());
+    DNN_SAFE(attr_args.prepare_post_ops_mds(
+                     prb->attr, prb->ndims, prb->dst_dims.data()),
+            WARN);
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE(create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims),
             WARN);
@@ -520,8 +526,10 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
         // Create a memory desc based on user inputs and query strides to use
         // them in a pack routine.
         const dnnl_dims_t wei_dims = {prb->k * prb->batch_size, prb->n};
-        auto wei_md = dnn_mem_t::init_md(prb->ndims, wei_dims, prb->wei_dt(),
-                prb->wtag, prb->strides[STRIDES_WEI]);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_md;
+        DNN_SAFE(dnn_mem_t::init_md(wei_md, prb->ndims, wei_dims, prb->wei_dt(),
+                         prb->wtag, prb->strides[STRIDES_WEI]),
+                WARN);
         const auto &wei_strides = query_md_strides(wei_md);
         assert(query_md_ndims(wei_md) == 2);
 
@@ -605,7 +613,7 @@ dnnl_status_t brgemm_kernel_execute_postops_wrapper(const_dnnl_brgemm_t brgemm,
 //   for the main operation and attributes.
 // * Stashing them with a proper exec_arg ID in a `mem_map` object.
 // See a common version of `init_memory_args` comment for more details.
-void init_memory_args(
+int init_memory_args(
         dnn_mem_map_t &mem_map, const prb_t *prb, kernel_args_t &kernel_args) {
     // Fuse batch size into K dimension which follows the library usage of the
     // kernel batch size setting.
@@ -618,15 +626,21 @@ void init_memory_args(
     dims_t dst_strides = {prb->get_ldd(), 1};
     dims_t acc_strides = prb->use_dst_as_acc() ? dst_strides : dims_t();
 
-    auto src_md = dnn_mem_t::init_md(
-            prb->ndims, src_dims, prb->src_dt(), stag, src_strides);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_md;
+    DNN_SAFE(dnn_mem_t::init_md(src_md, prb->ndims, src_dims, prb->src_dt(),
+                     stag, src_strides),
+            WARN);
 
-    auto dst_md = dnn_mem_t::init_md(
-            prb->ndims, prb->dst_dims.data(), prb->dst_dt(), "", dst_strides);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_md;
+    DNN_SAFE(dnn_mem_t::init_md(dst_md, prb->ndims, prb->dst_dims.data(),
+                     prb->dst_dt(), "", dst_strides),
+            WARN);
 
     // Same as dst_md but with a pre-defined data type according to doc.
-    auto acc_md = dnn_mem_t::init_md(prb->ndims, prb->dst_dims.data(),
-            prb->acc_dt(), tag::abx, acc_strides);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> acc_md;
+    DNN_SAFE(dnn_mem_t::init_md(acc_md, prb->ndims, prb->dst_dims.data(),
+                     prb->acc_dt(), tag::abx, acc_strides),
+            WARN);
 
 #if !defined(DNNL_EXPERIMENTAL_UKERNEL)
     // Create weights memory descriptor with kernel-friendly format.
@@ -640,7 +654,10 @@ void init_memory_args(
     const auto wtag = prepare_wei_format_string(prb, kernel_args);
     BENCHDNN_PRINT(6, "wtag: %s\n", wtag.c_str());
 
-    auto wei_md = dnn_mem_t::init_md(prb->ndims, wei_dims, prb->wei_dt(), wtag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_md;
+    DNN_SAFE(dnn_mem_t::init_md(
+                     wei_md, prb->ndims, wei_dims, prb->wei_dt(), wtag),
+            WARN);
     kernel_args.original_wei_md_size_ = dnnl_memory_desc_get_size(wei_md);
 
     // Prepare and assign extra for wei_md when s8s8 compensation, or source
@@ -665,12 +682,15 @@ void init_memory_args(
     benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> bia_md {};
     if (prb->bia_dt != dnnl_data_type_undef) {
         const dnnl_dims_t bia_dims = {1, prb->n};
-        bia_md = dnn_mem_t::init_md(
-                prb->ndims, bia_dims, prb->bia_dt, tag::abx);
+        DNN_SAFE(dnn_mem_t::init_md(
+                         bia_md, prb->ndims, bia_dims, prb->bia_dt, tag::abx),
+                WARN);
     }
 #else
-    auto wei_md = dnn_mem_t::init_md(prb->ndims, wei_dims, prb->wei_dt(),
-            prb->wtag, prb->strides[STRIDES_WEI]);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_md;
+    DNN_SAFE(dnn_mem_t::init_md(wei_md, prb->ndims, wei_dims, prb->wei_dt(),
+                     prb->wtag, prb->strides[STRIDES_WEI]),
+            WARN);
     const auto &wei_strides = query_md_strides(wei_md);
 
     // Note: packing routine transforms a plain user tensor into an internal
@@ -705,8 +725,10 @@ void init_memory_args(
     const dnnl_dim_t k_rounded = multiplier * div_up(prb->k, multiplier);
     const dnnl_dims_t wei_packed_dims = {k_rounded * prb->batch_size, prb->n};
     dims_t wei_packed_strides = {prb->get_ldb(), 1};
-    auto wei_packed_md = dnn_mem_t::init_md(
-            prb->ndims, wei_packed_dims, prb->wei_dt(), "", wei_packed_strides);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> wei_packed_md;
+    DNN_SAFE(dnn_mem_t::init_md(wei_packed_md, prb->ndims, wei_packed_dims,
+                     prb->wei_dt(), "", wei_packed_strides),
+            WARN);
 #endif
 
     dnnl_dim_t scratchpad_size
@@ -714,8 +736,10 @@ void init_memory_args(
     int ndims = scratchpad_size ? 1 : 0;
     dnnl_data_type_t dt = scratchpad_size ? dnnl_u8 : dnnl_data_type_undef;
     dnnl_dims_t scratchpad_dims = {scratchpad_size};
-    auto scratchpad_md
-            = dnn_mem_t::init_md(ndims, scratchpad_dims, dt, tag::abx);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> scratchpad_md;
+    DNN_SAFE(dnn_mem_t::init_md(
+                     scratchpad_md, ndims, scratchpad_dims, dt, tag::abx),
+            WARN);
 
     const auto &test_engine = get_test_engine();
 
@@ -768,8 +792,10 @@ void init_memory_args(
             default: break;
         }
 
-        auto po_md
-                = dnn_mem_t::init_md(ndims, dims.data(), b.src1_dt, tag::abx);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> po_md;
+        DNN_SAFE(dnn_mem_t::init_md(
+                         po_md, ndims, dims.data(), b.src1_dt, tag::abx),
+                WARN);
         mem_map.emplace(
                 po_arg, dnn_mem_t(po_md, test_engine, /* prefill = */ true));
     }
@@ -796,8 +822,10 @@ void init_memory_args(
                 ndims = 1;
             }
             const auto dt = sc.get(exec_arg).dt;
-            auto scales_md
-                    = dnn_mem_t::init_md(ndims, dims.data(), dt, tag::abx);
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> scales_md;
+            DNN_SAFE(dnn_mem_t::init_md(
+                             scales_md, ndims, dims.data(), dt, tag::abx),
+                    WARN);
             mem_map.emplace(exec_sc_arg,
                     dnn_mem_t(scales_md, test_engine, /* prefill = */ true));
         }
@@ -825,11 +853,16 @@ void init_memory_args(
                 ndims = 1;
             }
             const auto dt = zp.get(exec_arg).dt;
-            auto zp_md = dnn_mem_t::init_md(ndims, dims.data(), dt, tag::abx);
+            benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> zp_md;
+            DNN_SAFE(
+                    dnn_mem_t::init_md(zp_md, ndims, dims.data(), dt, tag::abx),
+                    WARN);
             mem_map.emplace(exec_zp_arg,
                     dnn_mem_t(zp_md, test_engine, /* prefill = */ true));
         }
     }
+
+    return OK;
 }
 
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
@@ -914,7 +947,9 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
     // A hack to pass brgemm attributes to reference execution since some
     // members change the computation flow for correctness validation.
     dnnl_dims_t dims = {1};
-    auto workspace_md = dnn_mem_t::init_md(1, dims, dnnl_u8, tag::abx);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> workspace_md;
+    DNN_SAFE(
+            dnn_mem_t::init_md(workspace_md, 1, dims, dnnl_u8, tag::abx), WARN);
     ref_mem_map.emplace(DNNL_ARG_WORKSPACE,
             dnn_mem_t(workspace_md, ref_engine, /* prefill = */ false,
                     {false, (void *)&kernel_args.generate_skip_accumulation_}));
@@ -934,13 +969,16 @@ int scales_post_processing(dnn_mem_map_t &mem_map) {
     const auto replace_mem_to_v16
             = [&](dnnl_data_type_t dt, int exec_arg, float val) {
         dims_t dims = {16};
-        auto new_md = dnn_mem_t::init_md(1, dims.data(), dt, tag::abx);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> new_md;
+        DNN_SAFE(
+                dnn_mem_t::init_md(new_md, 1, dims.data(), dt, tag::abx), WARN);
         dnn_mem_t new_m(new_md, get_test_engine(), /* prefill = */ true);
         if (!new_m.is_mapped()) new_m.map();
         for (int64_t i = 0; i < new_m.nelems(); i++) {
             new_m.set_elem(i, val);
         }
         mem_map[DNNL_ARG_ATTR_SCALES | exec_arg] = std::move(new_m);
+        return OK;
     };
 
     if (has_dst_scale) {
@@ -948,8 +986,9 @@ int scales_post_processing(dnn_mem_map_t &mem_map) {
                 = mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST);
         assert(dst_scales_m.nelems() == 1);
         // Create a v16 dst scales memory and bcast inversed dst value there.
-        replace_mem_to_v16(dst_scales_m.dt(), DNNL_ARG_DST,
-                1.f / dst_scales_m.get_elem(0));
+        SAFE(replace_mem_to_v16(dst_scales_m.dt(), DNNL_ARG_DST,
+                     1.f / dst_scales_m.get_elem(0)),
+                WARN);
     }
 
 #if defined(brg_aarch64)
@@ -989,16 +1028,18 @@ int scales_post_processing(dnn_mem_map_t &mem_map) {
         }
         // Second, update memory for a single scale.
         if (wei_scales_m.nelems() == 1) {
-            replace_mem_to_v16(wei_scales_m.dt(), DNNL_ARG_WEIGHTS,
-                    wei_scales_m.get_elem(0));
+            SAFE(replace_mem_to_v16(wei_scales_m.dt(), DNNL_ARG_WEIGHTS,
+                         wei_scales_m.get_elem(0)),
+                    WARN);
         }
     } else if (has_src_scale) {
         const auto &src_scales_m
                 = mem_map.at(DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC);
         assert(src_scales_m.nelems() == 1);
         // Create a v16 weights scales memory and put src value there.
-        replace_mem_to_v16(
-                src_scales_m.dt(), DNNL_ARG_WEIGHTS, src_scales_m.get_elem(0));
+        SAFE(replace_mem_to_v16(src_scales_m.dt(), DNNL_ARG_WEIGHTS,
+                     src_scales_m.get_elem(0)),
+                WARN);
     }
 
 #endif
@@ -1097,7 +1138,7 @@ int doit(const prb_t *prb, res_t *res) {
 #endif
 
     dnn_mem_map_t mem_map, ref_mem_map;
-    init_memory_args(mem_map, prb, kernel_args);
+    SAFE(init_memory_args(mem_map, prb, kernel_args), WARN);
     TIME_FILL(SAFE(
             init_ref_memory_args(ref_mem_map, mem_map, prb, kernel_args, res),
             WARN));

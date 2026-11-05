@@ -820,7 +820,7 @@ struct attr_args_t {
         entries.insert(std::make_pair(arg, mask));
     }
 
-    int prepare_post_ops_mds(const attr_t &attr, int ndims,
+    dnnl_status_t prepare_post_ops_mds(const attr_t &attr, int ndims,
             const dnnl_dims_t prb_dims,
             dnnl_primitive_kind_t prim_kind = dnnl_undefined_primitive,
             const sparse_options_t *sparse_options = nullptr);

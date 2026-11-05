@@ -39,9 +39,10 @@
 
 namespace sdpa {
 
-benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> create_md(int ndims,
-        const dims_t &dims, dnnl_data_type_t dt, const std::string &tag) {
-    return dnn_mem_t::init_md(ndims, dims.data(), dt, tag);
+dnnl_status_t create_md(benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> &md,
+        int ndims, const dims_t &dims, dnnl_data_type_t dt,
+        const std::string &tag) {
+    return dnn_mem_t::init_md(md, ndims, dims.data(), dt, tag);
 }
 
 dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
@@ -55,15 +56,21 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     auto v_dt = force_f32_dt ? dnnl_f32 : prb->v_dt();
     auto dst_dt = force_f32_dt ? dnnl_f32 : prb->dst_dt();
 
-    auto q_d = create_md(prb->ndims, prb->q_dims(), q_dt, prb->qtag);
-    auto k_d = create_md(prb->ndims, prb->k_dims(), k_dt, prb->ktag);
-    auto v_d = create_md(prb->ndims, prb->v_dims(), v_dt, prb->vtag);
-    auto dst_d = create_md(prb->ndims, prb->dst_dims, dst_dt, prb->dtag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> q_d;
+    DNN_SAFE_STATUS(create_md(q_d, prb->ndims, prb->q_dims(), q_dt, prb->qtag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> k_d;
+    DNN_SAFE_STATUS(create_md(k_d, prb->ndims, prb->k_dims(), k_dt, prb->ktag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> v_d;
+    DNN_SAFE_STATUS(create_md(v_d, prb->ndims, prb->v_dims(), v_dt, prb->vtag));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+    DNN_SAFE_STATUS(
+            create_md(dst_d, prb->ndims, prb->dst_dims, dst_dt, prb->dtag));
 
     // Attention mask (optional).
     benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> mask_d {};
     if (prb->with_mask()) {
-        mask_d = create_md(prb->ndims, prb->msk_dims, prb->mdt, tag::abx);
+        DNN_SAFE_STATUS(create_md(
+                mask_d, prb->ndims, prb->msk_dims, prb->mdt, tag::abx));
     }
 
     // Always pass a valid md — the API unconditionally dereferences it.
@@ -95,8 +102,8 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     // Build attr_args for dropout mask md if configured.
     attr_args_t attr_args;
     if (!prb->attr.dropout.is_def()) {
-        attr_args.prepare_post_ops_mds(
-                prb->attr, prb->ndims, prb->score_dims.data());
+        DNN_SAFE_STATUS(attr_args.prepare_post_ops_mds(
+                prb->attr, prb->ndims, prb->score_dims.data()));
     }
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
@@ -115,11 +122,18 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
                 /* kq_attr = */ nullptr,
                 /* vs_attr = */ nullptr)));
     } else {
-        auto diff_q_d = create_md(prb->ndims, prb->q_dims(), q_dt, prb->qtag);
-        auto diff_k_d = create_md(prb->ndims, prb->k_dims(), k_dt, prb->ktag);
-        auto diff_v_d = create_md(prb->ndims, prb->v_dims(), v_dt, prb->vtag);
-        auto diff_dst_d
-                = create_md(prb->ndims, prb->dst_dims, dst_dt, prb->dtag);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_q_d;
+        DNN_SAFE_STATUS(create_md(
+                diff_q_d, prb->ndims, prb->q_dims(), q_dt, prb->qtag));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_k_d;
+        DNN_SAFE_STATUS(create_md(
+                diff_k_d, prb->ndims, prb->k_dims(), k_dt, prb->ktag));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_v_d;
+        DNN_SAFE_STATUS(create_md(
+                diff_v_d, prb->ndims, prb->v_dims(), v_dt, prb->vtag));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_dst_d;
+        DNN_SAFE_STATUS(create_md(
+                diff_dst_d, prb->ndims, prb->dst_dims, dst_dt, prb->dtag));
 
         TIME_C_PD(DNN_SAFE_STATUS(sdpa_primitive_desc_create(&init_pd_args.pd,
                 init_pd_args.engine, q_d, k_d, v_d, dst_d, mask_ptr, scale_d,

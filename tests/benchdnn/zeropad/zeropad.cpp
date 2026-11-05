@@ -129,8 +129,10 @@ int doit(const prb_t *prb, res_t *res) {
     prb->skip_unimplemented(res);
     if (res->state == SKIPPED) return OK;
 
-    auto data_md = dnn_mem_t::init_md(
-            prb->ndims, prb->dims.data(), prb->dt, prb->tag);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> data_md;
+    DNN_SAFE(dnn_mem_t::init_md(
+                     data_md, prb->ndims, prb->dims.data(), prb->dt, prb->tag),
+            WARN);
     if (res->state == SKIPPED || res->state == UNIMPLEMENTED) return OK;
     if (bench_mode == bench_mode_t::init) return res->state = INITIALIZED, OK;
 
@@ -153,8 +155,10 @@ int doit(const prb_t *prb, res_t *res) {
     }
     if (has_bench_mode_bit(mode_bit_t::perf)) {
         // Get plain memory desc size to have a proper padded area size.
-        auto plain_data_md = dnn_mem_t::init_md(
-                prb->ndims, prb->dims.data(), prb->dt, tag::abx);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> plain_data_md;
+        DNN_SAFE(dnn_mem_t::init_md(plain_data_md, prb->ndims, prb->dims.data(),
+                         prb->dt, tag::abx),
+                WARN);
         // Fill output bytes for perf_report.
         res->ibytes = 0; // Since we don't read any data from padding.
         res->obytes = dnnl_memory_desc_get_size(data_md)

@@ -41,25 +41,33 @@ dnnl_data_type_t prb_t::get_dt(data_kind_t data_kind) const {
 }
 
 benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
+    // The same tags were already used to create descriptors in `init_pd`, so a
+    // failure is not expected.
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> md;
     switch (arg) {
         case DNNL_ARG_SRC:
             assert(src_runtime_dim_mask().any());
-            return dnn_mem_t::init_md(ndims, src_dims().data(), src_dt(), stag,
-                    strides[STRIDES_SRC]);
+            DNN_SAFE_V(dnn_mem_t::init_md(md, ndims, src_dims().data(),
+                    src_dt(), stag, strides[STRIDES_SRC]));
+            return md;
         case DNNL_ARG_WEIGHTS:
             assert(weights_runtime_dim_mask().any());
-            return dnn_mem_t::init_md(ndims, weights_dims().data(), wei_dt(),
-                    wtag, strides[STRIDES_WEI]);
+            DNN_SAFE_V(dnn_mem_t::init_md(md, ndims, weights_dims().data(),
+                    wei_dt(), wtag, strides[STRIDES_WEI]));
+            return md;
         case DNNL_ARG_BIAS:
-            return dnn_mem_t::init_md(
-                    ndims, bia_dims().data(), bia_dt, tag::abx);
+            DNN_SAFE_V(dnn_mem_t::init_md(
+                    md, ndims, bia_dims().data(), bia_dt, tag::abx));
+            return md;
         case DNNL_ARG_DST:
             assert(dst_runtime_dim_mask().any());
-            return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag,
-                    strides[STRIDES_DST]);
+            DNN_SAFE_V(dnn_mem_t::init_md(md, ndims, dst_dims.data(), dst_dt(),
+                    dtag, strides[STRIDES_DST]));
+            return md;
         case DNNL_ARG_ATTR_DROPOUT_MASK:
-            return dnn_mem_t::init_md(ndims, dst_dims.data(),
-                    get_dt(DROPOUT_MASK), attr.dropout.tag);
+            DNN_SAFE_V(dnn_mem_t::init_md(md, ndims, dst_dims.data(),
+                    get_dt(DROPOUT_MASK), attr.dropout.tag));
+            return md;
         default:
             assert(!"unsupported arg");
             return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);

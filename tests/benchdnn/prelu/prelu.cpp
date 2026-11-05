@@ -107,18 +107,22 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     const auto &src_dims = prb->vdims[0];
     const auto &weight_dims = prb->vdims[1];
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, src_dims.data(),
-            force_f32_dt ? dnnl_f32 : prb->sdt[0], prb->stag[0]);
-    auto weights_d = dnn_mem_t::init_md(prb->ndims, weight_dims.data(),
-            force_f32_dt ? dnnl_f32 : prb->sdt[1], prb->stag[1]);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src_d, prb->ndims, src_dims.data(),
+            force_f32_dt ? dnnl_f32 : prb->sdt[0], prb->stag[0]));
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> weights_d;
+    DNN_SAFE_STATUS(
+            dnn_mem_t::init_md(weights_d, prb->ndims, weight_dims.data(),
+                    force_f32_dt ? dnnl_f32 : prb->sdt[1], prb->stag[1]));
 
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
             create_dnnl_attr(dnnl_attr, prb->attr, attr_args_t(), prb->ndims));
 
     if (prb->dir & FLAG_FWD) {
-        auto dst_d = dnn_mem_t::init_md(prb->ndims, src_dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->sdt[0], tag::any);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, prb->ndims, src_dims.data(),
+                force_f32_dt ? dnnl_f32 : prb->sdt[0], tag::any));
 
         auto prop = prb->dir & FLAG_INF ? dnnl_forward_inference
                                         : dnnl_forward_training;
@@ -127,12 +131,18 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
                 init_pd_args.src_md ? init_pd_args.src_md : src_d, weights_d,
                 dst_d, dnnl_attr)));
     } else {
-        auto diff_src_d = dnn_mem_t::init_md(prb->ndims, src_dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->sdt[0], tag::any);
-        auto diff_weights_d = dnn_mem_t::init_md(prb->ndims, weight_dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->sdt[1], tag::any);
-        auto diff_dst_d = dnn_mem_t::init_md(prb->ndims, src_dims.data(),
-                force_f32_dt ? dnnl_f32 : prb->sdt[0], tag::any);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_src_d;
+        DNN_SAFE_STATUS(
+                dnn_mem_t::init_md(diff_src_d, prb->ndims, src_dims.data(),
+                        force_f32_dt ? dnnl_f32 : prb->sdt[0], tag::any));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_weights_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(diff_weights_d, prb->ndims,
+                weight_dims.data(), force_f32_dt ? dnnl_f32 : prb->sdt[1],
+                tag::any));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_dst_d;
+        DNN_SAFE_STATUS(
+                dnn_mem_t::init_md(diff_dst_d, prb->ndims, src_dims.data(),
+                        force_f32_dt ? dnnl_f32 : prb->sdt[0], tag::any));
 
         TIME_C_PD(DNN_SAFE_STATUS(dnnl_prelu_backward_primitive_desc_create(
                 &init_pd_args.pd, init_pd_args.engine, src_d, weights_d,

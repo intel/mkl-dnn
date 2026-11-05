@@ -429,8 +429,10 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
 
-    auto src_d = dnn_mem_t::init_md(prb->ndims, prb->data_dims().data(),
-            force_f32_dt ? dnnl_f32 : prb->dt, prb->tag, prb->strides[0]);
+    benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> src_d;
+    DNN_SAFE_STATUS(dnn_mem_t::init_md(src_d, prb->ndims,
+            prb->data_dims().data(), force_f32_dt ? dnnl_f32 : prb->dt,
+            prb->tag, prb->strides[0]));
 
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
     DNN_SAFE_STATUS(
@@ -438,8 +440,10 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
 
     auto flags = (dnnl_normalization_flags_t)prb->flags;
     if (dir & FLAG_FWD) {
-        auto dst_d = dnn_mem_t::init_md(prb->ndims, prb->data_dims().data(),
-                force_f32_dt ? dnnl_f32 : prb->dt, tag::any, prb->strides[1]);
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> dst_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(dst_d, prb->ndims,
+                prb->data_dims().data(), force_f32_dt ? dnnl_f32 : prb->dt,
+                tag::any, prb->strides[1]));
         auto prop = prb->dir & FLAG_INF ? dnnl_forward_inference
                                         : dnnl_forward_training;
         TIME_C_PD(DNN_SAFE_STATUS(
@@ -448,12 +452,14 @@ dnnl_status_t init_pd(init_pd_args_t &init_pd_args) {
                         init_pd_args.src_md ? init_pd_args.src_md : src_d,
                         dst_d, prb->eps, flags, dnnl_attr)));
     } else {
-        auto diff_src_d = dnn_mem_t::init_md(prb->ndims,
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_src_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(diff_src_d, prb->ndims,
                 prb->data_dims().data(), force_f32_dt ? dnnl_f32 : prb->dt,
-                tag::any, prb->strides[0]);
-        auto diff_dst_d = dnn_mem_t::init_md(prb->ndims,
+                tag::any, prb->strides[0]));
+        benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> diff_dst_d;
+        DNN_SAFE_STATUS(dnn_mem_t::init_md(diff_dst_d, prb->ndims,
                 prb->data_dims().data(), force_f32_dt ? dnnl_f32 : prb->dt,
-                tag::any, prb->strides[1]);
+                tag::any, prb->strides[1]));
         auto prop = prb->dir & FLAG_WEI ? dnnl_backward : dnnl_backward_data;
         TIME_C_PD(DNN_SAFE_STATUS(
                 dnnl_batch_normalization_backward_primitive_desc_create(
