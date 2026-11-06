@@ -633,8 +633,11 @@ reg_alloc_result_t allocate_registers(
             add_operand(v);
         for (int v : use_vregs)
             add_operand(v);
-        for (int v = 0; v < n_vregs; v++) {
-            if ((live_in[i][v / 64] >> (v % 64)) & 1) extend_interval(v);
+        for (int w = 0; w < (int)live_in[i].size(); w++) {
+            uint64_t bits = live_in[i][w];
+            for (int v = w * 64; bits != 0; bits >>= 1, v++) {
+                if (bits & 1) extend_interval(v);
+            }
         }
     }
 
