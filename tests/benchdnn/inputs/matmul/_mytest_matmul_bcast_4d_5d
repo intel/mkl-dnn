@@ -1,0 +1,36 @@
+# 4D and 5D Binary Post-Op Broadcast Test Suite (MFDNN-12303)
+#$ ./tests/benchdnn/benchdnn --matmul --batch=../tests/benchdnn/inputs/matmul/_mytest_matmul_bcast_4d_5d
+
+--reset
+--skip-impl=ref
+--dt=f32,bf16,s8:s8:s32
+--stag=abcd
+--wtag=abcd
+--dtag=abcd
+
+# All 16 broadcast masks for 4D (0..15)
+--attr-post-ops=add:f32:0,add:f32:1,add:f32:2,add:f32:3,add:f32:4,add:f32:5,add:f32:6,add:f32:7,add:f32:8,add:f32:9,add:f32:10,add:f32:11,add:f32:12,add:f32:13,add:f32:14,add:f32:15
+3x2x4x8:3x2x8x6n"postops_4d_all_masks"
+
+--reset
+--skip-impl=ref
+--dt=f32,bf16,s8:s8:s32
+--stag=abcde
+--wtag=abcde
+--dtag=abcde
+
+# All 32 broadcast masks for 5D (0..31)
+--attr-post-ops=add:f32:0,add:f32:1,add:f32:2,add:f32:3,add:f32:4,add:f32:5,add:f32:6,add:f32:7,add:f32:8,add:f32:9,add:f32:10,add:f32:11,add:f32:12,add:f32:13,add:f32:14,add:f32:15,add:f32:16,add:f32:17,add:f32:18,add:f32:19,add:f32:20,add:f32:21,add:f32:22,add:f32:23,add:f32:24,add:f32:25,add:f32:26,add:f32:27,add:f32:28,add:f32:29,add:f32:30,add:f32:31
+3x2x5x4x8:3x2x5x8x6n"postops_5d_all_masks"
+
+# GQA 5D Broadcast Reproducer (from MFDNN-12303)
+--reset
+--skip-impl=ref
+--allow-enum-tags-only=false
+--dt=f32
+--stag=abcde
+--wtag=abced
+--dtag=abcde
+--attr-post-ops=div:f32:0+add:f32:17:abcde
+--attr-scratchpad=user
+32x2x8x384x64:32x2x1x64x384n"gqa_5d_repro"
