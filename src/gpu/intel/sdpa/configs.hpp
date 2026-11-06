@@ -22,6 +22,7 @@
 #include "common/c_types_map.hpp"
 #include "gemmstone/microkernel_selector.hpp"
 #include "gpu/intel/compute/device_info.hpp"
+#include "gpu/intel/sdpa/config.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -30,22 +31,6 @@ namespace intel {
 namespace sdpa {
 
 namespace micro = gemmstone::microkernel;
-
-struct fwd_config_t {
-    int unroll_m_kq, unroll_n_kq; // Subgroup tile sizes for K*Q GEMM
-    int unroll_m_vs, unroll_n_vs; // Subgroup tile sizes for V*S GEMM
-    int wg_m_kq, wg_n_kq; // Workgroup configuration for K*Q GEMM
-    int wg_m_vs, wg_n_vs; // Workgroup configuration for V*S GEMM
-};
-
-struct bwd_config_t {
-    int unroll_m_BcBr, unroll_n_BcBr; // Subgroup tile sizes for Br*Bc GEMMs
-    int unroll_m_DBc, unroll_n_DBc; // Subgroup tile sizes for Bc*D GEMMs
-    int unroll_m_DBr, unroll_n_DBr; // Subgroup tile sizes for Br*D GEMMs
-    int wg_m_BcBr, wg_n_BcBr; // Workgroup configuration for Br*Bc GEMMs
-    int wg_m_DBc, wg_n_DBc; // Workgroup configuration for Bc*D GEMMs
-    int wg_m_DBr, wg_n_DBr; // Workgroup configuration for Br*D GEMMs
-};
 
 enum class property : int {
     none = 0x0,
