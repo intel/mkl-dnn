@@ -1,0 +1,46 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+# f32 coverage: f32 Q/K/V always take the FMA (non-systolic) kernel, the
+# only FMA path on parts with systolic arrays. micro.hpp only dispatches f32
+# with a causal mask, so decode uses the bottom-right form (every key
+# visible to the last query) and prefill both forms.
+
+# Decode, both K layouts
+b=1 h=32 q=1 k=4096 d=128 dt=f32 mask=causal_bottom_right
+b=1 h=32 q=1 k=4096 d=128 dt=f32 mask=causal_bottom_right args=--ktag=abdc
+b=1 h=32 q=1 k=1025 d=128 dt=f32 mask=causal_bottom_right
+b=1 h=32 hk=8 q=1 k=2049 d=128 dt=f32 mask=causal_bottom_right args=--ktag=abdc
+b=1 h=8 q=1 k=1500 d=64 dt=f32 mask=causal_bottom_right
+b=1 h=16 q=1 k=1025 d=256 dt=f32 mask=causal_bottom_right args=--ktag=abdc
+
+# Prefill
+b=1 h=32 q=1024 k=1024 d=128 dt=f32 mask=causal_top_left
+b=1 h=32 q=1024 k=1024 d=128 dt=f32 mask=causal_bottom_right args=--ktag=abdc
+b=1 h=32 q=2048 k=2048 d=128 dt=f32 mask=causal_top_left
+b=2 h=10 q=1024 k=1024 d=64 dt=f32 mask=causal_top_left
+b=2 h=5 q=4096 k=4096 d=64 dt=f32 mask=causal_bottom_right
+b=1 h=8 q=1500 k=1500 d=64 dt=f32 mask=causal_top_left
+b=2 h=8 q=1024 k=1024 d=80 dt=f32 mask=causal_top_left
+b=1 h=32 q=1024 k=1024 d=96 dt=f32 mask=causal_bottom_right
+b=1 h=16 q=1024 k=1024 d=256 dt=f32 mask=causal_top_left
+b=1 h=8 q=512 k=512 d=512 dt=f32 mask=causal_top_left
+
+# Chunked prefill over a longer cache, small sequences, small head sizes
+b=1 h=32 q=128 k=4096 d=128 dt=f32 mask=causal_bottom_right
+b=2 h=10 q=77 k=77 d=64 dt=f32 mask=causal_top_left
+b=1 h=8 q=32 k=32 d=64 dt=f32 mask=causal_top_left
+b=1 h=32 q=16 k=16 d=16 dt=f32 mask=causal_top_left
+b=1 h=12 q=384 k=384 d=64 dt=f32 mask=causal_bottom_right

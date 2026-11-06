@@ -1,0 +1,76 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+# Coverage for the model fit, derived from benchdnn's inputs/sdpa harness:
+# regions the KPI list does not reach. Sweep this file into its own CSV and
+# give both CSVs to fit_fwd_model.py; whether its winners go into the table
+# is a separate choice.
+#
+# args=--ktag=abdc stores K with the head dimension contiguous, the layout
+# frameworks pass; the driver default keeps K rows contiguous. The two
+# layouts compile different kernels (tk0 / tk1 in the key) and odd key
+# counts are 2-byte aligned only in the default layout.
+
+# Head sizes 128 to 512 at a tiny batch-head count, both layouts
+b=1 h=2 q=1 k=385 d=128 dt=f16
+b=1 h=2 q=1 k=385 d=128 dt=f16 args=--ktag=abdc
+b=1 h=2 q=1 k=385 d=256 dt=f16
+b=1 h=2 q=1 k=385 d=256 dt=f16 args=--ktag=abdc
+b=1 h=2 q=1 k=385 d=512 dt=f16
+b=1 h=2 q=1 k=385 d=512 dt=f16 args=--ktag=abdc
+b=1 h=2 q=384 k=384 d=128 dt=f16
+b=1 h=2 q=384 k=384 d=128 dt=f16 args=--ktag=abdc
+b=1 h=2 q=384 k=384 d=256 dt=f16 args=--ktag=abdc
+b=1 h=2 q=384 k=384 d=512 dt=f16
+b=1 h=2 q=384 k=384 d=512 dt=f16 args=--ktag=abdc
+
+# Grouped-query attention: q heads over fewer kv heads
+b=1 h=4 hk=2 q=1 k=385 d=128 dt=f16
+b=1 h=4 hk=2 q=1 k=385 d=128 dt=f16 args=--ktag=abdc
+b=1 h=4 hk=2 q=128 k=128 d=64 dt=f16 mask=buffer_1d mdt=f16 args=--ktag=abdc
+b=1 h=32 hk=8 q=1 k=68 d=128 dt=f16 mask=buffer_1d mdt=f16 args=--ktag=abdc
+b=1 h=32 hk=8 q=1 k=385 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=32 hk=8 q=384 k=384 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=28 hk=4 q=1 k=1025 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=28 hk=4 q=2048 k=2048 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=24 hk=8 q=1 k=2049 d=64 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=24 hk=8 q=1024 k=1024 d=64 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=2 h=32 hk=4 q=1 k=256 d=64 dt=f16
+b=3 h=28 hk=4 q=1 k=300 d=128 dt=f16 mask=causal_top_left
+
+# LLM shapes in the framework layout
+b=1 h=32 q=1 k=1025 d=96 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=32 q=2048 k=2048 d=96 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=32 q=1 k=2049 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=32 q=1024 k=1024 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+
+# Small sequences and small head sizes
+b=1 h=8 q=32 k=32 d=64 dt=f16
+b=1 h=8 q=32 k=32 d=64 dt=f16 mask=causal_top_left
+b=2 h=4 q=16 k=16 d=32 dt=f16
+b=1 h=32 q=16 k=16 d=16 dt=f16
+b=1 h=16 q=384 k=384 d=16 dt=f16
+b=1 h=12 q=384 k=384 d=64 dt=f16
+b=1 h=32 q=512 k=512 d=128 dt=f16
+
+# KPI shapes in the framework layout
+b=2 h=10 q=1024 k=1024 d=64 dt=f16 args=--ktag=abdc
+b=2 h=5 q=4096 k=4096 d=64 dt=f16 args=--ktag=abdc
+b=2 h=5 q=4096 k=77 d=64 dt=f16 args=--ktag=abdc
+b=1 h=32 q=1 k=1025 d=128 dt=f16 mask=buffer_1d mdt=f16 args=--ktag=abdc
+b=1 h=32 q=1024 k=1024 d=128 dt=f16 mask=buffer_2d mdt=f16 args=--ktag=abdc
+b=1 h=8 q=1 k=1500 d=64 dt=f16 args=--ktag=abdc
+b=1 h=8 q=1500 k=1500 d=64 dt=f16 args=--ktag=abdc
+b=1 h=16 q=1 k=1025 d=256 dt=f16 mask=buffer_1d mdt=f16 args=--ktag=abdc
