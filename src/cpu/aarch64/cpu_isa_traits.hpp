@@ -73,7 +73,8 @@ enum cpu_isa_t : unsigned {
     sve_128 = sve_128_bit | sve,
     sve_256 = sve_256_bit | sve_128,
     sve_512 = sve_512_bit | sve_256,
-    sme = sme_bit,
+    // SME does not imply SVE (e.g. Apple M4), but does imply Advanced SIMD
+    sme = sme_bit | asimd,
     isa_all = ~0u,
 };
 
