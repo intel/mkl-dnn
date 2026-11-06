@@ -1656,9 +1656,16 @@ void CopyPlan::planInt3Upconvert(CopyInstruction &i)
     rows[2] = addByteOffset(srcBase, 2 * byteStep);
     for (auto &r : rows) r.stride = colPitchBytes;
 
+    // Byte destination with dword-pitched columns: each lane is one shr from
+    // the dword holding it; only lanes straddling a dword boundary need a splice.
+    bool dwordByteExtract = (colPitchBytes == 4 && type_size == 1 && rowStrideBytes % 4 == 0);
+
     // Straddling lanes need lo/hi scratch for their shift/or sequence.
-    auto tmp = newTemp(DataType::uw, nLocal, 2);
-    auto tmpHi = newTemp(DataType::uw, nLocal, 2);
+    CopyOperand tmp, tmpHi;
+    if (!dwordByteExtract) {
+        tmp = newTemp(DataType::uw, nLocal, 2);
+        tmpHi = newTemp(DataType::uw, nLocal, 2);
+    }
 
     std::vector<CopyInstruction*> allOps;
     {
@@ -1718,9 +1725,38 @@ void CopyPlan::planInt3Upconvert(CopyInstruction &i)
         setOp(shrOp, Opcode::shr, 2 * nLocal, dstMerged, rowDup, packedShift);
     };
 
+    if (dwordByteExtract) {
+        int byteInDword = srcBase.offset % 4;
+        // Dword w of the packed bitstream.
+        auto dword = [&](int w, DataType type) {
+            auto op = srcBase;
+            int off = op.offset - byteInDword + w * rowStrideBytes;
+            op.grf += off / grfBytes;
+            op.offset = (off % grfBytes) / getBytes(type);
+            op.type = type;
+            op.stride = 4 / getBytes(type);
+            return op;
+        };
+        // Alternate between the two dst GRFs to space out WAW dependencies.
+        static const int laneOrder[8] = {0, 4, 1, 5, 2, 6, 3, 7};
+        for (int lane : laneOrder) {
+            int b = 8 * byteInDword + 3 * lane;
+            int w = b / 32;
+            b %= 32;
+            auto dst = computeFinalDstLane(lane);
+            setOp(allOps[next++], Opcode::shr, nLocal, dst, dword(w, DataType::ud), CopyOperand(b));
+            if (b + 3 > 32) {
+                // OR in the low bits of the next dword.
+                if (!tmp) tmp = newTemp(DataType::uw, nLocal, 2);
+                setOp(allOps[next++], Opcode::shl, nLocal, tmp, dword(w + 1, DataType::uw), CopyOperand(32 - b));
+                setOp(allOps[next++], Opcode::or_, nLocal, dst, dst, tmp);
+            }
+        }
+    }
+
     // Lanes 0&1/6&7 merge into one shr each when dstStride == 2; the
     // middle pair and straddling lanes are always processed individually.
-    bool canMergePairs = (dstStride == 2);
+    bool canMergePairs = (dstStride == 2) && !dwordByteExtract;
     if (canMergePairs) {
         static const int mergePairs[2][2] = {{0, 1}, {6, 7}};
         for (auto &pr : mergePairs)
@@ -1730,8 +1766,15 @@ void CopyPlan::planInt3Upconvert(CopyInstruction &i)
     // Straddling lanes (2, 5) use a shr/shl/or_ sequence; non-merged
     // lanes use a single shr.
     std::vector<int> soloLanes = {2, 3, 4, 5};
-    if (!canMergePairs)
+    if (dwordByteExtract)
+        soloLanes.clear();
+    else if (!canMergePairs) {
         soloLanes = {0, 1, 2, 3, 4, 5, 6, 7};
+        if (type_size == 1 && dstStride == 1) {
+            // Interleave destination GRFs to avoid back-to-back write dependencies.
+            soloLanes = {0, 4, 1, 5, 2, 6, 3, 7};
+        }
+    }
     for (int lane : soloLanes) {
         const auto &L = lanes[lane];
         auto finalDstLane = computeFinalDstLane(lane);
