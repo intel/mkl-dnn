@@ -267,6 +267,17 @@ set to `custom`, cold cache is enabled for specified arguments, but it requires
 source code adjustments. Refer to [cold cache](knob_cold_cache.md) for more
 information.
 
+### --fill
+`--fill=VALUE` specifies how the driver fills data with reference memory
+disabled (`--mode=F`, `--mode-modifier=M`, or `--mode=P` on a GPU engine). It
+cannot be used with `--mode=C`. `VALUE` can be:
+  - `random` (the default): pseudo-random data on Intel GPU to avoid memory
+    compression, a constant byte on other engines.
+  - `random:MASK`: random data AND-ed with the hex `MASK`, e.g., `random:0xe0`
+    keeps the top three bits of each byte. Intel GPU only.
+  - `0` or `1`: every element is set to that value. `0` allows memory
+    compression.
+
 ### --fix-times-per-prb
 `--fix-times-per-prb=N` specifies the `N` number of rounds per problem to run,
 where `N` is a non-negative integer value. When `N` is set to `0` (the default),

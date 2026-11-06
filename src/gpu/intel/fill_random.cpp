@@ -63,7 +63,8 @@ static uint32_t nan_safe_mask(data_type_t dt) {
 }
 
 status_t fill_random(impl::stream_t *stream, size_t size,
-        impl::memory_t *memory, int buffer_index, uint32_t seed) {
+        impl::memory_t *memory, int buffer_index, uint32_t seed, uint32_t mask,
+        uint64_t value) {
     if (size == 0) return status::success;
 
     auto *intel_stream = utils::downcast<intel::stream_t *>(stream);
@@ -79,7 +80,8 @@ status_t fill_random(impl::stream_t *stream, size_t size,
     arg_list.set(0, *memory->memory_storage(buffer_index));
     arg_list.set(1, seed);
     arg_list.set(2, static_cast<uint64_t>(size));
-    arg_list.set(3, nan_safe_mask(memory->md()->data_type));
+    arg_list.set(3, nan_safe_mask(memory->md()->data_type) & mask);
+    arg_list.set(4, value);
 
     CHECK(kernel.parallel_for(*stream, nd_range, arg_list,
             intel_stream->ctx().get_deps(), intel_stream->ctx().get_deps()));
@@ -93,7 +95,7 @@ status_t fill_random(impl::stream_t *stream, size_t size,
 
 extern "C" dnnl::impl::status_t DNNL_API dnnl_impl_gpu_fill_random(
         dnnl::impl::stream_t *stream, size_t size, dnnl::impl::memory_t *memory,
-        int buffer_index, uint32_t seed) {
+        int buffer_index, uint32_t seed, uint32_t mask, uint64_t value) {
     return dnnl::impl::gpu::intel::fill_random(
-            stream, size, memory, buffer_index, seed);
+            stream, size, memory, buffer_index, seed, mask, value);
 }

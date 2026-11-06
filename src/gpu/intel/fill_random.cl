@@ -19,13 +19,15 @@
 // Fills a buffer with pseudo-random data using Philox RNG.
 // Each work-item generates 4 × uint32 (16 bytes) via vstore4.
 // The mask clears exponent LSBs to prevent NaN/Inf for FP types.
-__kernel void fill_random(
-        __global uint *buf, uint seed, ulong byte_count, uint mask) {
+// Output is (random & mask) | value; mask = 0 gives a constant fill.
+__kernel void fill_random(__global uint *buf, uint seed, ulong byte_count,
+        uint mask, ulong value) {
     const ulong start = (ulong)get_global_id(0) * 16;
     if (start >= byte_count) return;
 
     uint b = (uint)(start >> 2);
-    uint4 rnd = philox_4x32_vec4(b, b ^ seed) & (uint4)(mask);
+    uint2 v = as_uint2(value);
+    uint4 rnd = (philox_4x32_vec4(b, b ^ seed) & (uint4)(mask)) | (uint4)(v, v);
 
     if (start + 16 <= byte_count) {
         vstore4(rnd, get_global_id(0), buf);

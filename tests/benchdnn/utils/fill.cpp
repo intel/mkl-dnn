@@ -489,6 +489,61 @@ std::string execarg2str(int exec_arg) {
 
 std::string buffer_prefix;
 
+fill_input_t fill_input;
+bool fill_input_applied = false;
+
+std::ostream &operator<<(std::ostream &s, const fill_input_t &fill) {
+    if (fill.is_const()) return s << fill.value;
+    if (fill.is_def()) return s << "random";
+    char buf[16];
+    snprintf(buf, sizeof(buf), "0x%08x", fill.mask);
+    return s << "random:" << buf;
+}
+
+static uint64_t fill_value_pattern(dnnl_data_type_t dt, float value) {
+    uint64_t buf[64] = {};
+    for (int i = 0; i < 64; i++)
+        set_element(dt, i, buf, value);
+    return buf[0];
+}
+
+static void fill_pattern(void *ptr, uint64_t value, size_t size) {
+    auto *p = static_cast<uint8_t *>(ptr);
+    size_t i = 0;
+    for (; i + sizeof(value) <= size; i += sizeof(value))
+        std::memcpy(p + i, &value, sizeof(value));
+    std::memcpy(p + i, &value, size - i);
+}
+
+int fill_by_input(const dnn_mem_t &mem, const fill_input_t &fill, size_t size,
+        int buffer_index) {
+    const auto dt = mem.dt(buffer_index);
+    // u3 elements do not tile 64 bits.
+    if (fill.value == 1 && dt == dnnl_u3) {
+        BENCHDNN_PRINT(
+                0, "Error: --fill=1 is not supported for %s.\n", dt2str(dt));
+        SAFE_V(FAIL);
+    }
+    const uint64_t value = fill.value == 1 ? fill_value_pattern(dt, 1.f) : 0;
+    if (!fill.is_def() && (fill.is_const() || mem.can_fill_random()))
+        fill_input_applied = true;
+
+    if (mem.can_fill_random()) {
+        const uint32_t mask = fill.is_const() ? 0 : fill.mask; // 0: no random
+        SAFE(mem.gpu_fill_random(size, buffer_index, mask, value), WARN);
+    } else if (!fill.is_const()) {
+        // Fill memory directly with 0x3F3F3F3F (0.747059f).
+        mem.memset(dnnl_mem_default_perf_test_value, size, buffer_index);
+    } else if (value == 0) {
+        mem.memset(0, size, buffer_index);
+    } else {
+        mem.map();
+        fill_pattern(mem.get_mapped_pointer<void>(buffer_index), value, size);
+        mem.unmap();
+    }
+    return OK;
+}
+
 bool fill_from_file(
         int exec_arg, dnn_mem_t &mem, dnn_mem_t &ref_mem, res_t *res) {
     static const char format[] = "[FILL]: File %s %s; buffer not imported.\n";

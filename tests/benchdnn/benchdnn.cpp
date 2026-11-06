@@ -23,6 +23,7 @@
 #include "common.hpp"
 #include "dnnl_common.hpp"
 #include "dnnl_memory.hpp"
+#include "utils/fill.hpp"
 #include "utils/parser.hpp"
 #include "utils/summary.hpp"
 
@@ -159,6 +160,11 @@ int main(int argc, char **argv) {
     }
 
     total_time.stamp();
+
+    if (!fill_input.is_def() && !fill_input_applied)
+        BENCHDNN_PRINT(0, "%s\n",
+                "WARNING: --fill had no effect for this driver, mode, or "
+                "engine.");
 
     print_impl_names_summary();
     print_impl_names_csv_summary();

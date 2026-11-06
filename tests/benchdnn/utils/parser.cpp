@@ -638,6 +638,34 @@ summary_t str2summary(const std::string &s) {
     return v;
 }
 
+fill_input_t str2fill_input(const std::string &s) {
+    fill_input_t f;
+    if (s == "0" || s == "1") {
+        f.value = s[0] - '0';
+        return f;
+    }
+    if (s == "random") return f;
+    const std::string prefix = "random:0x";
+    const std::string hex = s.compare(0, prefix.size(), prefix) == 0
+            ? s.substr(prefix.size())
+            : "";
+    const size_t n = hex.size();
+    if ((n != 2 && n != 4 && n != 8)
+            || hex.find_first_not_of("0123456789abcdefABCDEF")
+                    != std::string::npos) {
+        BENCHDNN_PRINT(0,
+                "Error: unsupported fill '%s'. Supported values are '0', "
+                "'1', 'random', or 'random:MASK' with a 2, 4, or 8-digit "
+                "hex MASK.\n",
+                s.c_str());
+        SAFE_V(FAIL);
+    }
+    f.mask = static_cast<uint32_t>(std::stoul(hex, nullptr, 16));
+    for (size_t bits = n * 4; bits < 32; bits *= 2)
+        f.mask |= f.mask << bits;
+    return f;
+}
+
 cold_cache_input_t str2cold_cache_input(const std::string &s) {
     // Allowed input: MODE[+EXTENSION[+...]]
     // Allowed extensions: TLB[:SIZE]
@@ -1567,6 +1595,17 @@ static bool parse_cold_cache(
             option_name, help);
 }
 
+static bool parse_fill(
+        const char *str, const std::string &option_name = "fill") {
+    static const std::string help
+            = "0|1|random[:MASK]    (Default: `random`)\n    Instructs the "
+              "driver how to fill data without reference memory. `0` and `1` "
+              "fill every element with that value, `random:MASK` ANDs random "
+              "data with the hex `MASK`, e.g., `random:0xe0`.\n";
+    return parse_single_value_option(fill_input, fill_input_t(),
+            parsers::str2fill_input, str, option_name, help);
+}
+
 static bool parse_cpu_isa_hints(
         const char *str, const std::string &option_name = "cpu-isa-hints") {
     static const std::string help
@@ -2073,7 +2112,7 @@ bool parse_bench_settings(const char *str) {
     bool parsed = parse_allow_enum_tags_only(str)
             || parse_attr_same_pd_check(str) || parse_canonical(str)
             || parse_check_ref_impl(str) || parse_cold_cache(str)
-            || parse_cpu_isa_hints(str) || parse_engine(str)
+            || parse_cpu_isa_hints(str) || parse_engine(str) || parse_fill(str)
             || parse_fast_ref(str) || parse_fix_times_per_prb(str)
             || parse_global_impl(str) || parse_global_skip_impl(str)
             || parse_max_ms_per_prb(str) || parse_num_streams(str)
@@ -2146,6 +2185,13 @@ void catch_unknown_options(const char *str) {
         BENCHDNN_PRINT(0, "%s\n%s \'%s\'\n",
                 "ERROR: options should be passed with `--` prefix.",
                 "Given input:", str);
+        exit(2);
+    }
+
+    // Checked per problem since `--mode` and `--fill` may come in any order.
+    if (has_bench_mode_bit(mode_bit_t::corr) && !fill_input.is_def()) {
+        BENCHDNN_PRINT(0, "%s\n",
+                "Error: --fill cannot be used for correctness testing.");
         exit(2);
     }
 }
