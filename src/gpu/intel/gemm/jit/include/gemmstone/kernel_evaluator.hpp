@@ -40,6 +40,7 @@ struct EvaluateParams {
     bool batch = false;
     bool deterministic = false;
     bool noCAtomics = false;
+    int unrollRound[3] = {1, 1, 1}; // Unroll round-up applied after selection
     Type Tc_ext = Type::invalid;    // External C element type; Type::invalid = use catalog precision
 };
 

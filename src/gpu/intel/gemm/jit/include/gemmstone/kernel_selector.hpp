@@ -52,6 +52,7 @@ struct MatchParamsBase
     int stepping = 0;
     int alignment[3] = {0, 0, 0};
     int unrollReq[3] = {1, 1, 1};
+    int unrollRound[3] = {1, 1, 1};   // post-selection round-up granularity
     kcatalog::string tags, lateTags;
     int nExtraReqs = 0;
     const StrategyRequirement *extraReqs = nullptr;

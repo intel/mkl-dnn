@@ -606,6 +606,19 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
 }
 
 // Reduce register pressure. Returns true if successful.
+bool GEMMStrategy::alignUnrollToCQGroups(const GEMMProblem &problem)
+{
+    if (!problem.hasCMXScale()) return true;
+    constexpr int g = 32;
+    int um = (unroll[LoopM] + g - 1) / g * g;
+    if (um == unroll[LoopM]) return true;
+    unroll[LoopM] = um;
+    if (remHandling[LoopM] == RemainderHandling::Ignore)
+        remHandling[LoopM] = RemainderHandling::General;
+    if (!dpasw && A.tileR && um % A.tileR) return false;
+    return true;
+}
+
 bool GEMMStrategy::minimize(HW hw, const GEMMProblem &problem)
 {
     bool better = false;

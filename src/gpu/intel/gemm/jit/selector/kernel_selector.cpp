@@ -395,9 +395,8 @@ MatchParamsBase::MatchParamsBase(ngen::HW hw, bool systolicAvailable, const ngen
         unrollReq[LoopN] = 8;
     }
 
-    if(problem.hasCMXScale()){
-        unrollReq[LoopM] = 32;
-    }
+    if (problem.hasCMXScale())
+        unrollRound[LoopM] = 32;
 
     switch (hw) {
         default: assert(!"Unknown architecture");

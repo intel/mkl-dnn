@@ -261,6 +261,10 @@ status_t gen_desc_t::finalize(const char *tags) {
 #ifdef DNNL_DEV_MODE
     }
 #endif
+    if (!strategy_.alignUnrollToCQGroups(problem_)) {
+        gpu_debug() << "MX dst unroll rounding incompatible with entry";
+        return status::unimplemented;
+    }
     modifyStrategy(strategy_, aux_params_);
     if (l1_flush_wa_)
         strategy_.C.cachingW = makeL1Uncacheable(strategy_.C.cachingW);
@@ -628,6 +632,8 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     }
 
     eval_params_.sizes = base.sizes;
+    for (int i = 0; i < 3; i++)
+        eval_params_.unrollRound[i] = base.unrollRound[i];
     eval_params_.alpha = alpha;
     eval_params_.beta = beta;
     eval_params_.product = product_;

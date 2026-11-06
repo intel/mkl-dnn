@@ -337,6 +337,7 @@ struct GEMMStrategy : public GEMMStrategyPOD
     void preflight(ngen::HW hw, const GEMMProblem &problem);
     int defaultBlockK(ngen::HW hw, const GEMMProblem &problem) const;
     bool minimize(ngen::HW hw, const GEMMProblem &problem);
+    bool alignUnrollToCQGroups(const GEMMProblem &problem);
 
     void trimKChain(ngen::HW hw, int k, const GEMMProblem &problem);
 

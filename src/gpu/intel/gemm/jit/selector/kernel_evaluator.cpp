@@ -61,6 +61,11 @@ static int roundUpSmallPow2(uint8_t x)
     return 2 << y;
 }
 
+static int effUnroll(int u, int round)
+{
+    return round > 1 ? int(alignUp(u, round)) : u;
+}
+
 double evaluateW(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, EvaluateAuxOutput &aux)
 {
     static constexpr double maxPriority = 10000.;
@@ -147,7 +152,7 @@ double evaluateSCore(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, 
     if (threads < capacity)
         Em = 1.;
     double etime = (1 - Em) * etimeNoLB + Em * etimeLB;
-    etime *= (e.driverInfo.unroll[LoopM] * e.driverInfo.unroll[LoopN]);
+    etime *= (effUnroll(e.driverInfo.unroll[LoopM], dp.unrollRound[LoopM]) * e.driverInfo.unroll[LoopN]);
     etime *= kthread;
 
     if (!dp.effective) {
@@ -341,7 +346,7 @@ double evaluateECore(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, 
     if (aux.kParallelVariable)
         Em = 0.;
     double etime = (1 - Em) * etimeNoLB + Em * etimeLB;
-    etime *= (e.driverInfo.unroll[LoopM] * e.driverInfo.unroll[LoopN]);
+    etime *= (effUnroll(e.driverInfo.unroll[LoopM], dp.unrollRound[LoopM]) * e.driverInfo.unroll[LoopN]);
     etime *= kthread;
     etime /= e.driverInfo.wgExpand;
 
@@ -485,7 +490,7 @@ DerivedEvaluateParams getDerivedParams(const kcatalog::Entry &e, const EvaluateP
     DerivedEvaluateParams dp;
     static_cast<EvaluateParams &>(dp) = p;
 
-    auto unrollM = e.driverInfo.unroll[LoopM];
+    auto unrollM = effUnroll(e.driverInfo.unroll[LoopM], p.unrollRound[LoopM]);
     auto unrollN = e.driverInfo.unroll[LoopN];
 
     auto wgM = e.driverInfo.wg[LoopM];
