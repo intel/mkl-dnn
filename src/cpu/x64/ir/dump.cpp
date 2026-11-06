@@ -336,7 +336,7 @@ std::vector<int> file_vregs(const ir_t &ir, const reg_pools_t &pools, int f) {
 // indexed [file][op].
 std::vector<std::vector<int>> count_pressure(
         const ir_t &ir, const reg_pools_t &pools) {
-    std::vector<std::vector<int8_t>> live_in;
+    std::vector<std::vector<uint64_t>> live_in;
     compute_liveness(ir, live_in);
 
     std::vector<std::vector<int>> pressure(
@@ -344,7 +344,10 @@ std::vector<std::vector<int>> count_pressure(
     std::vector<int> defs, uses;
 
     for (int i = 0; i < ir.n_ops(); i++) {
-        std::vector<int8_t> needs = live_in[i];
+        std::vector<int8_t> needs(ir.n_vregs());
+        for (int v = 0; v < ir.n_vregs(); v++) {
+            needs[v] = (live_in[i][v / 64] >> (v % 64)) & 1;
+        }
         ir.def_use(ir.ops()[i], defs, uses);
 
         for (int v : defs)

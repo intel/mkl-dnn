@@ -171,6 +171,8 @@ struct reg_pools_t {
 //
 // Two values that are live at the same operation cannot share a register.
 //
+// `live_in[i]` holds one bit per vreg, bit `v % 64` of word `v / 64`.
+//
 // Backward data-flow to a fixed point. For each operation `i`:
 //
 //   1. Computing `live_in` at operation `i`:
@@ -200,7 +202,7 @@ struct reg_pools_t {
 // loop_end needs the back-edge, so it appears only on the second pass. A third
 // pass changes nothing, which is the fixed point.
 void compute_liveness(
-        const ir_t &ir, std::vector<std::vector<int8_t>> &live_in);
+        const ir_t &ir, std::vector<std::vector<uint64_t>> &live_in);
 
 // Export for testing.
 reg_alloc_result_t DNNL_API allocate_registers(
