@@ -42,6 +42,7 @@ void Generator<hw>::makeSumLayout(bool column, const RegisterLayout &srcLayout,
     bool cm = srcLayout.colMajor();
     bool hReduce = (column == cm);
     bool needAll1s = false;
+    bool partials = canSwizzle(hw, Tdst);
     int m = srcLayout.rows(), n = srcLayout.cols(), cp = 1;
 
     auto &rdim = column ? m : n;
@@ -51,6 +52,21 @@ void Generator<hw>::makeSumLayout(bool column, const RegisterLayout &srcLayout,
 
     if (hReduce) {
         if (canDP4A && srcLayout.hasFullCrosspack(1)) {
+            if (hw >= HW::Xe2) {
+                // Wrap partials at the src block width so dp4a src/dst offsets match.
+                auto RegisterBlock::*nx = column ? &RegisterBlock::nr : &RegisterBlock::nc;
+                auto RegisterBlock::*offsetX = column ? &RegisterBlock::offsetR : &RegisterBlock::offsetC;
+                int kb = rdim;
+                for (auto &block: srcLayout)
+                    kb = std::min<int>(kb, block.*nx);
+                bool uniform = true;
+                for (auto &block: srcLayout)
+                    uniform &= (block.*nx % kb == 0) && (block.*offsetX % kb == 0);
+                if (uniform && kb % 8 == 0 && rdim % kb == 0 && kb < rdim) {
+                    rdim = kb;
+                    partials = true;
+                }
+            }
             rdim /= 4;
             needAll1s = true;
             if (rdim & 1) rdim <<= 1; // Ensure dp4a dest offset is even.
@@ -62,7 +78,6 @@ void Generator<hw>::makeSumLayout(bool column, const RegisterLayout &srcLayout,
         cp = 1;
     }
 
-    bool partials = canSwizzle(hw, Tdst);
     dstLayout = RegisterLayout(hw, Tdst, m, n, cm, cp, 0, 0, partials);
 
     // Prepare all-1s immediate for dp4a.
@@ -105,6 +120,10 @@ void Generator<hw>::accumulateSum(bool column,
     int yinc = 1;
     int reduce = (canDP4A && hReduce) ? 4 : 1;
     if (x0 % reduce || x1 % reduce) stub();
+    int xWrap = (column ? dstLayout.rows() : dstLayout.cols()) * reduce;
+
+    std::vector<int> coveredY((x1 - x0) / reduce, y0);
+    auto linear = [&](const Subregister &sr) { return sr.getBase() * GRF::bytes(hw) + sr.getByteOffset(); };
 
     RegisterRange temp, tempF;
     Subregister imm;
@@ -114,14 +133,15 @@ void Generator<hw>::accumulateSum(bool column,
             int isrc, jsrc, idst, jdst, nsrc, ndst;
             const RegisterBlock *blockSrc, *blockDst;
 
+            int xd = (x % xWrap) / reduce;
             isrc = cm ? x : y;
             jsrc = cm ? y : x;
             if (!hReduce) {
                 idst = cm ? x : 0;
                 jdst = cm ? 0 : x;
             } else {
-                idst = cm ? x / reduce : y;
-                jdst = cm ? y : x / reduce;
+                idst = cm ? xd : y;
+                jdst = cm ? y : xd;
             }
 
             Subregister srcBase = srcLayout.find(isrc, jsrc, srcRegs, &nsrc, &blockSrc);
@@ -132,22 +152,59 @@ void Generator<hw>::accumulateSum(bool column,
                 neMax /= 2;
             auto ne = std::min({nsrc / reduce, ndst, neMax});
 
+            int xStep = ne * reduce;
+            int xi = (x - x0) / reduce;
+            if (y < coveredY[xi]) {
+                x += xStep;
+                continue;
+            }
+
+            if (hw >= HW::Xe2 && reduce > 1 && blockSrc->crosspack == 1 && blockDst->crosspack == 1
+                    && is_zero_or_pow2(ne) && srcBase.getByteOffset() == dstBase.getByteOffset()) {
+                auto rowContinues = [&](int r) {
+                    int nsrcR, ndstR;
+                    const RegisterBlock *bS, *bD;
+                    auto srcR = srcLayout.find(cm ? x : y + r, cm ? y + r : x, srcRegs, &nsrcR, &bS);
+                    auto dstR = dstLayout.find(cm ? xd : y + r, cm ? y + r : xd, dstRegs, &ndstR, &bD);
+                    nsrcR = std::min(nsrcR, x1 - x);
+                    return (std::min({nsrcR / reduce, ndstR, neMax}) == ne)
+                        && bS->crosspack == 1 && bD->crosspack == 1
+                        && linear(srcR) == linear(srcBase) + r * xStep * Tsrc
+                        && linear(dstR) == linear(dstBase) + r * ne * Tdst;
+                };
+                // src/dst spans match in bytes, so the dst bound covers src.
+                int maxRows = std::min({y1 - y, neMax / ne, (2 * GRF::bytes(hw) - dstBase.getByteOffset()) / (ne * Tdst)});
+                int g = 1;
+                while (g < maxRows && rowContinues(g))
+                    g++;
+                g = rounddown_pow2(g);
+                coveredY[xi] = y + g;
+                ne *= g;
+            }
+
             auto src = srcBase(blockSrc->crosspack);
             auto dst = dstBase(blockDst->crosspack);
 
-            bool hsMatch = (src.getHS() * Tsrc == dst.getHS() * Tdst);
-            if (Tsrc == Type::bf16 && Tdst == Type::f32)
-                hsMatch = (src.getHS() == 1) && (dst.getHS() == 1);
+            bool hsMatch, offMatch;
+            if (reduce > 1) {
+                hsMatch = (src.getHS() * Tsrc * reduce == dst.getHS() * Tdst);
+                offMatch = (srcBase.getByteOffset() == dstBase.getByteOffset());
+            } else {
+                hsMatch = (Tsrc == Type::bf16 && Tdst == Type::f32)
+                        ? (src.getHS() == 1) && (dst.getHS() == 1)
+                        : (src.getHS() * Tsrc == dst.getHS() * Tdst);
+                offMatch = (srcBase.getOffset() == dstBase.getOffset());
+            }
 
-            if (!canSwizzle(hw, Tsrc) && ne > 1 && (srcBase.getOffset() != dstBase.getOffset() || !hsMatch)) {
+            if (!canSwizzle(hw, Tsrc) && ne > 1 && (!offMatch || !hsMatch)) {
                 if (temp.isInvalid()) {
                     temp = state.ra.alloc_range(2);
                 }
-                zeroMatrix(temp, strategy);
                 auto srcI = src;
                 int tmpHS = std::max<int>(1, ((blockDst->crosspack * Tdst) / Tsrc) / reduce);
                 if (Tsrc == Type::bf16 && Tdst == Type::f32)
                     tmpHS = blockDst->crosspack;
+                if (tmpHS > 1) zeroMatrix(temp, strategy);
                 auto tmpBase = temp[0].sub(dst.getByteOffset() / Tsrc.real(), src.getType());
                 auto tmp = tmpBase(tmpHS);
                 auto tmpI = tmp;
@@ -216,7 +273,7 @@ void Generator<hw>::accumulateSum(bool column,
                 eadd(ne, dst, src, dst, strategy, state);
             }
 
-            x += ne * reduce;
+            x += xStep;
         }
     }
 

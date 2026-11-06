@@ -475,17 +475,20 @@ void Generator<hw>::outerProductSystolic(int h, int ha_period, int hb_period, in
             }
 
             if (strategy.atomicFMA) {
-                if (!last && (rc == 8 || canAtomicNon8x8))
-                    mod |= Atomic;
                 if (rc != 8 && strategy.extendedAtomicFMA) hw_unsupported();
-            }
 
-            const bool canFwd = (hw == HW::Xe3p)
-                && (problem.product.family >= ProductFamily::CRI)
-                && (rc == 8)
-                && mod.isAtomic()
-                && (problem.Tc != Type::f16);
-            if (hhbase + ksys < opCount && canFwd) mod |= Fwd;
+                bool hasNextDependency = (hhbase + ksys < opCount);
+                gemm_assert(!(last && hasNextDependency));
+                const bool canFwd = (hw == HW::Xe3p)
+                    && (problem.product.family >= ProductFamily::CRI)
+                    && (rc == 8)
+                    && (problem.Tc != Type::f16);
+                bool atomicEligible = !last && (rc == 8 || canAtomicNon8x8) && (!hasNextDependency || canFwd);
+
+                if (atomicEligible) mod |= Atomic;
+                if (hasNextDependency && canFwd) mod |= Fwd;
+                if (mod.isFwd() && !mod.isAtomic()) hw_unsupported();
+            }
 
             bool nullC = startRepackC && hhbase == 0;
             if (nullC)

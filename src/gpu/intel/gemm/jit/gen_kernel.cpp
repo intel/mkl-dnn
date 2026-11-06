@@ -390,10 +390,10 @@ status_t gen_desc_t::finalize(const char *tags) {
 
     // Check for legal 2D quantization group size.
     if (problem_.aOffset2D() || problem_.aScale2D())
-        if (problem_.aqGroupK % strategy_.aqGroupKGranularity())
+        if (!strategy_.aqGroupKCompatible(problem_.aqGroupK))
             return reject("A quantization group");
     if (problem_.bOffset2D() || problem_.bScale2D())
-        if (problem_.bqGroupK % strategy_.bqGroupKGranularity())
+        if (!strategy_.bqGroupKCompatible(problem_.bqGroupK))
             return reject("B quantization group");
     if (problem_.aScale2D()
             && problem_.aqGroupK % minOuterProductCount(problem_, strategy_)
@@ -643,8 +643,31 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     tags_ = match_params[0].tags;
     Ts_ = problem.Ts;
     beta_ = problem.beta;
-    return select(catalog(), static_cast<int>(match_params.size()),
-            match_params.data(), eval_params_, aux_params_, &observer);
+
+    // Entries from both catalogs are concatenated so kernel creation
+    // failures fall back to the next tier.
+    //   GEMM_LUT: try the exact-size LUT catalog first (default on).
+    int npat = static_cast<int>(match_params.size());
+    std::vector<const kcatalog::Entry *> entries;
+    auto append = [&](const std::vector<const kcatalog::Entry *> &v) {
+        entries.insert(entries.end(), v.begin(), v.end());
+    };
+    if (gpu_utils::dev_getenv("GEMM_LUT", true)) {
+        // LUT entries require a direct precision match: f32 -> SSS, tf32 -> TTS.
+        MatchParams lut_match = base;
+        if (fpmath_tf32 && problem.Ta_ext == Type::f32
+                && problem.Tb_ext == Type::f32) {
+            lut_match.selector.precisions[0] = "T";
+            lut_match.selector.precisions[1] = "T";
+        }
+        append(select(lut_catalog(), 1, &lut_match, eval_params_, aux_params_,
+                &observer));
+    }
+
+    append(select(catalog(), npat, match_params.data(), eval_params_,
+            aux_params_, &observer));
+
+    return entries;
 }
 
 status_t gen_nocopy_desc_t::finalize() {

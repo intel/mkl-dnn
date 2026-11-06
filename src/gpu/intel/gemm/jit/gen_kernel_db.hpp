@@ -27,6 +27,7 @@ namespace gemm {
 namespace jit {
 
 gemmstone::kcatalog::Catalog catalog();
+gemmstone::kcatalog::Catalog lut_catalog();
 
 } // namespace jit
 } // namespace gemm

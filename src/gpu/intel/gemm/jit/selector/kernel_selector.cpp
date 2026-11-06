@@ -206,6 +206,11 @@ const std::vector<const kcatalog::Entry *> getEntries(const kcatalog::Catalog &c
                       if (lhsU3 != rhsU3) return lhsU3;
                       if (lhs.score < rhs.score) return true;
                       if (lhs.score > rhs.score) return false;
+                      // Among equally-scored entries, prefer a tf32 kernel
+                      // (precision 'T') over its f32 twin.
+                      bool lhsTF32 = (lhs.entry->selector.precisions[0][0] == 'T');
+                      bool rhsTF32 = (rhs.entry->selector.precisions[0][0] == 'T');
+                      if (lhsTF32 != rhsTF32) return lhsTF32;
                       return (lhs.entry < rhs.entry);
     };
     std::sort(keys.begin(), keys.end(), less);

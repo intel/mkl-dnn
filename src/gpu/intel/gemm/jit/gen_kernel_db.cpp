@@ -20,6 +20,9 @@ namespace gemmstone {
 #define _CATALOG_ gemm_catalog
 #include "selector/db/kernel.db"
 #undef _CATALOG_
+#define _CATALOG_ gemm_lut_catalog
+#include "selector/db/lut.db"
+#undef _CATALOG_
 } // namespace gemmstone
 
 namespace dnnl {
@@ -31,6 +34,10 @@ namespace jit {
 
 gemmstone::kcatalog::Catalog catalog() {
     return gemmstone::gemm_catalog;
+}
+
+gemmstone::kcatalog::Catalog lut_catalog() {
+    return gemmstone::gemm_lut_catalog;
 }
 
 } // namespace jit
