@@ -1,0 +1,514 @@
+/*******************************************************************************
+* Copyright 2026 Intel Corporation
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*******************************************************************************/
+
+// Online-softmax epilogue kernels for the online-softmax (flash) CPU SDPA.
+// The IR builders and the concrete jit_generator_t kernels live here (compiled
+// into libdnnl); the header exposes only factory functions, mirroring the
+// brgemm IR kernels (brgemm_ir.cpp). See sdpa_online_softmax_ir.hpp for the
+// argument structs and the kernel math overview.
+
+#include "cpu/x64/sdpa/sdpa_online_softmax_ir.hpp"
+
+#if DNNL_X64
+#include <map>
+#include <memory>
+
+#include "common/c_types_map.hpp"
+#include "common/utils.hpp"
+
+#include "cpu/x64/ir/codegen.hpp"
+#include "cpu/x64/ir/dump.hpp"
+#include "cpu/x64/ir/eltwise_injector.hpp"
+#include "cpu/x64/ir/emitter/emitter.hpp"
+#include "cpu/x64/ir/ir.hpp"
+#include "cpu/x64/ir/reg_alloc.hpp"
+#include "cpu/x64/ir/reg_config.hpp"
+
+namespace dnnl {
+namespace impl {
+namespace cpu {
+namespace x64 {
+namespace sdpa_softmax_ir {
+
+namespace {
+
+// Builds the online-softmax epilogue for a tile of `seq_q` score rows, each of
+// width `w` (any w >= 1; the ragged tail beyond the last full simd_w block is
+// handled with masked loads/stores). Implements the per-row online-softmax
+// update for one KV tile. With `has_select`, each block also
+// gets the attention select mask applied right after scaling: uint8 condition
+// bytes are widened and turned into a lane mask (vload_widen -> vcmp_ne_zero),
+// then vblend selects the broadcast `fill` scalar into the masked-out lanes.
+// With `invert_select` false, keep scores where `cond != 0`; with it true, keep
+// scores where `cond == 0`.
+// The rows are processed by a loop over seq_q; the score and per-row state
+// pointers advance one row per iteration. Per row the op chain is: scale ->
+// (select) -> running row max -> exp(scaled - m_new) -> running denominator ->
+// divide by l_new. The scalar running state is kept in broadcast vectors so
+// the per-row arithmetic reuses the vector ops. In the tail block only some
+// lanes hold real scores; before the max and sum reductions the padding lanes
+// are set to a neutral value (m_old for the max so they cannot exceed the
+// running max, 0 for the sum so they add nothing). The first KV tile (m_old ==
+// -inf, l_old == 0) needs no explicit guard: the eltwise exp saturates -inf to
+// exactly 0, so corr == 0 and clo == l_old*corr == 0 fall out, and m_new is
+// just the tile max. A *fully masked* tile while the row is still empty (every
+// lane filled with -inf, so m_new == -inf and l_new == 0) is the one case
+// that  would produce NaN (m_old - m_new == -inf - -inf, and 0 / 0): two
+// build-time floors replace m_new / l_new only inside the exp subtractions and
+// normalizing divides, so such a tile yields zero probabilities and leaves
+// m == -inf / l == 0 unchanged, letting a later valid tile recover the row as
+// if it were the first. The scale, fill and tail mask are loop invariant, set up
+// once; the mask vreg stays live across all rows (masked ops assert it is never
+// spilled). `cond_row_stride` is the condition tensor's row stride in elements;
+// < 0 defaults to `w` (a tightly packed seq_q*w condition tile).
+ir::ir_t build_softmax_tile_ir(cpu_isa_t isa, int seq_q, int w,
+        bool has_select = false, bool invert_select = false,
+        int cond_row_stride = -1) {
+    using namespace ir;
+
+    const int simd_w = isa_max_vlen(isa) / (int)sizeof(float);
+    const int n_blk = w / simd_w;
+    const int tail = w % simd_w;
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
+    const dim_t tail_off = n_blk * vbytes;
+    const dim_t fsz = (dim_t)sizeof(float);
+    const dim_t cond_stride = cond_row_stride < 0 ? w : cond_row_stride;
+
+    ir_t ir;
+
+    // Row pointers: advanced one row per loop iteration.
+    const vreg_t sc_ptr = ir.new_gpr();
+    ir.load_param(sc_ptr, offsetof(softmax_row_args_t, scores));
+    const vreg_t m_ptr = ir.new_gpr();
+    ir.load_param(m_ptr, offsetof(softmax_row_args_t, m));
+    const vreg_t l_ptr = ir.new_gpr();
+    ir.load_param(l_ptr, offsetof(softmax_row_args_t, l));
+    const vreg_t oc_ptr = ir.new_gpr();
+    ir.load_param(oc_ptr, offsetof(softmax_row_args_t, old_coef));
+    // Loop invariant: the scale is shared by every row.
+    const vreg_t scale_ptr = ir.new_gpr();
+    ir.load_param(scale_ptr, offsetof(softmax_row_args_t, scale));
+
+    // Select mask inputs: cond advances one row per iteration (one byte per
+    // score), fill is a loop-invariant scalar shared by every row.
+    vreg_t cond_ptr = vreg_t::none;
+    vreg_t fill_ptr = vreg_t::none;
+    if (has_select) {
+        cond_ptr = ir.new_gpr();
+        ir.load_param(cond_ptr, offsetof(softmax_row_args_t, cond));
+        fill_ptr = ir.new_gpr();
+        ir.load_param(fill_ptr, offsetof(softmax_row_args_t, fill));
+    }
+
+    // One mask, reused by every masked op and every row, active for `tail`.
+    vreg_t mask = vreg_t::none;
+    if (tail) {
+        mask = ir.new_mask();
+        ir.set_mask_imm(mask, tail);
+    }
+
+    // The two softmax floors are loop invariant. m_floor floors m_new in the
+    // exp subtractions and l_floor floors l_new in the normalizing divides,
+    // keeping a fully -inf-masked tile finite instead of NaN (see m_sub and
+    // l_div below).
+    const vreg_t m_floor = ir.new_vec(data_type::f32);
+    ir.vbcast_imm(m_floor, -std::numeric_limits<float>::max());
+    const vreg_t l_floor = ir.new_vec(data_type::f32);
+    ir.vbcast_imm(l_floor, std::numeric_limits<float>::min());
+
+    // Online-softmax epilogue for the single row at the current pointers.
+    auto row_body = [&]() {
+        // Scratch shared by both horizontal reductions (overwritten each time).
+        const vreg_t ws = ir.new_vec(data_type::f32);
+
+        // Broadcast the scalar inputs so scalar arithmetic reuses vector ops.
+        const vreg_t scale_bc = ir.new_vec(data_type::f32);
+        ir.vload_bcast(scale_bc, scale_ptr, 0, data_type::f32);
+
+        vreg_t fill_bc = vreg_t::none;
+        if (has_select) {
+            fill_bc = ir.new_vec(data_type::f32);
+            ir.vload_bcast(fill_bc, fill_ptr, 0, data_type::f32);
+        }
+
+        // Apply the select mask to one scaled block of `n` elements at byte
+        // offset `cond_off` into this row's condition bytes, and return the
+        // vreg holding the result (unchanged when there is no select).
+        auto apply_select = [&](vreg_t blk, dim_t cond_off, int n) -> vreg_t {
+            if (!has_select) return blk;
+            const vreg_t cond = ir.new_vec(data_type::s32);
+            ir.vload_widen(cond, cond_ptr, cond_off, n, data_type::u8);
+            const vreg_t cmask = ir.new_mask();
+            ir.vcmp_ne_zero(cmask, cond);
+            if (!invert_select) {
+                // Keep the score where cond != 0: cmask ? score : fill.
+                const vreg_t sel = ir.new_vec(data_type::f32);
+                ir.vbcast(sel, fill_bc);
+                ir.vblend(sel, blk, cmask);
+                return sel;
+            }
+            // Keep the score where cond == 0: cmask ? fill : score.
+            ir.vblend(blk, fill_bc, cmask);
+            return blk;
+        };
+
+        const vreg_t m_old = ir.new_vec(data_type::f32);
+        ir.vload_bcast(m_old, m_ptr, 0, data_type::f32);
+
+        const vreg_t l_old = ir.new_vec(data_type::f32);
+        ir.vload_bcast(l_old, l_ptr, 0, data_type::f32);
+
+        // Pass 1: scale each block, store it back, and fold it into the running
+        // max (seeded with m_old so the reduction yields m_new directly).
+        const vreg_t rmax = ir.new_vec(data_type::f32);
+        ir.vbcast(rmax, m_old);
+        for (int b = 0; b < n_blk; b++) {
+            vreg_t blk = ir.new_vec(data_type::f32);
+            ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
+            ir.vmul(blk, scale_bc);
+            blk = apply_select(blk, (dim_t)b * simd_w, simd_w);
+            ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
+            ir.vmax(rmax, blk);
+        }
+        if (tail) {
+            vreg_t blk = ir.new_vec(data_type::f32);
+            ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
+            ir.vmul(blk, scale_bc);
+            blk = apply_select(blk, (dim_t)n_blk * simd_w, tail);
+            ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
+            // Unused lanes take m_old so they never win the max.
+            const vreg_t tmax = ir.new_vec(data_type::f32);
+            ir.vbcast(tmax, m_old);
+            ir.vblend(tmax, blk, mask);
+            ir.vmax(rmax, tmax);
+        }
+        ir.vhreduce_max(rmax, ws); // rmax lane 0 = m_new
+        const vreg_t m_new = ir.new_vec(data_type::f32);
+        ir.vbcast(m_new, rmax);
+        // m_sub is m_new floored at m_floor, used only in the exp subtractions:
+        // an all-masked tile has m_new == -inf, so x - m_new = -inf - -inf =
+        // NaN; the floor makes it finite so exp saturates to 0. A real tile has
+        // finite m_new >= m_floor, so m_sub == m_new. m_new is written back
+        // unchanged.
+        const vreg_t m_sub = ir.new_vec(data_type::f32);
+        ir.vbcast(m_sub, m_new);
+        ir.vmax(m_sub, m_floor);
+
+        // corr = exp(m_old - m_new): rescales previous tiles' contributions.
+        const vreg_t corr = ir.new_vec(data_type::f32);
+        ir.vbcast(corr, m_old);
+        ir.vsub(corr, m_sub);
+        ir.vexp(corr);
+
+        // Pass 2: P_unnorm = exp(scaled - m_new); accumulate the tile denom.
+        const vreg_t rsum = ir.new_vec(data_type::f32);
+        ir.vzero(rsum);
+        for (int b = 0; b < n_blk; b++) {
+            const vreg_t blk = ir.new_vec(data_type::f32);
+            ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
+            ir.vsub(blk, m_sub);
+            ir.vexp(blk);
+            ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
+            ir.vadd(rsum, blk);
+        }
+        if (tail) {
+            const vreg_t blk = ir.new_vec(data_type::f32);
+            ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
+            ir.vsub(blk, m_sub);
+            ir.vexp(blk);
+            ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
+            // Unused lanes take 0 so they add nothing to the denominator.
+            const vreg_t tsum = ir.new_vec(data_type::f32);
+            ir.vzero(tsum);
+            ir.vblend(tsum, blk, mask);
+            ir.vadd(rsum, tsum);
+        }
+        ir.vhreduce(rsum, ws); // rsum lane 0 = tile_sum
+        const vreg_t tile_sum = ir.new_vec(data_type::f32);
+        ir.vbcast(tile_sum, rsum);
+
+        // clo = l_old*corr; l_new = clo + tile_sum; old_coef = clo / l_new.
+        const vreg_t clo = ir.new_vec(data_type::f32);
+        ir.vbcast(clo, l_old);
+        ir.vmul(clo, corr);
+
+        const vreg_t l_new = ir.new_vec(data_type::f32);
+        ir.vbcast(l_new, clo);
+        ir.vadd(l_new, tile_sum);
+        // l_div floors l_new at l_floor only for the normalizing divides
+        // below: a fully -inf-masked tile has tile_sum == 0 and (first tile)
+        // clo == 0, so l_new == 0 and old_coef / P would divide 0/0 = NaN;
+        // l_div makes the denominator l_floor so both yield 0. Once the row has
+        // a real lane l_new >= 1 (the running max's own lane adds exp(0) == 1,
+        // in tile_sum when this tile sets m_new, else carried in clo since
+        // corr == 1), well above l_floor, so l_div == l_new. l_new is written
+        // back unchanged (the running denom stays 0 for an all-masked row, so a
+        // later valid tile recovers it as a first tile).
+        const vreg_t l_div = ir.new_vec(data_type::f32);
+        ir.vbcast(l_div, l_new);
+        ir.vmax(l_div, l_floor);
+
+        const vreg_t old_coef = ir.new_vec(data_type::f32);
+        ir.vbcast(old_coef, clo);
+        ir.vdiv(old_coef, l_div);
+
+        // Pass 3: normalize P by the running denominator.
+        for (int b = 0; b < n_blk; b++) {
+            const vreg_t blk = ir.new_vec(data_type::f32);
+            ir.vload(blk, sc_ptr, b * vbytes, data_type::f32);
+            ir.vdiv(blk, l_div);
+            ir.vstore(sc_ptr, b * vbytes, blk, data_type::f32);
+        }
+        if (tail) {
+            const vreg_t blk = ir.new_vec(data_type::f32);
+            ir.vload_masked(blk, sc_ptr, tail_off, mask, data_type::f32);
+            ir.vdiv(blk, l_div);
+            ir.vstore_masked(sc_ptr, tail_off, blk, mask, data_type::f32);
+        }
+
+        // Write back this row's scalar running state (lane 0).
+        ir.vstore_scalar(m_ptr, 0, m_new, data_type::f32);
+        ir.vstore_scalar(l_ptr, 0, l_new, data_type::f32);
+        ir.vstore_scalar(oc_ptr, 0, old_coef, data_type::f32);
+    };
+
+    // Advance every row pointer to the next row.
+    auto advance_row = [&]() {
+        ir.add_imm(sc_ptr, w * fsz);
+        ir.add_imm(m_ptr, fsz);
+        ir.add_imm(l_ptr, fsz);
+        ir.add_imm(oc_ptr, fsz);
+        if (has_select)
+            ir.add_imm(cond_ptr, cond_stride); // one uint8 byte per score
+    };
+
+    emit_loop_imm(ir, seq_q, row_body, advance_row);
+
+    return ir;
+}
+
+// Builds the accumulator renormalization for a tile of `seq_q` rows, each of
+// head size `hs` (any hs >= 1; the ragged tail beyond the last full simd_w
+// block uses masked loads/stores). Mirrors the acc rescale in the online-softmax SDPA
+// driver that follows the softmax epilogue: acc = old_coef*acc + pv. Rows are
+// processed by a loop over seq_q; the acc, pv and old_coef pointers advance one
+// row per iteration. old_coef is broadcast so the per-row scalar reuses the
+// vector ops; no reduction is needed, so the tail needs no lane neutralization
+// (masked ld/st touch only the active columns).
+ir::ir_t build_acc_renorm_ir(cpu_isa_t isa, int seq_q, int hs) {
+    using namespace ir;
+
+    const int simd_w = isa_max_vlen(isa) / (int)sizeof(float);
+    const int n_blk = hs / simd_w;
+    const int tail = hs % simd_w;
+    const dim_t vbytes = simd_w * (dim_t)sizeof(float);
+    const dim_t tail_off = n_blk * vbytes;
+    const dim_t fsz = (dim_t)sizeof(float);
+
+    ir_t ir;
+
+    // Row pointers: advanced one row per loop iteration.
+    const vreg_t acc_ptr = ir.new_gpr();
+    ir.load_param(acc_ptr, offsetof(acc_renorm_args_t, acc));
+    const vreg_t pv_ptr = ir.new_gpr();
+    ir.load_param(pv_ptr, offsetof(acc_renorm_args_t, pv));
+    const vreg_t oc_ptr = ir.new_gpr();
+    ir.load_param(oc_ptr, offsetof(acc_renorm_args_t, old_coef));
+
+    // One mask, reused by every masked op and every row, active for `tail`.
+    vreg_t mask = vreg_t::none;
+    if (tail) {
+        mask = ir.new_mask();
+        ir.set_mask_imm(mask, tail);
+    }
+
+    // acc = old_coef*acc + pv for the single row at the current pointers.
+    auto row_body = [&]() {
+        const vreg_t oc_bc = ir.new_vec(data_type::f32);
+        ir.vload_bcast(oc_bc, oc_ptr, 0, data_type::f32);
+
+        for (int b = 0; b < n_blk; b++) {
+            const vreg_t acc = ir.new_vec(data_type::f32);
+            ir.vload(acc, acc_ptr, b * vbytes, data_type::f32);
+            ir.vmul(acc, oc_bc);
+            const vreg_t pv = ir.new_vec(data_type::f32);
+            ir.vload(pv, pv_ptr, b * vbytes, data_type::f32);
+            ir.vadd(acc, pv);
+            ir.vstore(acc_ptr, b * vbytes, acc, data_type::f32);
+        }
+        if (tail) {
+            const vreg_t acc = ir.new_vec(data_type::f32);
+            ir.vload_masked(acc, acc_ptr, tail_off, mask, data_type::f32);
+            ir.vmul(acc, oc_bc);
+            const vreg_t pv = ir.new_vec(data_type::f32);
+            ir.vload_masked(pv, pv_ptr, tail_off, mask, data_type::f32);
+            ir.vadd(acc, pv);
+            ir.vstore_masked(acc_ptr, tail_off, acc, mask, data_type::f32);
+        }
+    };
+
+    // Advance every row pointer to the next row.
+    auto advance_row = [&]() {
+        ir.add_imm(acc_ptr, hs * fsz);
+        ir.add_imm(pv_ptr, hs * fsz);
+        ir.add_imm(oc_ptr, fsz);
+    };
+
+    emit_loop_imm(ir, seq_q, row_body, advance_row);
+
+    return ir;
+}
+
+// JIT kernel for the online-softmax tile epilogue. Construct with its
+// build-time shape/strides, call create_kernel(), then invoke via
+// operator()(const softmax_row_args_t *). generate() builds the IR and runs the
+// register-allocation + emission pipeline, wiring an eltwise injector for the
+// exp the softmax uses.
+class softmax_tile_ir_kernel_t : public jit_generator_t {
+public:
+    softmax_tile_ir_kernel_t(cpu_isa_t isa, int seq_q, int w, bool has_select,
+            bool invert_select, int cond_row_stride)
+        : jit_generator_t("sdpa_softmax_tile_ir", isa)
+        , isa_(isa)
+        , seq_q_(seq_q)
+        , w_(w)
+        , cond_row_stride_(cond_row_stride)
+        , has_select_(has_select)
+        , invert_select_(invert_select) {}
+
+    const char *name() const override { return "sdpa_softmax_tile_ir_kernel"; }
+    const char *source_file() const override { return __FILE__; }
+
+protected:
+    void generate() override {
+        using namespace ir;
+
+        ir_t ir = build_softmax_tile_ir(isa_, seq_q_, w_, has_select_,
+                invert_select_, cond_row_stride_);
+
+        const int rsp_idx = Xbyak::Operand::RSP;
+        const int param_idx = abi_param1.getIdx();
+
+        // The eltwise injector (vexp) writes this opmask on AVX-512 and restores
+        // nothing, so it is kept out of the allocatable mask file.
+        const int exp_opmask = 1;
+
+        const reg_config_t reg_cfg
+                = make_reg_config(isa_, param_idx, rsp_idx, {exp_opmask});
+
+        const reg_alloc_result_t alloc = allocate_registers(ir, reg_cfg.pools);
+
+        // One eltwise injector per algorithm the IR uses, discovered by
+        // scanning the veltwise ops. Each one saves and restores every register
+        // it borrows, so it takes no part in the IR register allocation. A
+        // single generic callback dispatches by algorithm.
+        std::map<alg_kind_t, std::unique_ptr<eltwise_injector_t>>
+                eltwise_injectors;
+        for (const auto &op : ir.ops()) {
+            if (op.kind != op_kind_t::veltwise) continue;
+            const auto alg = (alg_kind_t)op.imm;
+            if (eltwise_injectors.count(alg)) continue;
+            eltwise_injectors.emplace(alg,
+                    std::unique_ptr<eltwise_injector_t>(
+                            new eltwise_injector_t(*this, isa_, alg,
+                                    /* alpha = */ 0.f, /* beta = */ 0.f,
+                                    /* scale = */ 1.f)));
+        }
+        eltwise_fn_t emit_eltwise;
+        if (!eltwise_injectors.empty()) {
+            emit_eltwise = [&](alg_kind_t alg, int vec_phys) {
+                eltwise_injectors.at(alg)->apply(vec_phys);
+            };
+        }
+
+        preamble();
+
+        const int frame = (int)utils::rnd_up(alloc.frame_bytes, 16);
+        if (frame > 0) sub(rsp, frame);
+
+        // This epilogue has no attribute post-ops, so no post-ops injector.
+        data_section_t data;
+        emit(*this, ir, alloc, reg_cfg, data, /*postops=*/nullptr,
+                emit_eltwise);
+
+        if (frame > 0) add(rsp, frame);
+
+        postamble();
+
+        emit_data_section(*this, data);
+
+        // Each eltwise injector's constant table follows the postamble.
+        for (auto &kv : eltwise_injectors)
+            kv.second->prepare_table();
+
+        print_kernel_dump(*this, ir, data, reg_cfg, alloc);
+    }
+
+private:
+    cpu_isa_t isa_;
+    int seq_q_;
+    int w_;
+    int cond_row_stride_;
+    bool has_select_;
+    bool invert_select_;
+};
+
+// JIT kernel for the accumulator renormalization epilogue. Construct with its
+// build-time shape, call create_kernel(), then invoke via operator()(const
+// acc_renorm_args_t *). generate() builds the IR and runs the
+// register-allocation + emission pipeline (no eltwise, no post-ops).
+class acc_renorm_ir_kernel_t : public jit_generator_t {
+public:
+    acc_renorm_ir_kernel_t(cpu_isa_t isa, int seq_q, int hs)
+        : jit_generator_t("sdpa_acc_renorm_ir", isa)
+        , isa_(isa)
+        , seq_q_(seq_q)
+        , hs_(hs) {}
+
+    const char *name() const override { return "sdpa_acc_renorm_ir_kernel"; }
+    const char *source_file() const override { return __FILE__; }
+
+protected:
+    void generate() override {
+        auto ir = build_acc_renorm_ir(isa_, seq_q_, hs_);
+        generate_kernel(*this, ir);
+    }
+
+private:
+    cpu_isa_t isa_;
+    int seq_q_;
+    int hs_;
+};
+
+} // namespace
+
+jit_generator_t *create_softmax_tile_ir_kernel(cpu_isa_t isa, int seq_q, int w,
+        bool has_select, bool invert_select, int cond_row_stride) {
+    return new softmax_tile_ir_kernel_t(
+            isa, seq_q, w, has_select, invert_select, cond_row_stride);
+}
+
+jit_generator_t *create_acc_renorm_ir_kernel(cpu_isa_t isa, int seq_q, int hs) {
+    return new acc_renorm_ir_kernel_t(isa, seq_q, hs);
+}
+
+} // namespace sdpa_softmax_ir
+} // namespace x64
+} // namespace cpu
+} // namespace impl
+} // namespace dnnl
+
+#endif // DNNL_X64

@@ -19,6 +19,8 @@
 
 #include "common/z_magic.hpp"
 
+#include "common/utils.hpp"
+
 #include "cpu/x64/ir/ir.hpp"
 
 namespace dnnl {
@@ -146,6 +148,18 @@ void ir_t::vload_bcast(
     ops_.push_back(op);
 }
 
+void ir_t::vload_widen(
+        vreg_t dst, vreg_t base, dim_t disp, int n_elems, data_type_t mem_dt) {
+    op_t op;
+    op.kind = op_kind_t::vload_widen;
+    op.dst = dst;
+    op.imm = n_elems;
+    op.mem.base = base;
+    op.mem.disp = disp;
+    op.mem_dt = mem_dt;
+    ops_.push_back(op);
+}
+
 void ir_t::vdot(vreg_t dst, vreg_t a, vreg_t b) {
     op_t op;
     op.kind = op_kind_t::vdot;
@@ -163,11 +177,70 @@ void ir_t::vadd(vreg_t dst, vreg_t src) {
     ops_.push_back(op);
 }
 
+void ir_t::vsub(vreg_t dst, vreg_t src) {
+    op_t op;
+    op.kind = op_kind_t::vsub;
+    op.dst = dst;
+    op.s0 = src;
+    ops_.push_back(op);
+}
+
 void ir_t::vmul(vreg_t dst, vreg_t src) {
     op_t op;
     op.kind = op_kind_t::vmul;
     op.dst = dst;
     op.s0 = src;
+    ops_.push_back(op);
+}
+
+void ir_t::vdiv(vreg_t dst, vreg_t src) {
+    op_t op;
+    op.kind = op_kind_t::vdiv;
+    op.dst = dst;
+    op.s0 = src;
+    ops_.push_back(op);
+}
+
+void ir_t::vmax(vreg_t dst, vreg_t src) {
+    op_t op;
+    op.kind = op_kind_t::vmax;
+    op.dst = dst;
+    op.s0 = src;
+    ops_.push_back(op);
+}
+
+void ir_t::vcmp_ne_zero(vreg_t dst, vreg_t src) {
+    assert(vreg_info_[(int)dst].kind == reg_kind_t::mask
+            && "vcmp_ne_zero: dst must be a mask vreg");
+    op_t op;
+    op.kind = op_kind_t::vcmp_ne_zero;
+    op.dst = dst;
+    op.s0 = src;
+    ops_.push_back(op);
+}
+
+void ir_t::vblend(vreg_t dst, vreg_t src, vreg_t mask) {
+    op_t op;
+    op.kind = op_kind_t::vblend;
+    op.dst = dst;
+    op.s0 = src;
+    op.s1 = mask;
+    ops_.push_back(op);
+}
+
+void ir_t::vbcast(vreg_t dst, vreg_t src) {
+    op_t op;
+    op.kind = op_kind_t::vbcast;
+    op.dst = dst;
+    op.s0 = src;
+    ops_.push_back(op);
+}
+
+void ir_t::vbcast_imm(vreg_t dst, float value) {
+    op_t op;
+    op.kind = op_kind_t::vbcast_imm;
+    op.dst = dst;
+    op.imm = float2int(value);
     ops_.push_back(op);
 }
 
@@ -178,6 +251,24 @@ void ir_t::vhreduce(vreg_t dst, vreg_t workspace) {
     op.kind = op_kind_t::vhreduce;
     op.dst = dst;
     op.s0 = workspace;
+    ops_.push_back(op);
+}
+
+void ir_t::vhreduce_max(vreg_t dst, vreg_t workspace) {
+    assert(dst != workspace && "vhreduce_max: workspace must differ from dst");
+
+    op_t op;
+    op.kind = op_kind_t::vhreduce_max;
+    op.dst = dst;
+    op.s0 = workspace;
+    ops_.push_back(op);
+}
+
+void ir_t::veltwise(alg_kind_t alg, vreg_t dst) {
+    op_t op;
+    op.kind = op_kind_t::veltwise;
+    op.dst = dst;
+    op.imm = (dim_t)alg;
     ops_.push_back(op);
 }
 
@@ -398,6 +489,7 @@ void ir_t::def_use(
         case op_kind_t::vload:
         case op_kind_t::vload_scalar:
         case op_kind_t::vload_bcast:
+        case op_kind_t::vload_widen:
             u(op.mem.base);
             d(op.dst);
             break;
@@ -413,15 +505,35 @@ void ir_t::def_use(
             d(op.dst);
             break;
         case op_kind_t::vadd: // read-modify-write
+        case op_kind_t::vsub: // read-modify-write
         case op_kind_t::vmul: // read-modify-write
+        case op_kind_t::vdiv: // read-modify-write
+        case op_kind_t::vmax: // read-modify-write
             u(op.dst);
             u(op.s0);
             d(op.dst);
             break;
+        case op_kind_t::vblend: // dst = mask ? s0 : dst; reads dst, s0, mask
+            u(op.dst);
+            u(op.s0);
+            u(op.s1);
+            d(op.dst);
+            break;
+        case op_kind_t::vbcast: // overwrites dst, reads s0
+        case op_kind_t::vcmp_ne_zero: // overwrites dst, reads s0
+            u(op.s0);
+            d(op.dst);
+            break;
+        case op_kind_t::vbcast_imm: d(op.dst); break;
         case op_kind_t::vhreduce: // the workspace is only written
+        case op_kind_t::vhreduce_max:
             u(op.dst);
             d(op.dst);
             d(op.s0);
+            break;
+        case op_kind_t::veltwise: // read-modify-write in place
+            u(op.dst);
+            d(op.dst);
             break;
         case op_kind_t::inject_postops: {
             // The injector transforms the accumulators in place (read and

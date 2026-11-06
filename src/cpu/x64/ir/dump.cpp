@@ -18,6 +18,7 @@
 #include <cassert>
 #include <cstdio>
 #include <iomanip>
+#include <limits>
 #include <vector>
 
 #include "oneapi/dnnl/dnnl_debug.h"
@@ -47,10 +48,20 @@ const char *kind_name(op_kind_t kind) {
         case op_kind_t::vload_scalar: return "vload_scalar";
         case op_kind_t::vstore_scalar: return "vstore_scalar";
         case op_kind_t::vload_bcast: return "vload_bcast";
+        case op_kind_t::vload_widen: return "vload_widen";
         case op_kind_t::vdot: return "vdot";
         case op_kind_t::vadd: return "vadd";
+        case op_kind_t::vsub: return "vsub";
         case op_kind_t::vmul: return "vmul";
+        case op_kind_t::vdiv: return "vdiv";
+        case op_kind_t::vmax: return "vmax";
+        case op_kind_t::vcmp_ne_zero: return "vcmp_ne_zero";
+        case op_kind_t::vblend: return "vblend";
+        case op_kind_t::vbcast: return "vbcast";
+        case op_kind_t::vbcast_imm: return "vbcast_imm";
         case op_kind_t::vhreduce: return "vhreduce";
+        case op_kind_t::vhreduce_max: return "vhreduce_max";
+        case op_kind_t::veltwise: return "veltwise";
         case op_kind_t::inject_postops: return "inject_postops";
         case op_kind_t::set_mask_imm: return "set_mask_imm";
         case op_kind_t::vload_masked: return "vload_masked";
@@ -220,6 +231,25 @@ std::string postops_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
     return s;
 }
 
+// Formats a vbcast_imm immediate as a concise value plus its raw bit pattern.
+std::string vbcast_imm_str(const ir_t &ir, const op_t &op) {
+    ostringstream_t ss;
+    const auto dt = ir.vreg_info()[(int)op.dst].dt;
+    if (dt == data_type::f32) {
+        const int imm = (int)op.imm;
+        ss << std::defaultfloat
+           << std::setprecision(std::numeric_limits<float>::max_digits10)
+           << int2float(imm) << " (0x" << std::hex << std::setw(8)
+           << std::setfill('0') << (uint32_t)imm << ")";
+    } else {
+        // Add other data types here if needed.
+        ss << op.imm;
+        ss << " (0x" << std::hex << std::setw(2 * (int)sizeof(op.imm))
+           << std::setfill('0') << op.imm << ")";
+    }
+    return ss.str();
+}
+
 // Returns the text of one operation, without index or indentation. Every kind
 // prints as its name followed by its operands, except the control-flow
 // markers. A loop or a conditional prints as an opening and a closing brace,
@@ -241,15 +271,26 @@ std::string op_str(const ir_t &ir, const op_t &op, cpu_isa_t isa,
         case op_kind_t::mov_reg:
         case op_kind_t::add_reg:
         case op_kind_t::vadd:
+        case op_kind_t::vsub:
         case op_kind_t::vmul:
-        case op_kind_t::vhreduce: return k + r(op.dst) + ", " + r(op.s0);
+        case op_kind_t::vdiv:
+        case op_kind_t::vmax:
+        case op_kind_t::vbcast:
+        case op_kind_t::vcmp_ne_zero:
+        case op_kind_t::vhreduce:
+        case op_kind_t::vhreduce_max: return k + r(op.dst) + ", " + r(op.s0);
+        case op_kind_t::vbcast_imm:
+            return k + r(op.dst) + ", " + vbcast_imm_str(ir, op);
         case op_kind_t::load: return k + r(op.dst) + ", " + mem(vreg_t::none);
-        case op_kind_t::vzero: return k + r(op.dst);
+        case op_kind_t::vzero:
+        case op_kind_t::veltwise: return k + r(op.dst);
         case op_kind_t::vload:
         case op_kind_t::vload_scalar:
-        case op_kind_t::vload_bcast: return k + r(op.dst) + ", " + mem(op.dst);
+        case op_kind_t::vload_bcast:
+        case op_kind_t::vload_widen: return k + r(op.dst) + ", " + mem(op.dst);
         case op_kind_t::vstore:
         case op_kind_t::vstore_scalar: return k + mem(op.s0) + ", " + r(op.s0);
+        case op_kind_t::vblend:
         case op_kind_t::vdot:
             return k + r(op.dst) + ", " + r(op.s0) + ", " + r(op.s1);
         case op_kind_t::inject_postops:

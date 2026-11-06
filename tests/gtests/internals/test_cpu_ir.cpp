@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <memory>
 #include <regex>
 #include <set>
@@ -33,6 +34,7 @@
 #include "common/c_types_map.hpp"
 
 #include "cpu/x64/ir/dump.hpp"
+#include "cpu/x64/ir/eltwise_injector.hpp"
 #include "cpu/x64/ir/emitter/emitter.hpp"
 #include "cpu/x64/ir/ir.hpp"
 #include "cpu/x64/ir/postops_injector.hpp"
@@ -324,13 +326,38 @@ protected:
                     eltwise_opmask, binary_tail_opmask));
         }
 
+        // Create an eltwise injector for each algorithm the IR uses, discovered
+        // by scanning the `veltwise` ops, the same way a real IR kernel would.
+        // Like the post-ops injector, each one saves and restores every register
+        // it borrows, so it takes no part in the IR register allocation. One
+        // generic callback dispatches by algorithm, so a new algorithm needs no
+        // new wiring here.
+        std::map<alg_kind_t, std::unique_ptr<eltwise_injector_t>>
+                eltwise_injectors;
+        for (const auto &op : ir_.ops()) {
+            if (op.kind != op_kind_t::veltwise) continue;
+            const auto alg = (alg_kind_t)op.imm;
+            if (eltwise_injectors.count(alg)) continue;
+            eltwise_injectors.emplace(alg,
+                    std::unique_ptr<eltwise_injector_t>(
+                            new eltwise_injector_t(*this, max_cpu_isa(), alg,
+                                    /* alpha = */ 0.f, /* beta = */ 0.f,
+                                    /* scale = */ 1.f)));
+        }
+        eltwise_fn_t emit_eltwise;
+        if (!eltwise_injectors.empty()) {
+            emit_eltwise = [&](alg_kind_t alg, int vec_phys) {
+                eltwise_injectors.at(alg)->apply(vec_phys);
+            };
+        }
+
         preamble();
 
         const int frame = (int)utils::rnd_up(alloc.frame_bytes, 16);
         if (frame > 0) sub(rsp, frame);
 
         data_section_t data;
-        emit(*this, ir_, alloc, reg_cfg, data, injector.get());
+        emit(*this, ir_, alloc, reg_cfg, data, injector.get(), emit_eltwise);
 
         if (frame > 0) add(rsp, frame);
 
@@ -341,6 +368,10 @@ protected:
         // The injector's constant table follows the postamble. A no-op unless
         // the chain has an eltwise post-op.
         if (injector) injector->maybe_prepare_table();
+
+        // Each eltwise injector's constant table also follows the postamble.
+        for (auto &kv : eltwise_injectors)
+            kv.second->prepare_table();
     }
 
 private:
@@ -1659,6 +1690,440 @@ end x64ir
         EXPECT_EQ(kernel_dump_str(gen, ir, data_section_t(), reg_cfg, alloc),
                 c.second);
     }
+}
+
+// Validates def_use for the elementwise/reduction ops added for the softmax
+// epilogue. The rmw ops read dst and s0 and write dst; vbcast overwrites dst
+// and only reads s0; vhreduce_max reads and writes dst and only writes its
+// workspace (the lowering overwrites it before reading it).
+TEST(IRBuilderTests, NewVectorOpsDefUse) {
+    ir_t ir;
+    const vreg_t ptr = ir.new_gpr();
+    ir.load_param(ptr, 0);
+    const vreg_t x = ir.new_vec(data_type::f32);
+    ir.vload(x, ptr, 0, data_type::f32);
+    const vreg_t y = ir.new_vec(data_type::f32);
+    ir.vload(y, ptr, simd_w() * (dim_t)sizeof(float), data_type::f32);
+    const vreg_t u8 = ir.new_vec(data_type::s32);
+    const int i_u8 = ir.n_ops();
+    ir.vload_widen(u8, ptr, 0, simd_w(), data_type::u8);
+
+    const int i_sub = ir.n_ops();
+    ir.vsub(x, y);
+    const int i_div = ir.n_ops();
+    ir.vdiv(x, y);
+    const int i_max = ir.n_ops();
+    ir.vmax(x, y);
+    const vreg_t mask = ir.new_mask();
+    ir.set_mask_imm(mask, simd_w() - 1);
+    const int i_blend = ir.n_ops();
+    ir.vblend(x, y, mask);
+    const vreg_t bc = ir.new_vec(data_type::f32);
+    const int i_bc = ir.n_ops();
+    ir.vbcast(bc, x);
+    const vreg_t cm = ir.new_mask();
+    const int i_cmp = ir.n_ops();
+    ir.vcmp_ne_zero(cm, u8);
+    const vreg_t ws = ir.new_vec(data_type::f32);
+    const int i_hm = ir.n_ops();
+    ir.vhreduce_max(x, ws);
+
+    const int i_exp = ir.n_ops();
+    ir.vexp(x);
+
+    std::vector<int> defs, uses;
+    // rmw ops read dst and s0 and write dst.
+    for (int idx : {i_sub, i_div, i_max}) {
+        ir.def_use(ir.ops()[idx], defs, uses);
+        EXPECT_EQ(defs, std::vector<int>({(int)x}));
+        ASSERT_EQ(uses.size(), 2u);
+        EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
+        EXPECT_NE(std::find(uses.begin(), uses.end(), (int)y), uses.end());
+    }
+    // vbcast overwrites dst and reads s0.
+    ir.def_use(ir.ops()[i_bc], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)bc}));
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    // vload_widen overwrites dst and reads the base pointer.
+    ir.def_use(ir.ops()[i_u8], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)u8}));
+    EXPECT_EQ(uses, std::vector<int>({(int)ptr}));
+    // vcmp_ne_zero overwrites dst and reads s0.
+    ir.def_use(ir.ops()[i_cmp], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)cm}));
+    EXPECT_EQ(uses, std::vector<int>({(int)u8}));
+    // vblend reads dst, s0 and the mask, and writes dst.
+    ir.def_use(ir.ops()[i_blend], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)x}));
+    ASSERT_EQ(uses.size(), 3u);
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)x), uses.end());
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)y), uses.end());
+    EXPECT_NE(std::find(uses.begin(), uses.end(), (int)mask), uses.end());
+    // vhreduce_max reads and writes dst and only writes its workspace (the
+    // lowering overwrites the workspace before reading it).
+    ir.def_use(ir.ops()[i_hm], defs, uses);
+    ASSERT_EQ(defs.size(), 2u);
+    EXPECT_NE(std::find(defs.begin(), defs.end(), (int)x), defs.end());
+    EXPECT_NE(std::find(defs.begin(), defs.end(), (int)ws), defs.end());
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
+    // vexp reads and writes dst in place.
+    ir.def_use(ir.ops()[i_exp], defs, uses);
+    EXPECT_EQ(defs, std::vector<int>({(int)x}));
+    EXPECT_EQ(uses, std::vector<int>({(int)x}));
+}
+
+// Builds a kernel that applies one elementwise op to two loaded vectors and
+// stores the full result. `kind` selects vsub/vmul/vdiv/vmax.
+ir_t build_elementwise_ir(op_kind_t kind) {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(dot_args_t, b));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t acc = ir.new_vec(data_type::f32);
+    ir.vload(acc, a_ptr, 0, data_type::f32);
+    const vreg_t b = ir.new_vec(data_type::f32);
+    ir.vload(b, b_ptr, 0, data_type::f32);
+
+    switch (kind) {
+        case op_kind_t::vsub: ir.vsub(acc, b); break;
+        case op_kind_t::vmul: ir.vmul(acc, b); break;
+        case op_kind_t::vdiv: ir.vdiv(acc, b); break;
+        case op_kind_t::vmax: ir.vmax(acc, b); break;
+        default: break;
+    }
+
+    ir.vstore(c_ptr, 0, acc, data_type::f32);
+    return ir;
+}
+
+// Validates the elementwise vector ops end to end against a scalar reference.
+TEST(IntegrationTests, ElementwiseVectorOps) {
+    SKIP_IF_NO_AVX2();
+
+    std::vector<float> a(simd_w()), b(simd_w());
+    for (int i = 0; i < simd_w(); i++) {
+        a[i] = (float)(i - 3) * 1.5f + 0.5f;
+        b[i] = (float)(i % 4) + 1.f; // nonzero for division
+    }
+
+    auto run = [&](op_kind_t kind) {
+        ir_kernel_t k(build_elementwise_ir(kind));
+        EXPECT_TRUE(k.run_ir_pipeline());
+        std::vector<float> c(simd_w(), -12345.f);
+        dot_args_t args {a.data(), b.data(), c.data()};
+        k.run(&args);
+        return c;
+    };
+
+    {
+        const auto c = run(op_kind_t::vsub);
+        for (int i = 0; i < simd_w(); i++)
+            EXPECT_FLOAT_EQ(c[i], a[i] - b[i]) << "lane " << i;
+    }
+    {
+        const auto c = run(op_kind_t::vmax);
+        for (int i = 0; i < simd_w(); i++)
+            EXPECT_FLOAT_EQ(c[i], std::max(a[i], b[i])) << "lane " << i;
+    }
+    {
+        const auto c = run(op_kind_t::vdiv);
+        for (int i = 0; i < simd_w(); i++)
+            EXPECT_FLOAT_EQ(c[i], a[i] / b[i]) << "lane " << i;
+    }
+}
+
+// Builds a kernel that reduces a vector to its horizontal max and broadcasts
+// that scalar back across all lanes.
+ir_t build_hmax_bcast_ir() {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t acc = ir.new_vec(data_type::f32);
+    ir.vload(acc, a_ptr, 0, data_type::f32);
+
+    const vreg_t ws = ir.new_vec(data_type::f32);
+    ir.vhreduce_max(acc, ws);
+
+    const vreg_t out = ir.new_vec(data_type::f32);
+    ir.vbcast(out, acc);
+
+    ir.vstore(c_ptr, 0, out, data_type::f32);
+    return ir;
+}
+
+// Validates horizontal-max reduction plus broadcast: every output lane must
+// equal the maximum input element. This is the row-max step of online softmax.
+TEST(IntegrationTests, HorizontalMaxBroadcast) {
+    SKIP_IF_NO_AVX2();
+
+    ir_kernel_t kernel(build_hmax_bcast_ir());
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a(simd_w()), c(simd_w(), -12345.f);
+    for (int i = 0; i < simd_w(); i++)
+        a[i] = (float)((i * 3) % 7) - 2.f;
+
+    dot_args_t args {a.data(), nullptr, c.data()};
+    kernel.run(&args);
+
+    const float m = *std::max_element(a.begin(), a.end());
+    for (int i = 0; i < simd_w(); i++)
+        EXPECT_FLOAT_EQ(c[i], m) << "lane " << i;
+}
+
+// Builds a kernel that applies exp element-wise to a loaded vector, in place,
+// and stores it. This is the P = exp(S - m) step of online softmax.
+ir_t build_exp_ir() {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t acc = ir.new_vec(data_type::f32);
+    ir.vload(acc, a_ptr, 0, data_type::f32);
+    ir.vexp(acc);
+    ir.vstore(c_ptr, 0, acc, data_type::f32);
+    return ir;
+}
+
+// Validates the `vexp` op end to end. The eltwise injector's exp is a
+// polynomial approximation, so compare with a relative tolerance rather than
+// exact equality.
+TEST(IntegrationTests, ExpVector) {
+    SKIP_IF_NO_AVX2();
+
+    ir_kernel_t kernel(build_exp_ir());
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a(simd_w()), c(simd_w(), -12345.f);
+    for (int i = 0; i < simd_w(); i++)
+        a[i] = (float)(i - 4) * 0.75f; // spans negative and positive
+
+    dot_args_t args {a.data(), nullptr, c.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w(); i++) {
+        const float expected = std::exp(a[i]);
+        EXPECT_NEAR(c[i], expected, 1e-5f * std::abs(expected) + 1e-6f)
+                << "lane " << i;
+    }
+}
+
+// Builds a kernel that applies two different eltwise algorithms in the same
+// kernel: exp to the first input, tanh to the second, storing both. This shows
+// that distinct `veltwise` ops carry their own algorithm (in `op.imm`) and are
+// dispatched to the matching injector, with no per-algorithm wiring.
+ir_t build_two_eltwise_ir() {
+    ir_t ir;
+
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(dot_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(dot_args_t, b));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(dot_args_t, c));
+
+    const vreg_t x = ir.new_vec(data_type::f32);
+    ir.vload(x, a_ptr, 0, data_type::f32);
+    ir.veltwise(alg_kind::eltwise_exp, x);
+    ir.vstore(c_ptr, 0, x, data_type::f32);
+
+    const vreg_t y = ir.new_vec(data_type::f32);
+    ir.vload(y, b_ptr, 0, data_type::f32);
+    ir.veltwise(alg_kind::eltwise_tanh, y);
+    ir.vstore(c_ptr, simd_w() * (dim_t)sizeof(float), y, data_type::f32);
+    return ir;
+}
+
+// Validates that two different eltwise algorithms coexist in one kernel and are
+// each applied correctly. If the algorithm were not distinguished per op, the
+// tanh lanes would receive exp (and fail).
+TEST(IntegrationTests, TwoEltwiseAlgorithms) {
+    SKIP_IF_NO_AVX2();
+
+    ir_kernel_t kernel(build_two_eltwise_ir());
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a(simd_w()), b(simd_w()), c(2 * simd_w(), -12345.f);
+    for (int i = 0; i < simd_w(); i++) {
+        a[i] = (float)(i - 4) * 0.75f;
+        b[i] = (float)(i - 4) * 0.5f;
+    }
+
+    dot_args_t args {a.data(), b.data(), c.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w(); i++) {
+        const float exp_ref = std::exp(a[i]);
+        EXPECT_NEAR(c[i], exp_ref, 1e-5f * std::abs(exp_ref) + 1e-6f)
+                << "exp lane " << i;
+        const float tanh_ref = std::tanh(b[i]);
+        EXPECT_NEAR(
+                c[simd_w() + i], tanh_ref, 1e-5f * std::abs(tanh_ref) + 1e-6f)
+                << "tanh lane " << i;
+    }
+}
+
+// Arguments for the select-mask kernel. `cond` is an integer condition that
+// drives a per-lane select between the two candidate vectors `a` and `b`:
+// a lane takes `b` where the condition is nonzero and `a` where it is zero.
+// Any nonzero value selects `b`.
+struct select_mask_args_t {
+    const float *a;
+    const float *b;
+    const int32_t *cond;
+    float *c;
+};
+
+// Validates vcmp_ne_zero end to end: an integer condition vector is turned into
+// a lane mask, then vblend selects `b` where the condition is nonzero and `a`
+// where it is zero. This is the select/where primitive of the SDPA attention
+// mask, where the operand order of vblend encodes the keep-on-cond sense.
+TEST(IntegrationTests, SelectMaskFromCondition) {
+    SKIP_IF_NO_AVX2();
+
+    ir_t ir;
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(select_mask_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(select_mask_args_t, b));
+    const vreg_t cond_ptr = ir.new_gpr();
+    ir.load_param(cond_ptr, offsetof(select_mask_args_t, cond));
+    const vreg_t c_ptr = ir.new_gpr();
+    ir.load_param(c_ptr, offsetof(select_mask_args_t, c));
+
+    const vreg_t a = ir.new_vec(data_type::f32);
+    ir.vload(a, a_ptr, 0, data_type::f32);
+    const vreg_t b = ir.new_vec(data_type::f32);
+    ir.vload(b, b_ptr, 0, data_type::f32);
+    const vreg_t cond = ir.new_vec(data_type::s32);
+    ir.vload(cond, cond_ptr, 0, data_type::s32);
+
+    // mask lanes = (cond != 0); a = mask ? b : a  ->  lane = cond ? b : a.
+    const vreg_t mask = ir.new_mask();
+    ir.vcmp_ne_zero(mask, cond);
+    ir.vblend(a, b, mask);
+    ir.vstore(c_ptr, 0, a, data_type::f32);
+
+    ir_kernel_t kernel(ir);
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<float> a_data(simd_w()), b_data(simd_w()),
+            c(simd_w(), -12345.f);
+    std::vector<int32_t> cond_data(simd_w());
+    for (int i = 0; i < simd_w(); i++) {
+        a_data[i] = (float)(10 + i);
+        b_data[i] = (float)(100 + i);
+        // Mix zero and nonzero (including a negative) condition lanes.
+        cond_data[i] = (i % 3 == 0) ? 0 : (i - 4);
+    }
+
+    select_mask_args_t args {
+            a_data.data(), b_data.data(), cond_data.data(), c.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w(); i++) {
+        const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
+        EXPECT_FLOAT_EQ(c[i], expected) << "lane " << i;
+    }
+}
+
+// Arguments for the load-u8 select-mask kernel. `cond` holds the uint8
+// condition bytes; per lane, `dst` takes `b` where the byte is nonzero and `a`
+// where it is zero, matching the SDPA attention-mask select.
+struct load_u8_args_t {
+    const uint8_t *cond;
+    const float *a;
+    const float *b;
+    float *dst;
+};
+
+// Validates vload_widen feeding the select-mask path, the real SDPA attention-mask
+// use: uint8 condition bytes are widened into integer lanes, turned into a lane
+// mask with vcmp_ne_zero, and consumed by vblend to pick `b` where the byte is
+// nonzero and `a` where it is zero.
+TEST(IntegrationTests, LoadU8SelectMask) {
+    SKIP_IF_NO_AVX2();
+
+    const int tail = simd_w() - 3;
+
+    ir_t ir;
+    const vreg_t cond_ptr = ir.new_gpr();
+    ir.load_param(cond_ptr, offsetof(load_u8_args_t, cond));
+    const vreg_t a_ptr = ir.new_gpr();
+    ir.load_param(a_ptr, offsetof(load_u8_args_t, a));
+    const vreg_t b_ptr = ir.new_gpr();
+    ir.load_param(b_ptr, offsetof(load_u8_args_t, b));
+    const vreg_t dst_ptr = ir.new_gpr();
+    ir.load_param(dst_ptr, offsetof(load_u8_args_t, dst));
+
+    // Full block: widen bytes -> integer lanes -> mask -> select.
+    const vreg_t cond = ir.new_vec(data_type::s32);
+    ir.vload_widen(cond, cond_ptr, 0, simd_w(), data_type::u8);
+    const vreg_t mask = ir.new_mask();
+    ir.vcmp_ne_zero(mask, cond);
+    const vreg_t a = ir.new_vec(data_type::f32);
+    ir.vload(a, a_ptr, 0, data_type::f32);
+    const vreg_t b = ir.new_vec(data_type::f32);
+    ir.vload(b, b_ptr, 0, data_type::f32);
+    ir.vblend(a, b, mask); // a = cond ? b : a
+    ir.vstore(dst_ptr, 0, a, data_type::f32);
+
+    // Tail block: the tail bytes are packed one at a time by the load; lanes
+    // past the tail widen to zero and are dropped by the masked store.
+    const vreg_t condt = ir.new_vec(data_type::s32);
+    ir.vload_widen(condt, cond_ptr, 0, tail, data_type::u8);
+    const vreg_t maskt = ir.new_mask();
+    ir.vcmp_ne_zero(maskt, condt);
+    const vreg_t at = ir.new_vec(data_type::f32);
+    ir.vload(at, a_ptr, 0, data_type::f32);
+    const vreg_t bt = ir.new_vec(data_type::f32);
+    ir.vload(bt, b_ptr, 0, data_type::f32);
+    ir.vblend(at, bt, maskt);
+    const vreg_t tail_mask = ir.new_mask();
+    ir.set_mask_imm(tail_mask, tail);
+    ir.vstore_masked(dst_ptr, simd_w() * (dim_t)sizeof(float), at, tail_mask,
+            data_type::f32);
+
+    ir_kernel_t kernel(ir);
+    ASSERT_TRUE(kernel.run_ir_pipeline());
+
+    std::vector<uint8_t> cond_data(simd_w());
+    std::vector<float> a_data(simd_w()), b_data(simd_w());
+    for (int i = 0; i < simd_w(); i++) {
+        // Mix zero and nonzero bytes, including values > 127.
+        cond_data[i] = (i % 3 == 0) ? 0 : (uint8_t)(30 + i * 25);
+        a_data[i] = (float)(10 + i);
+        b_data[i] = (float)(100 + i);
+    }
+    std::vector<float> dst(2 * simd_w(), -12345.f);
+
+    load_u8_args_t args {
+            cond_data.data(), a_data.data(), b_data.data(), dst.data()};
+    kernel.run(&args);
+
+    for (int i = 0; i < simd_w(); i++) {
+        const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
+        EXPECT_FLOAT_EQ(dst[i], expected) << "full lane " << i;
+    }
+    for (int i = 0; i < tail; i++) {
+        const float expected = cond_data[i] != 0 ? b_data[i] : a_data[i];
+        EXPECT_FLOAT_EQ(dst[simd_w() + i], expected) << "tail lane " << i;
+    }
+    // Lanes past the tail must be left untouched by the masked store.
+    for (int i = tail; i < simd_w(); i++)
+        EXPECT_FLOAT_EQ(dst[simd_w() + i], -12345.f) << "tail pad lane " << i;
 }
 
 } // namespace dnnl

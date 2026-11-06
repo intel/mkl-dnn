@@ -109,15 +109,47 @@ enum class op_kind_t {
     vstore_scalar,
     // dst = broadcast([base + disp]) (load one element, replicated across dst)
     vload_bcast,
+    // dst = imm elements of mem_dt at [base + disp], each widened to a dst lane
+    vload_widen,
     // dst += sum_{i=0}^{N-1} (s0[i] * s1[i]), where N is the dot length
     vdot,
     // dst += s0 (vector add)
     vadd,
+    // dst -= s0 (vector subtract)
+    vsub,
     // dst *= s0 (vector multiply)
     vmul,
+    // dst /= s0 (vector divide)
+    vdiv,
+    // dst = max(dst, s0) (vector elementwise max)
+    vmax,
+    // dst = (s0 != 0) ? all-ones : 0, per lane. Builds a boolean mask from a
+    // loaded condition for a later `vblend` to select between two vectors.
+    vcmp_ne_zero,
+    // dst = mask ? s0 : dst, per-lane select in place. The mask vreg (from
+    // set_mask_imm) is held in s1: active lanes take s0, inactive lanes keep
+    // dst. Used to neutralize a masked tail's unused lanes before a reduction
+    // (seed dst with the reduction's identity), and to apply a where/select
+    // mask.
+    vblend,
+    // dst = broadcast of s0's element 0 across all lanes (overwrites dst)
+    vbcast,
+    // dst = broadcast of a constant whose bit pattern is held in `imm` across
+    // all lanes.
+    vbcast_imm,
     // horizontal reduction of dst; result in element 0. s0 is scratch
     // (overwritten).
     vhreduce,
+    // horizontal max reduction of dst; result in element 0. s0 is scratch
+    // (overwritten).
+    vhreduce_max,
+
+    // dst = alg(dst), elementwise, in place. `alg` is an eltwise algorithm
+    // (e.g. eltwise_exp), held in `imm`. Lowered through the eltwise injector
+    // (like inject_postops: outside the emitter backend and the register
+    // allocator), not a backend instruction. One op serves every eltwise
+    // algorithm, so a new one needs no new op, emitter case or callback.
+    veltwise,
 
     // Post-ops
     //
@@ -194,6 +226,9 @@ struct mem_t {
 //         * mov_imm        -> literal constant
 //         * loop_begin     -> loop trip count
 //         * set_mask_imm   -> active element count
+//         * vbcast_imm     -> bit pattern
+//         * vload_widen / vload_masked / vstore_masked -> active element count
+//         * veltwise       -> eltwise algorithm (alg_kind_t)
 //         * inject_postops -> index into inject_postops_args()
 //         * if_begin       -> right-hand side of the comparison when s1 is
 //                             none
@@ -308,12 +343,33 @@ struct DNNL_API ir_t {
     void vload_scalar(vreg_t dst, vreg_t base, dim_t disp, data_type_t mem_dt);
     void vstore_scalar(vreg_t base, dim_t disp, vreg_t src, data_type_t mem_dt);
     void vload_bcast(vreg_t dst, vreg_t base, dim_t disp, data_type_t mem_dt);
+    // `n_elems` is the active element count (a full vector or a tail). Each
+    // `mem_dt` element is widened (zero-extended) to dst's wider element type.
+    void vload_widen(vreg_t dst, vreg_t base, dim_t disp, int n_elems,
+            data_type_t mem_dt);
     void vdot(vreg_t dst, vreg_t a, vreg_t b);
     void vadd(vreg_t dst, vreg_t src);
+    void vsub(vreg_t dst, vreg_t src);
     void vmul(vreg_t dst, vreg_t src);
+    void vdiv(vreg_t dst, vreg_t src);
+    void vmax(vreg_t dst, vreg_t src);
+    // `dst` is a mask vreg: a lane is set where `src` != 0. The mask is a
+    // per-lane predicate (opmask or sign bit), consumed only by mask ops.
+    void vcmp_ne_zero(vreg_t dst, vreg_t src);
+    // `mask` is a mask vreg from set_mask_imm or vcmp_ne_zero.
+    void vblend(vreg_t dst, vreg_t src, vreg_t mask);
+    void vbcast(vreg_t dst, vreg_t src);
+    // Broadcast a constant across `dst`.
+    // Add an overload per element type as needed.
+    void vbcast_imm(vreg_t dst, float value);
     // `workspace` is scratch. It is overwritten by this call, so pass a vreg
     // whose value is not needed afterwards.
     void vhreduce(vreg_t dst, vreg_t workspace);
+    void vhreduce_max(vreg_t dst, vreg_t workspace);
+    // `alg` selects the elementwise function applied to `dst` in place.
+    void veltwise(alg_kind_t alg, vreg_t dst);
+    // Convenience wrapper for the common exp case.
+    void vexp(vreg_t dst) { veltwise(alg_kind::eltwise_exp, dst); }
 
     // vec (masked)
     // `mask` comes from `set_mask_imm` and is required. Use `vload`/`vstore`

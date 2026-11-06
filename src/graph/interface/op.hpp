@@ -380,6 +380,7 @@ public:
             CASE(keep_dst_layout);
             CASE(with_scale);
             CASE(is_invert_scale);
+            CASE(is_invert_select);
             CASE(mask_type);
             CASE(is_rms);
             CASE(partition_id);

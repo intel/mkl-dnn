@@ -4699,6 +4699,27 @@ status_t fuse_sdpa(std::shared_ptr<subgraph_t> &sg) {
                 sdpa_op->set_attr(op_attr::mask_type,
                         static_cast<int64_t>(attn_mask_type::buffer));
             }
+            // handle select mask
+            else if (alg == dnnl::algorithm::binary_select) {
+                // dst = cond ? src0 : src1 (cond is src2). One of src0/src1 is
+                // the score value produced by the preceding operation, the other
+                // is the scalar fill. Wire the condition and then the fill.
+                const auto &prev_out = candidates[i - 1]->get_output_value(0);
+                const bool score_is_src0 = op->get_input_value(0) == prev_out;
+                const size_t fill_in = score_is_src0 ? 1 : 0;
+                auto fill_val = op->get_input_value(fill_in);
+                fill_val->remove_consumer(*op, fill_in);
+                auto cond_val = op->get_input_value(2);
+                cond_val->remove_consumer(*op, 2);
+                sdpa_op->connect_input(input_idx++, cond_val);
+                sdpa_op->connect_input(input_idx++, fill_val);
+                // score at src0 => cond ? score : fill;
+                // score at src1 => cond ? fill : score.
+                sdpa_op->set_attr(op_attr::mask_type,
+                        static_cast<int64_t>(attn_mask_type::select));
+                sdpa_op->set_attr<bool>(
+                        op_attr::is_invert_select, !score_is_src0);
+            }
         }
         // handle implicit dnnl_mask
         else if (op->get_kind() == op_kind::_mask) {

@@ -26,6 +26,7 @@
 #include "common/engine.hpp"
 #include "common/engine_id.hpp"
 #include "common/impl_list_item.hpp"
+#include "common/sdpa_types.hpp"
 
 #include "cpu/platform.hpp"
 
@@ -80,6 +81,7 @@ DECLARE_IMPL_LIST(reduction);
 DECLARE_IMPL_LIST(reorder);
 DECLARE_IMPL_LIST(resampling);
 DECLARE_IMPL_LIST(rnn);
+DECLARE_IMPL_LIST(sdpa);
 DECLARE_IMPL_LIST(shuffle);
 DECLARE_IMPL_LIST(softmax);
 
@@ -115,9 +117,9 @@ public:
             CASE(reorder);
             CASE(resampling);
             CASE(rnn);
+            CASE(sdpa);
             CASE(shuffle);
             CASE(softmax);
-            case primitive_kind::sdpa: return empty_list;
             default: assert(!"unknown primitive kind"); return empty_list;
         }
 #undef CASE

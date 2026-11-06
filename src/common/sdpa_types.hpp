@@ -32,6 +32,7 @@ namespace impl {
 #define DNNL_ARG_KEYS DNNL_ARG_SRC_1
 #define DNNL_ARG_VALUES DNNL_ARG_SRC_2
 #define DNNL_ARG_ATTN_MASK DNNL_ARG_SHIFT
+#define DNNL_ARG_ATTN_MASK_FILL DNNL_ARG_SRC_3
 
 #define DNNL_ARG_DIFF_QUERIES DNNL_ARG_DIFF_SRC_0
 #define DNNL_ARG_DIFF_KEYS DNNL_ARG_DIFF_SRC_1
@@ -52,6 +53,11 @@ typedef enum {
     /// causal mask with the diagonal starting from the bottom right hand side
     /// of the mask tensor
     dnnl_attn_mask_bottom_right = 3,
+
+    /// select mask: a boolean/int8 condition tensor chooses between the score
+    /// and scalar fill value. The operand order is controlled by invert_select.
+    dnnl_attn_mask_select = 4,
+
 } dnnl_attn_mask_type_t;
 // NOLINTEND(modernize-use-using)
 
@@ -61,6 +67,7 @@ const attn_mask_type_t undef = dnnl_attn_mask_undef;
 const attn_mask_type_t buffer = dnnl_attn_mask_buffer;
 const attn_mask_type_t top_left = dnnl_attn_mask_top_left;
 const attn_mask_type_t bottom_right = dnnl_attn_mask_bottom_right;
+const attn_mask_type_t select = dnnl_attn_mask_select;
 } // namespace attn_mask_type
 
 // A descriptor for a scaled dot product attention (SDPA) operation.
@@ -84,6 +91,8 @@ struct sdpa_desc_t : public op_desc_t {
     quant_entry_t vs_scales;
     quant_entry_t vs_zero_points;
 
+    memory_desc_t fill_desc; /* fill value for select attention mask */
+
     memory_desc_t dS_desc;
 
     memory_desc_t dst_desc;
@@ -99,6 +108,9 @@ struct sdpa_desc_t : public op_desc_t {
     // invert_scale = false: multiply by scale
     // invert_scale = true:  divide by scale
     bool invert_scale {};
+    // invert_select = false: cond ? score : fill
+    // invert_select = true:  cond ? fill : score
+    bool invert_select {};
     dim_t kv_head_number {};
 
     attn_mask_type_t mask_type = attn_mask_type::undef;
@@ -127,6 +139,7 @@ struct sdpa_desc_t : public op_desc_t {
     const memory_desc_t *diff_qry_md() const { return &diff_q_desc; }
     const memory_desc_t *diff_key_md() const { return &diff_k_desc; }
     const memory_desc_t *diff_val_md() const { return &diff_v_desc; }
+    const memory_desc_t *fill_md() const { return &fill_desc; }
 };
 
 } // namespace impl

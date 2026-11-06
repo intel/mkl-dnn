@@ -28,7 +28,9 @@ dnnl_status_t DNNL_API sdpa_primitive_desc_create(
         dnnl_alg_kind_t softmax_alg, dnnl_prop_kind_t prop,
         const_dnnl_primitive_attr_t attr, const_dnnl_primitive_attr_t kq_attr,
         const_dnnl_primitive_attr_t vs_attr,
-        const_dnnl_memory_desc_t stats_desc = nullptr);
+        const_dnnl_memory_desc_t stats_desc = nullptr,
+        const_dnnl_memory_desc_t fill_desc = nullptr,
+        bool invert_select = false);
 
 dnnl_status_t DNNL_API sdpa_primitive_desc_create(
         dnnl_primitive_desc_t *primitive_desc_iface, dnnl_engine_t engine,
