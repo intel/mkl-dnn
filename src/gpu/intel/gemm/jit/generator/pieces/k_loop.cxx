@@ -1778,6 +1778,9 @@ void Generator<hw>::kLoop(KLoop type, const GEMMProblem &problem, GEMMStrategy &
     ls.setCallback(CT::JumpTarget, [&](int label, int) {
         mark(labels[label]);
         state.wipeActiveVFlags();
+        // Control flow merges here: flagAP holds the result of whichever comparison preceded the
+        // jump to this label, so a later check can't assume it still reflects lastThresh.
+        lastThresh = 0;
     });
     ls.setCallback(CT::Jump, [&](int label, int) {
         if (size_t(label) >= labels.size())
