@@ -876,8 +876,8 @@ micro_sdpa_bwd(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
             // Store softmax for ugemm_vs B-operand
 #if USE_SYSTOLIC_UKERNEL
             s_tile_type_packed S_tile_packed;
-            tile_copy_to_vec2_cvt(
-                    S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T);
+            tile_copy_to_vec_cvt(
+                    S_tile, S_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T, 2);
             tile_store_t_sys_src2(S_tile_packed, (local uint *)S_slm,
                     ugemm_vs_sg_tile_n, ugemm_kq_wg_tile_n / 2, sg_j0_kq / 2,
                     sg_i0_kq);
@@ -961,8 +961,8 @@ micro_sdpa_bwd(const global KEY_DATA_T *K, const global QRY_DATA_T *Q,
                     ugemm_ktq_sg_tile_n, ugemm_kq_wg_tile_m, ugemm_kq_wg_tile_n,
                     sg_i0_kq, sg_j0_kq);
             p_tile_type_packed dP_tile_packed;
-            tile_copy_to_vec2_cvt(
-                    dP_tile, dP_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T);
+            tile_copy_to_vec_cvt(
+                    dP_tile, dP_tile_packed, VEC_TYPE2, CONVERT_TILE_FMA_T, 2);
             tile_store_sys_src1(dP_tile_packed, (local uint *)S_slm,
                     SUBGROUP_SIZE, ugemm_kq_wg_tile_n / 2, ugemm_kq_wg_tile_m,
                     ugemm_kq_wg_tile_n / 2, sg_i0_kq, sg_j0_kq / 2);

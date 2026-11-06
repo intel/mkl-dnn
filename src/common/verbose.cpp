@@ -1652,15 +1652,29 @@ std::string init_info_sdpa(const engine_t *e, const pd_t *pd) {
        << ",";
 
     std::string delimiter;
-    if (pd->with_key_scales() || pd->with_value_scales()) {
+    if (pd->with_query_scales() || pd->with_key_scales()
+            || pd->with_value_scales() || pd->with_probs_quant_scales()
+            || pd->with_probs_dequant_scales()) {
         ss << delimiter << "attr-scales:";
         delimiter = "";
+        if (pd->with_query_scales()) {
+            ss << delimiter << "query:" << desc->q_scales;
+            delimiter = "+";
+        }
         if (pd->with_key_scales()) {
             ss << delimiter << "key:" << desc->kq_scales;
             delimiter = "+";
         }
         if (pd->with_value_scales()) {
             ss << delimiter << "val:" << desc->vs_scales;
+            delimiter = "+";
+        }
+        if (pd->with_probs_quant_scales()) {
+            ss << delimiter << "probs_quant:" << desc->probs_quant_scales;
+            delimiter = "+";
+        }
+        if (pd->with_probs_dequant_scales()) {
+            ss << delimiter << "probs_dequant:" << desc->probs_dequant_scales;
             delimiter = "+";
         }
         delimiter = " ";

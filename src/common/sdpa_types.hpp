@@ -31,6 +31,7 @@ namespace impl {
 #define DNNL_ARG_QUERIES DNNL_ARG_SRC_0
 #define DNNL_ARG_KEYS DNNL_ARG_SRC_1
 #define DNNL_ARG_VALUES DNNL_ARG_SRC_2
+#define DNNL_ARG_PROBABILITIES DNNL_ARG_SRC_3
 #define DNNL_ARG_ATTN_MASK DNNL_ARG_SHIFT
 
 #define DNNL_ARG_DIFF_QUERIES DNNL_ARG_DIFF_SRC_0
@@ -79,10 +80,13 @@ struct sdpa_desc_t : public op_desc_t {
 
     // primitive_attr_t can't be used because of deleted copy-ctor, but desc_t
     // must be copyable.
+    quant_entry_t q_scales;
     quant_entry_t kq_scales;
     quant_entry_t kq_zero_points;
     quant_entry_t vs_scales;
     quant_entry_t vs_zero_points;
+    quant_entry_t probs_quant_scales;
+    quant_entry_t probs_dequant_scales;
 
     memory_desc_t dS_desc;
 

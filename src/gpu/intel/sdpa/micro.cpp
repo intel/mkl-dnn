@@ -83,7 +83,7 @@ int alignment_for_md(const memory_desc_wrapper &mdw, dim_t ld_bytes) {
 }
 
 // micro_sdpa/micro_sdpa_bwd cross-thread argument bytes, plus headroom.
-constexpr int host_argument_bytes_fwd = 328;
+constexpr int host_argument_bytes_fwd = 336;
 constexpr int host_argument_bytes_bwd = 256;
 
 compute::gpu_arch_t gpu_arch(const micro::HWInformation &hw_info) {
@@ -271,6 +271,7 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
             hw_info.gmdid != 0, "gmdid is 0, microkernels not supported.");
 
     ukernel_params.hwinfo = {hw_info};
+    pv_ukernel_rounding_ = pv_fp8_capable();
 
     auto convert_dnnl_to_kernel_layout = [](const memory_desc_t *md) {
         return (gemm_desc_t::get_trans(*md) == dnnl_trans) ? MatrixLayout::T
@@ -290,10 +291,20 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
         problem.Ta = problem.Tb = Type::bf16;
     } else if (desc()->qry_md()->data_type == data_type::f32) {
         problem.Ta = problem.Tb = Type::f32;
+    } else if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
+        if (q_slm_fp8()) {
+            // Q stays fp8 through SLM
+            problem.Ta = problem.Tb = Type::hf8;
+        } else {
+            // Q is upconverted to f16
+            problem.Tb_ext = Type::f16;
+            problem.Ta = problem.Tb = Type::f16;
+        }
     } else {
-        VCHECK_SDPA_COND(utils::one_of(desc()->qry_md()->data_type,
-                                 data_type::f16, data_type::bf16),
-                "Q tensor's data type must be bf16 or f16");
+        VCHECK_SDPA_COND(
+                utils::one_of(desc()->qry_md()->data_type, data_type::f16,
+                        data_type::bf16, data_type::f8_e4m3),
+                "Q tensor's data type must be bf16, f16, or f8_e4m3");
     }
     problem.Tc = problem.Tc_ext = Type::f32;
     problem.Ts = problem.Tc;
@@ -356,8 +367,9 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     problem_kq.A.setAlignment(k_align);
     problem_kq.B.setAlignment(64); // Q is packed in VNNI format in SLM
     if (use_systolic_ukernel()) {
-        problem_kq.B.crosspack = 2;
-        problem_kq.B.tileR = into<uint16_t>(d_max());
+        // VNNI: 4 bytes of Q per channel
+        problem_kq.B.crosspack = into<uint8_t>(4 / problem_kq.Tb);
+        problem_kq.B.tileR = into<uint16_t>(d_max_kq_padded());
         problem_kq.B.tileC = into<uint16_t>(sg_size());
     }
 
@@ -393,6 +405,17 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     auto problem_vs = std::move(problem);
     problem_vs.Tc = problem_vs.Ts
             = (vs_acc_dt() == data_type::f16) ? Type::f16 : Type::f32;
+    if (pv_ukernel_rounding()) {
+        // let ukernel round f16 -> hf8 natively
+        problem_vs.Ta = Type::hf8;
+        problem_vs.Tb = Type::hf8;
+        problem_vs.Tb_ext = Type::f16;
+    } else if (pv_fp8()) {
+        problem_vs.Ta = Type::hf8;
+        problem_vs.Tb = problem_vs.Tb_ext = Type::hf8;
+    } else if (desc()->qry_md()->data_type == data_type::f8_e4m3) {
+        problem_vs.Tb = problem_vs.Tb_ext = Type::f16;
+    }
 
     bool vs_common_scales = with_quantize_common(d->vs_scales);
     bool vs_common_zp = with_quantize_common(d->vs_zero_points);
@@ -432,7 +455,11 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
             gemm_desc_t::get_ld(*desc()->val_md()) * val_mdw.data_type_size());
     problem_vs.A.setAlignment(alignment_for_md(val_mdw, ldv));
     problem_vs.B.setAlignment(64); // S is packed in SLM
-    if (use_systolic_ukernel()) { problem_vs.B.crosspack = 16; }
+    // S is staged as Tb_ext, and the systolic op consumes ksys = 32 / Tb_ext
+    // elements of it per channel
+    if (use_systolic_ukernel()) {
+        problem_vs.B.crosspack = into<uint8_t>(32 / problem_vs.Tb_ext);
+    }
 
     ukernel_params.problem_vs = {problem_vs};
 
@@ -899,6 +926,10 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
     init_conf_common(conf, this);
     conf.d_max_kq = d_max_kq();
     conf.d_max_v = d_max_v();
+    conf.q_slm_fp8 = q_slm_fp8();
+    conf.pv_fp8 = pv_fp8();
+    conf.pv_ukernel_cvt = pv_ukernel_rounding();
+    conf.quantize_probs = quantize_probs();
 
     conf.require_stateless_addressing = has_large_buffers();
 
@@ -909,6 +940,24 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
 
     conf.key_scales_data_t = key_scales_dt();
     conf.value_scales_data_t = value_scales_dt();
+    conf.qry_scales_data_t = query_scales_dt();
+
+    // The Q descale is one value per (batch, head). Resolve the mask into
+    // plain element strides here so the kernel need not know the mask
+    conf.with_qry_scales = with_query_scales();
+    conf.qry_scale_per_head = false;
+    conf.qry_scale_batch_stride = 0;
+    if (with_query_scales()) {
+        const int q_scales_mask = desc()->q_scales.get_mask();
+        // Bit 1 selects a per-head scale, bit 0 a per-batch one.
+        if (q_scales_mask & 2) {
+            conf.qry_scale_per_head = true;
+            conf.qry_scale_batch_stride
+                    = static_cast<int>(desc()->num_q_heads());
+        } else if (q_scales_mask & 1) {
+            conf.qry_scale_batch_stride = 1;
+        }
+    }
 
     conf.key_zp_data_t = key_zp_dt();
     conf.value_zp_data_t = value_zp_dt();
@@ -991,7 +1040,7 @@ status_t micro_fwd_t::pd_t::init_conf(const impl::engine_t *engine) {
 
     conf.block_q = conf.block_a = conf.block_2d_a = false;
     if (d_full) {
-        conf.block_q = (ldq % 4 == 0);
+        conf.block_q = (ldq % 4 == 0) && (d_max_kq_padded() == d_max_kq());
         conf.block_a = (lda % 4 == 0 && v_full);
     } else if (arch() >= compute::gpu_arch_t::xe_hpc
             && config.unroll_m_vs < 64) {
@@ -1145,6 +1194,15 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     def_data_type(kernel_ctx, dst_data_t, "DST");
     def_data_type(kernel_ctx, msk_data_t, "MSK");
 
+    const bool any_hf8 = utils::one_of(
+            data_type::f8_e4m3, key_data_t, qry_data_t, val_data_t);
+    if (any_hf8) kernel_ctx.define_int("MATH_UTILS_DECLARE_HF8", 1);
+    kernel_ctx.define_int("QRY_SLM_FP8", q_slm_fp8);
+    kernel_ctx.define_int("VS_S_FP8", pv_fp8);
+    kernel_ctx.define_int("VS_S_QUANT", quantize_probs);
+    kernel_ctx.define_int("VS_S_UKERNEL_CVT", pv_ukernel_cvt);
+
+    def_data_type(kernel_ctx, qry_scales_data_t, "QRY_ATTR_SCALES");
     def_data_type(kernel_ctx, key_scales_data_t, "KEY_ATTR_SCALES");
     def_data_type(kernel_ctx, value_scales_data_t, "VAL_ATTR_SCALES");
 
@@ -1160,6 +1218,9 @@ status_t micro_fwd_params_t::get_kernel_ctx(
 
     kernel_ctx.define_int("TRANSPOSE_K", transpose_k);
 
+    kernel_ctx.define_int("QRY_SCALES", with_qry_scales);
+    kernel_ctx.define_int("QRY_SCALE_BATCH_STRIDE", qry_scale_batch_stride);
+    kernel_ctx.define_int("QRY_SCALE_PER_HEAD", qry_scale_per_head);
     kernel_ctx.define_int("KEY_SCALES", kq_scale_mask);
     kernel_ctx.define_int("VAL_SCALES", vs_scale_mask);
     kernel_ctx.define_int("KEY_ZERO_POINTS", kq_zp_mask);
@@ -1630,6 +1691,8 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     const auto &scale = CTX_IN_STORAGE(DNNL_ARG_SCALE);
     const auto &attn_mask = CTX_IN_STORAGE(DNNL_ARG_ATTN_MASK);
 
+    const auto &qry_scales
+            = CTX_IN_STORAGE(DNNL_ARG_ATTR_SCALES | DNNL_ARG_QUERIES);
     const auto &key_scales
             = CTX_IN_STORAGE(DNNL_ARG_KEYS | DNNL_ARG_ATTR_SCALES);
     const auto &key_zp
@@ -1638,6 +1701,25 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
             = CTX_IN_STORAGE(DNNL_ARG_VALUES | DNNL_ARG_ATTR_SCALES);
     const auto &value_zp
             = CTX_IN_STORAGE(DNNL_ARG_VALUES | DNNL_ARG_ATTR_ZERO_POINTS);
+
+    // The probabilities are rounded to e4m3 as e / s_q and rescaled by s_d.
+    // Without user scales, a power-of-two 256 rounds values >= 2^-6 like an
+    // unscaled cast while keeping small ones out of the subnormal range.
+    float probs_scale = 256.f, probs_descale = 1.f / 256.f;
+    if (pd()->with_probs_quant_scales()) {
+        const auto read_scalar = [&](int arg, float &value) {
+            const auto *storage = utils::downcast<
+                    const dnnl::impl::host_scalar_memory_storage_t *>(
+                    &CTX_IN_STORAGE(arg));
+            return storage->get_scalar_value(&value, sizeof(value));
+        };
+        float quant_scale, dequant_scale;
+        CHECK(read_scalar(
+                DNNL_ARG_ATTR_SCALES | DNNL_ARG_PROBABILITIES, quant_scale));
+        CHECK(read_scalar(DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dequant_scale));
+        probs_scale = 1.f / quant_scale;
+        probs_descale = dequant_scale;
+    }
 
     const int kv_group_size = pd()->conf.kv_group_size;
     const dim_t Q = pd()->desc()->queries();
@@ -1702,10 +1784,13 @@ status_t micro_fwd_t::execute_forward(const exec_ctx_t &ctx) const {
     arg_list.append((int)D_v);
     arg_list.append((int)K);
     arg_list.append((int)Q);
+    arg_list.append(qry_scales);
     arg_list.append(key_scales);
     arg_list.append(key_zp);
     arg_list.append(value_scales);
     arg_list.append(value_zp);
+    arg_list.append(probs_scale);
+    arg_list.append(probs_descale);
     arg_list.append(mask_type);
     if (pd()->with_attn_mask()) arg_list.append(attn_mask);
 

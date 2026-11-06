@@ -64,6 +64,7 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     data_type_t dst_data_t, key_data_t, qry_data_t, val_data_t, msk_data_t;
     data_type_t key_scales_data_t, value_scales_data_t;
     data_type_t key_zp_data_t, value_zp_data_t;
+    data_type_t qry_scales_data_t;
     int kv_group_size;
 
     int q_align, k_align, v_align, a_align;
@@ -75,6 +76,7 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
             val_zp_elements_per_byte;
 
     int key_group_size, val_group_size;
+    int qry_scale_batch_stride;
     data_type_t scale_data_t;
 
     int attn_mask_undef, attn_mask_buffer, attn_mask_top_left,
@@ -88,7 +90,8 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     bool block_q, block_a, block_2d_a;
     bool prefetch_mask, prefetch_k0, prefetch_k, prefetch_v, prefetch_remainder;
     bool remainder_q;
-    uint8_t padding2[5] = {0};
+    bool with_qry_scales, qry_scale_per_head;
+    uint8_t padding2[3] = {0};
     int prefetch_d_max;
     int prefetch_v_max;
 
@@ -99,7 +102,11 @@ struct micro_fwd_params_t : trivially_serializable_t<micro_fwd_params_t> {
     bool require_stateless_addressing;
     bool is_training;
     bool dropout, dropout_output_mask, dropout_offset, dropout_host_scalars;
-    uint8_t padding3[1] = {0};
+    bool q_slm_fp8;
+    bool pv_fp8;
+    bool quantize_probs;
+    bool pv_ukernel_cvt;
+    uint8_t padding3[5] = {0};
 
     micro_fwd_ukernel_params_t ukernel_config;
 };
@@ -213,40 +220,91 @@ struct micro_fwd_t : public primitive_t {
                 VDISPATCH_SDPA(desc()->attn_mask_md()->dims[mask_k_index]
                                 == desc()->keys(),
                         VERBOSE_INVALID_BROADCAST, "attn_mask", mask_k_index);
-                if (desc()->qry_md()->data_type == data_type::f32) {
-                    VDISPATCH_SDPA(desc()->attn_mask_md()->data_type
-                                    == desc()->qry_md()->data_type,
-                            "Mask data type(%s) should match Qry/Dst data "
-                            "type(%s).",
-                            dnnl_dt2str(desc()->attn_mask_md()->data_type),
-                            dnnl_dt2str(desc()->qry_md()->data_type));
+                if (desc()->qry_md()->data_type == f8_e4m3) {
+                    // an fp8 query still takes an xf16 mask, so the mask is
+                    // not required to match it
+                    VDISPATCH_SDPA(
+                            utils::one_of(desc()->attn_mask_md()->data_type,
+                                    data_type::f16, data_type::bf16,
+                                    data_type::f32),
+                            "Mask data type(%s) should be f16, bf16 or f32 "
+                            "when Qry is fp8.",
+                            dnnl_dt2str(desc()->attn_mask_md()->data_type));
                 } else {
                     VDISPATCH_SDPA((desc()->attn_mask_md()->data_type
                                            == desc()->qry_md()->data_type)
                                     || (desc()->attn_mask_md()->data_type
                                             == data_type::f32),
-                            "Mask data type(%s) should be xf16 or f32 when "
-                            "Qry/Dst(%s) is xf16.",
+                            "Mask data type(%s) should be f32 or match "
+                            "Qry/Dst data type(%s).",
                             dnnl_dt2str(desc()->attn_mask_md()->data_type),
                             dnnl_dt2str(desc()->qry_md()->data_type));
                 }
             }
+            const auto qry_dt = desc()->qry_md()->data_type;
+            const auto key_dt = desc()->key_md()->data_type;
+            const auto val_dt = desc()->val_md()->data_type;
+            const bool is_fp8_qry = (qry_dt == f8_e4m3);
+
+            VDISPATCH_SDPA((utils::everyone_is(
+                                    data_type::f16, qry_dt, dst_md()->data_type)
+                                   || utils::everyone_is(data_type::bf16,
+                                           qry_dt, dst_md()->data_type)
+                                   || utils::everyone_is(data_type::f32, qry_dt,
+                                           dst_md()->data_type)
+                                   || (is_fp8_qry
+                                           && utils::one_of(dst_md()->data_type,
+                                                   f16, bf16))),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SDPA(utils::one_of(key_dt, f32, bf16, f16, u8, s8, u4, s4,
+                                   f8_e4m3),
+                    VERBOSE_UNSUPPORTED_DT);
+            VDISPATCH_SDPA(utils::one_of(val_dt, f32, bf16, f16, u8, s8, u4, s4,
+                                   f8_e4m3),
+                    VERBOSE_UNSUPPORTED_DT);
+
+            const bool with_fp8
+                    = utils::one_of(f8_e4m3, qry_dt, key_dt, val_dt);
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8, key_dt == val_dt),
+                    "K(%s) and V(%s) data types must match when either is fp8",
+                    dnnl_dt2str(key_dt), dnnl_dt2str(val_dt));
+
+            VDISPATCH_SDPA(IMPLICATION(is_fp8_qry, key_dt == f8_e4m3),
+                    "an fp8 query(%s) requires fp8 K(%s) and V(%s)",
+                    dnnl_dt2str(qry_dt), dnnl_dt2str(key_dt),
+                    dnnl_dt2str(val_dt));
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8, use_systolic_ukernel_),
+                    "fp8 requires the systolic microkernel path");
+
+            const bool with_probs_quant
+                    = with_probs_quant_scales() || with_probs_dequant_scales();
+
+            VDISPATCH_SDPA(IMPLICATION(with_probs_quant,
+                                   with_probs_quant_scales()
+                                           && with_probs_dequant_scales()),
+                    "softmax output quantization needs both scales");
+
+            VDISPATCH_SDPA(IMPLICATION(with_probs_quant, quantize_probs()),
+                    "softmax output quantization requires fp8 Q and V");
+            VDISPATCH_SDPA(IMPLICATION(with_probs_quant,
+                                   desc()->probs_quant_scales.is_host_scalar()
+                                           && desc()->probs_dequant_scales
+                                                      .is_host_scalar()),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
+            VDISPATCH_SDPA(IMPLICATION(with_fp8,
+                                   desc()->kq_zero_points.has_default_values()
+                                           && desc()->vs_zero_points
+                                                      .has_default_values()),
+                    "zero points are not supported with fp8");
+
             VDISPATCH_SDPA(
-                    (utils::everyone_is(data_type::f16,
-                             desc()->qry_md()->data_type, dst_md()->data_type)
-                            || utils::everyone_is(data_type::bf16,
-                                    desc()->qry_md()->data_type,
-                                    dst_md()->data_type)
-                            || utils::everyone_is(data_type::f32,
-                                    desc()->qry_md()->data_type,
-                                    dst_md()->data_type)),
-                    VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_SDPA(utils::one_of(desc()->key_md()->data_type, f32, bf16,
-                                   f16, u8, s8, u4, s4),
-                    VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_SDPA(utils::one_of(desc()->val_md()->data_type, f32, bf16,
-                                   f16, u8, s8, u4, s4),
-                    VERBOSE_UNSUPPORTED_DT);
+                    IMPLICATION(with_fp8,
+                            desc()->prop_kind == prop_kind::forward_inference),
+                    "fp8 is not supported for training");
+
             VDISPATCH_SDPA(set_default_formats() == status::success,
                     VERBOSE_UNSUPPORTED_TAG);
 
@@ -286,6 +344,22 @@ struct micro_fwd_t : public primitive_t {
                     "KQ accumulation data type should be f16 or f32");
             VDISPATCH_SDPA(utils::one_of(vs_acc_dt(), f16, f32),
                     "VS accumulation data type should be f16 or f32");
+
+            if (with_query_scales()) {
+                const int q_scales_mask = desc()->q_scales.get_mask();
+                VDISPATCH_SDPA(utils::one_of(q_scales_mask, 0, 1, 3),
+                        "unsupported mask for query scales(%d). must be 0, 1, "
+                        "or 3",
+                        q_scales_mask);
+                VDISPATCH_SDPA(desc()->q_scales.has_default_groups(),
+                        "grouped query scales are not supported");
+
+                VDISPATCH_SDPA(!((q_scales_mask & 2) && desc()->queries() == 1
+                                       && desc()->num_q_heads()
+                                               != desc()->num_kv_heads()),
+                        "per-head query scales are not supported for GQA with "
+                        "a single query");
+            }
 
             int kq_scales_mask = desc()->kq_scales.get_mask();
             int kq_zp_mask = desc()->kq_zero_points.get_mask();
@@ -392,6 +466,34 @@ struct micro_fwd_t : public primitive_t {
         int sg_size() const { return sg_size_; }
         bool use_systolic_ukernel() const { return use_systolic_ukernel_; }
 
+        bool q_slm_fp8() const {
+            return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
+                    && desc()->qry_md()->data_type == data_type::f8_e4m3;
+        }
+
+        bool pv_fp8_capable() const {
+            return use_systolic_ukernel_ && arch_ >= compute::gpu_arch_t::xe3p
+                    && desc()->qry_md()->data_type == data_type::f8_e4m3
+                    && desc()->val_md()->data_type == data_type::f8_e4m3;
+        }
+
+        bool pv_ukernel_rounding() const { return pv_ukernel_rounding_; }
+
+        bool quantize_probs() const {
+            return use_systolic_ukernel_
+                    && desc()->qry_md()->data_type == data_type::f8_e4m3
+                    && desc()->val_md()->data_type == data_type::f8_e4m3;
+        }
+
+        bool pv_fp8() const {
+            return pv_fp8_capable() && !pv_ukernel_rounding_;
+        }
+
+        int d_max_kq_padded() const {
+            const int crosspack = q_slm_fp8() ? 4 : 2;
+            return std::max(d_max_kq(), crosspack * sg_size_);
+        }
+
         // Block size for the Q/K head dim, baked into the kernel.
         int d_max_kq() const {
             int head_size = into<int>(desc()->head_size());
@@ -415,6 +517,7 @@ struct micro_fwd_t : public primitive_t {
     private:
         int sg_size_ = 0;
         bool use_systolic_ukernel_ = true;
+        bool pv_ukernel_rounding_ = false;
         compute::gpu_arch_t arch_ = compute::gpu_arch_t::unknown;
 
         status_t init_conf_microkernels(const impl::engine_t *engine);

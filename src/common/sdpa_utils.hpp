@@ -194,7 +194,22 @@ static inline status_t sdpa_attr_check(const memory_desc_t *q_desc,
     if (kq_attr && !kq_attr->has_default_values()) {
         const auto &sc = kq_attr->scales_;
         const auto &zp = kq_attr->zero_points_;
-        if (!sc.has_default_values()) {
+        // Scales under DNNL_ARG_SRC dequantize Q; those under DNNL_ARG_WEIGHTS
+        // dequantize K. Both ride in on the KQ attribute
+        if (!sc.has_default_values(DNNL_ARG_SRC)) {
+            const auto &scale_dt = sc.get_data_type(DNNL_ARG_SRC);
+            VCHECK_SDPA_ATTR_TYPE(utils::one_of(scale_dt, f16, bf16, f32),
+                    kq_attr, "scales", "f16, bf16, or f32");
+
+            // By default, host scalar scales are not supported for GPU
+            // as the value should be accessed differently in the kernel
+            VCHECK_SDPA_UNIMPL(IMPLICATION(engine->kind() == engine_kind::gpu,
+                                       !sc.get(DNNL_ARG_SRC).is_host_scalar()),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+        }
+        VCHECK_SDPA_UNIMPL(zp.has_default_values(DNNL_ARG_SRC),
+                "zero points are not supported for the Q tensor");
+        if (!sc.has_default_values(DNNL_ARG_WEIGHTS)) {
             const auto &scale_dt = sc.get_data_type(DNNL_ARG_WEIGHTS);
             VCHECK_SDPA_ATTR_TYPE(utils::one_of(scale_dt, f16, bf16, f32),
                     kq_attr, "scales", "f16, bf16, or f32");
@@ -211,14 +226,23 @@ static inline status_t sdpa_attr_check(const memory_desc_t *q_desc,
         const auto &zp = vs_attr->zero_points_;
 
         if (!sc.has_default_values()) {
+            const bool with_probs_quant = !sc.has_default_values(DNNL_ARG_SRC);
+            const bool with_probs_dequant
+                    = !sc.has_default_values(DNNL_ARG_DST);
+            VCHECK_SDPA_UNIMPL(
+                    IMPLICATION(with_probs_quant || with_probs_dequant,
+                            with_probs_quant && with_probs_dequant),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+
             const auto &scale_dt = sc.get_data_type(DNNL_ARG_WEIGHTS);
             VCHECK_SDPA_ATTR_TYPE(utils::one_of(scale_dt, f16, bf16, f32),
                     vs_attr, "scales", "f16, bf16, or f32");
 
             // By default, host scalar scales are not supported for GPU
             // as the value should be accessed differently in the kernel
-            VCHECK_SDPA_UNIMPL(IMPLICATION(engine->kind() == engine_kind::gpu,
-                                       !sc.has_host_scalars()),
+            VCHECK_SDPA_UNIMPL(
+                    IMPLICATION(engine->kind() == engine_kind::gpu,
+                            !sc.get(DNNL_ARG_WEIGHTS).is_host_scalar()),
                     VERBOSE_UNSUPPORTED_SCALES_CFG);
         }
         if (!zp.has_default_values()) {
@@ -231,6 +255,18 @@ static inline status_t sdpa_attr_check(const memory_desc_t *q_desc,
             VCHECK_SDPA_UNIMPL(IMPLICATION(engine->kind() == engine_kind::gpu,
                                        !zp.has_host_scalars()),
                     VERBOSE_UNSUPPORTED_ZP_CFG);
+        }
+
+        // Softmax output quantization only supports a single f32 scale
+        for (int arg : {DNNL_ARG_SRC, DNNL_ARG_DST}) {
+            if (sc.has_default_values(arg)) continue;
+            VCHECK_SDPA_ATTR_TYPE(
+                    sc.get_data_type(arg) == f32, vs_attr, "scales", "f32");
+            VCHECK_SDPA_UNIMPL(
+                    sc.get_mask(arg) == 0, VERBOSE_UNSUPPORTED_SCALES_CFG);
+            VCHECK_SDPA_UNIMPL(IMPLICATION(engine->kind() == engine_kind::gpu,
+                                       sc.get(arg).is_host_scalar()),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
         }
     }
 
@@ -284,6 +320,9 @@ static inline sdpa_desc_t create_sdpa_desc(const memory_desc_t *q_md,
     sdpa_desc.kq_acc_dt = data_type::f32;
     sdpa_desc.vs_acc_dt = data_type::f32;
     if (kq_attr) {
+        // Q and K dequantization both arrive on the KQ attribute, keyed by
+        // DNNL_ARG_SRC and DNNL_ARG_WEIGHTS respectively
+        sdpa_desc.q_scales = kq_attr->scales_.get(DNNL_ARG_SRC);
         sdpa_desc.kq_scales = kq_attr->scales_.get(DNNL_ARG_WEIGHTS);
         sdpa_desc.kq_zero_points = kq_attr->zero_points_.get(DNNL_ARG_WEIGHTS);
         if (kq_attr->acc_mode_ == accumulation_mode::f16) {
@@ -293,6 +332,9 @@ static inline sdpa_desc_t create_sdpa_desc(const memory_desc_t *q_md,
     if (vs_attr) {
         sdpa_desc.vs_scales = vs_attr->scales_.get(DNNL_ARG_WEIGHTS);
         sdpa_desc.vs_zero_points = vs_attr->zero_points_.get(DNNL_ARG_WEIGHTS);
+        // Softmax output is the VS matmul source, so its scales key on src/dst
+        sdpa_desc.probs_quant_scales = vs_attr->scales_.get(DNNL_ARG_SRC);
+        sdpa_desc.probs_dequant_scales = vs_attr->scales_.get(DNNL_ARG_DST);
         if (vs_attr->acc_mode_ == accumulation_mode::f16) {
             sdpa_desc.vs_acc_dt = data_type::f16;
         }

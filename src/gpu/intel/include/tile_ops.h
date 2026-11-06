@@ -426,14 +426,16 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
         } \
     } while (0)
 
-#define tile_copy_to_vec2_cvt(t, t_new, type, cvt) \
+#define tile_copy_to_vec_cvt(t, t_new, type, cvt, n) \
     do { \
         _Pragma("unroll") for (int i = 0; i < sizeof(t.x) / sizeof(t.x[0]); \
                                i++) { \
-            _Pragma("unroll") for (int s = 0; \
-                                   s < sizeof(t.x[0]) / sizeof(t.x[0][0]) / 2; \
+            _Pragma("unroll") for (int s = 0; s \
+                                   < sizeof(t.x[0]) / sizeof(t.x[0][0]) / (n); \
                                    s++) { \
-                type v = {cvt(t.x[i][2 * s]), cvt(t.x[i][2 * s + 1])}; \
+                type v; \
+                _Pragma("unroll") for (int e = 0; e < (n); e++) v[e] \
+                        = cvt(t.x[i][(n) * s + e]); \
                 t_new.x[i][s] = as_uint(v); \
             } \
         } \
@@ -985,8 +987,7 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
     } \
     __attribute__((overloadable)) void tile_store_t_sys_src2(tile_type t, \
             local element_type *ptr, int tile_n, int ld, int offset_r, \
-            int offset_c) { \
-        const int cp = 32 / sizeof(element_type); \
+            int offset_c, int cp) { \
         offset_c += get_sub_group_local_id(); \
         int offset_r0 = offset_r & (cp - 1); \
         int offset_r1 = offset_r & ~(cp - 1); \
@@ -1002,6 +1003,12 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
                 if ((~i & (cp - 1)) == 0) ptr_j += cp * (tile_n - 1); \
             } \
         } \
+    } \
+    __attribute__((overloadable)) void tile_store_t_sys_src2(tile_type t, \
+            local element_type *ptr, int tile_n, int ld, int offset_r, \
+            int offset_c) { \
+        tile_store_t_sys_src2(t, ptr, tile_n, ld, offset_r, offset_c, \
+                32 / sizeof(element_type)); \
     } \
     __attribute__((overloadable)) void tile_load_t_sys_src2(tile_type *t, \
             local element_type *ptr, int tile_n, int ld, int offset_r, \
@@ -1362,28 +1369,30 @@ __attribute__((enable_if(sg == 16, "wrong subgroup size"))) {
         tile_store_block2d(t, ptr, m, n, m, offset_r, offset_c); \
     }
 
-#define DECLARE_2D_TILE_LOAD_PACKED_VEC( \
-        tile_type, element_type, vec_type, sg, br, bc, nbr, nbc) \
-    __attribute__((overloadable)) void tile_load_packed_vec2(tile_type *t, \
+#define DECLARE_2D_TILE_LOAD_PACKED_VEC(tile_type, element_type, vec_type, \
+        pack_as, vlen, sg, br, bc, nbr, nbc) \
+    __attribute__((overloadable)) void tile_load_packed_vec(tile_type *t, \
             const global element_type *ptr, int m, int n, int ld, \
             int offset_r, int offset_c) { \
         ptr += (off_t)ld * offset_c + offset_r; \
         _Pragma("unroll") for (int j = 0; j < bc * nbc; j++, ptr += ld) { \
             if (offset_c + j < n) { \
                 _Pragma("unroll") for (int i0 = 0; i0 < br * nbr; i0 += sg) { \
-                    int i = 2 * (i0 + get_sub_group_local_id()); \
+                    int i = (vlen) * (i0 + get_sub_group_local_id()); \
                     vec_type loaded = 0; \
-                    if (offset_r + i < m) loaded.s0 = ptr[i]; \
-                    if (offset_r + i + 1 < m) loaded.s1 = ptr[i + 1]; \
-                    tile_access(*t, i0, j, sg, br, bc, nbr) = as_uint(loaded); \
+                    _Pragma("unroll") for (int e = 0; e < (vlen); \
+                                           e++) if (offset_r + i + e < m) \
+                            loaded[e] \
+                            = ptr[i + e]; \
+                    tile_access(*t, i0, j, sg, br, bc, nbr) = pack_as(loaded); \
                 } \
             } \
         } \
     } \
-    __attribute__((overloadable)) void tile_load_packed_vec2(tile_type *t, \
+    __attribute__((overloadable)) void tile_load_packed_vec(tile_type *t, \
             const global element_type *ptr, int m, int n, int offset_r, \
             int offset_c) { \
-        tile_load_packed_vec2(t, ptr, m, n, m, offset_r, offset_c); \
+        tile_load_packed_vec(t, ptr, m, n, m, offset_r, offset_c); \
     }
 
 #define cooperative_prefetch_2d(ptr, r, c, ld, sg_id, n_sg, sg_size, caching) \

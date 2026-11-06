@@ -250,8 +250,8 @@ int ref_primitive_t::execute_prim(res_t *res) const {
     return OK;
 }
 
-void ref_primitive_t::check_correctness(
-        const args_t &args, bool has_eltwise, bool has_nans, res_t *res) const {
+void ref_primitive_t::check_correctness(const args_t &args, bool has_eltwise,
+        bool has_nans, res_t *res, float p2p_threshold) const {
 
     static const std::unordered_map<size_t, data_kind_t>
             dnnl_arg_2_data_kind_map {
@@ -299,6 +299,8 @@ void ref_primitive_t::check_correctness(
         // `cmp` object has internal knowledge on when this check must be
         // enabled.
         cmp.set_allow_norm_check(true);
+        // Partition-level override, e.g. for rounding inside a fusion
+        if (p2p_threshold > 0.f) cmp.set_threshold(p2p_threshold);
         // TODO: there's an open question with how to determine the threshold
         // and what the criteria to use. Unless a partition says it is some
         // complex fusion (such as SDP) with a specific data type, setting such

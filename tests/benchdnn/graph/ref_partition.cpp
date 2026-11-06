@@ -367,6 +367,24 @@ int ref_partition_t::check_partition_correctness(
     bool mistrusted = false, has_eltwise = false, output_has_nans = false;
     const auto &map_kind_to_alg = eltwise::get_eltwise_kind_map();
 
+    // Fused SDPA rounds P before normalizing, the reference after: allow one
+    // e4m3 rounding on each side.
+    bool has_f8_probs_quant = false;
+    for (const auto &op : partition_ops_ref_) {
+        const auto &aop = op.get();
+        if (aop.kind_ != "Quantize" && aop.kind_ != "DynamicQuantize") continue;
+        const auto out_dt = aop.out_lts_[0].get_data_type();
+        if (out_dt != logical_tensor::data_type::f8_e4m3
+                && out_dt != logical_tensor::data_type::f8_e5m2)
+            continue;
+        const auto *parent_op = get_parent_op(aop.in_lts_[0].id_);
+        if (parent_op && parent_op->kind_ == "SoftMax") {
+            has_f8_probs_quant = true;
+            break;
+        }
+    }
+    const float p2p_threshold = has_f8_probs_quant ? 2 * 0.0625f : 0.f;
+
     for (const auto &op : partition_ops_ref_) {
         size_t op_id = op.get().id_;
         const auto &op_kind = op.get().kind_;
@@ -432,7 +450,7 @@ int ref_partition_t::check_partition_correctness(
         // The graph driver allows nans from the branch of Sqrt, but for the
         // other branch, the driver should not tolerate that.
         ref_prim->check_correctness(
-                output_args, has_eltwise, output_has_nans, res);
+                output_args, has_eltwise, output_has_nans, res, p2p_threshold);
         if (res->state == FAILED) {
             if (is_nvidia_gpu()) {
                 res->state = SKIPPED;

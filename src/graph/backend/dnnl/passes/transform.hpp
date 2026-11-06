@@ -231,6 +231,8 @@ status_t convert_to_runtime_src_scales(std::shared_ptr<subgraph_t> &sg);
 
 status_t fuse_src_scales(std::shared_ptr<subgraph_t> &sg);
 
+status_t fuse_src_scales_sdpa(std::shared_ptr<subgraph_t> &sg);
+
 status_t convert_to_runtime_dst_scales(std::shared_ptr<subgraph_t> &sg);
 
 status_t fuse_dst_scales(std::shared_ptr<subgraph_t> &sg);
