@@ -53,7 +53,7 @@ struct ref_matmul_int8_t : public primitive_t {
                     is_dense_format_kind(), VERBOSE_UNSUPPORTED_SPARSE_CFG);
             VDISPATCH_MATMUL(
                     utils::one_of(src_type, s8, u8), VERBOSE_UNSUPPORTED_DT);
-            VDISPATCH_MATMUL(utils::one_of(wei_type, s8, u8, s4, u4, u3),
+            VDISPATCH_MATMUL(utils::one_of(wei_type, s8, u8, s4, u4, u2, u3),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_MATMUL(IMPLICATION(with_bias(),
                                      utils::one_of(bia_type, f32, bf16, f16,
