@@ -495,7 +495,8 @@ inline uint32_t philox4x32(uint64_t idx, uint64_t seed, uint64_t offset) {
         key[0] += PHILOX_W4x32_0;
         key[1] += PHILOX_W4x32_1;
     };
-    constexpr int nrounds = 10;
+    // 7 rounds, must match src/gpu/intel/include/philox.h.
+    constexpr int nrounds = 7;
     for (int i = 0; i < (nrounds - 1); ++i) {
         philox4x32round();
         philox4x32bumpkey();

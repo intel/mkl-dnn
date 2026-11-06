@@ -20,25 +20,41 @@
 #define DT_UNDEF 1
 #include "gpu/intel/include/types.h"
 
-uint4 philox_4x32_vec4_w_offset(ulong idx, ulong seed, ulong offset) {
-#define PHILOX_4UINT_ROUND(mul, ctr, key) \
-    as_uint4(convert_ulong2(ctr.s02) * mul).s3210 \
-            ^ (uint4)(ctr.s1 ^ key.s0, 0, ctr.s3 ^ key.s1, 0)
+/* 7-round Philox-4x32 (not the standard 10 rounds);
+   keep in sync with philox4x32() in src/common/math_utils.hpp. */
 
-    ulong x = (idx & ~3L);
-    uint4 ctr = (uint4)((uint)offset, (uint)(offset >> 32), (uint)x,
-            (uint)(x >> 32));
+/* Key schedule depends only on seed: compute once, then use *_w_keys(). */
+typedef struct {
+    uint16 key0;
+    uint4 key1;
+} philox_key_schedule_t;
+
+philox_key_schedule_t philox_4x32_key_schedule(ulong seed) {
     uint seed_lo = (uint)seed;
     uint seed_hi = (uint)(seed >> 32);
     const ulong seeds = as_ulong((uint2)(seed_lo, seed_hi));
-
-    const ulong2 PHILOX_M4x32 = (ulong2)(0xD2511F53uL, 0xCD9E8D57uL);
     const ulong PHILOX_W4x32 = as_ulong((uint2)(0x9E3779B9u, 0xBB67AE85u));
-    const uint16 key0 = as_uint16((ulong8)(seeds))
+    philox_key_schedule_t ks;
+    ks.key0 = as_uint16((ulong8)(seeds))
             + as_uint16((ulong8)(PHILOX_W4x32))
                     * (uint16)(0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7);
-    const uint4 key1 = as_uint4((ulong2)seeds)
+    ks.key1 = as_uint4((ulong2)seeds)
             + as_uint4((ulong2)(PHILOX_W4x32)) * (uint4)(8, 8, 9, 9);
+    return ks;
+}
+
+/* No native 64-bit multiply: use 32-bit mul + mul_hi for each product. */
+#define PHILOX_4UINT_ROUND(mul, ctr, key) \
+    ({ \
+        uint lo0 = ctr.s0 * mul.s0; \
+        uint hi0 = mul_hi(ctr.s0, mul.s0); \
+        uint lo1 = ctr.s2 * mul.s1; \
+        uint hi1 = mul_hi(ctr.s2, mul.s1); \
+        (uint4)(hi1 ^ ctr.s1 ^ key.s0, lo1, hi0 ^ ctr.s3 ^ key.s1, lo0); \
+    })
+
+uint4 philox_4x32_vec4_ctr_w_keys(uint4 ctr, uint16 key0, uint4 key1) {
+    const uint2 PHILOX_M4x32 = (uint2)(0xD2511F53u, 0xCD9E8D57u);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s01);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s23);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s45);
@@ -46,10 +62,88 @@ uint4 philox_4x32_vec4_w_offset(ulong idx, ulong seed, ulong offset) {
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.s89);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.sAB);
     ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.sCD);
-    ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key0.sEF);
-    ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key1.s01);
-    ctr = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctr, key1.s23);
     return ctr;
+}
+
+/* Two independent vec4 chains per call, for ILP. */
+uint8 philox_4x32_vec4x2_ctr_w_keys(
+        uint4 ctrA, uint4 ctrB, uint16 key0, uint4 key1) {
+    const uint2 PHILOX_M4x32 = (uint2)(0xD2511F53u, 0xCD9E8D57u);
+
+#define PHILOX_4UINT_ROUND_X2(key) \
+    do { \
+        ctrA = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctrA, (key)); \
+        ctrB = PHILOX_4UINT_ROUND(PHILOX_M4x32, ctrB, (key)); \
+    } while (0)
+
+    PHILOX_4UINT_ROUND_X2(key0.s01);
+    PHILOX_4UINT_ROUND_X2(key0.s23);
+    PHILOX_4UINT_ROUND_X2(key0.s45);
+    PHILOX_4UINT_ROUND_X2(key0.s67);
+    PHILOX_4UINT_ROUND_X2(key0.s89);
+    PHILOX_4UINT_ROUND_X2(key0.sAB);
+    PHILOX_4UINT_ROUND_X2(key0.sCD);
+#undef PHILOX_4UINT_ROUND_X2
+    return (uint8)(ctrA, ctrB);
+}
+
+uint4 philox_4x32_ctr_w_offset(ulong idx, ulong offset) {
+    ulong x = (idx & ~3L);
+    return (uint4)((uint)offset, (uint)(offset >> 32), (uint)x,
+            (uint)(x >> 32));
+}
+
+uint4 philox_4x32_vec4_w_keys(
+        ulong idx, ulong offset, uint16 key0, uint4 key1) {
+    return philox_4x32_vec4_ctr_w_keys(
+            philox_4x32_ctr_w_offset(idx, offset), key0, key1);
+}
+
+uint4 philox_4x32_vec4_w_offset(ulong idx, ulong seed, ulong offset) {
+    philox_key_schedule_t ks = philox_4x32_key_schedule(seed);
+    return philox_4x32_vec4_w_keys(idx, offset, ks.key0, ks.key1);
+}
+
+uint8 philox_4x32_vec4x2_w_keys(
+        ulong idx, ulong offset, uint16 key0, uint4 key1) {
+    ulong x0 = (idx & ~3L);
+    return philox_4x32_vec4x2_ctr_w_keys(philox_4x32_ctr_w_offset(x0, offset),
+            philox_4x32_ctr_w_offset(x0 + 4, offset), key0, key1);
+}
+
+/* Legacy (no offset) generator, as in philox_4x32(): the counter comes from a
+   32-bit idx alone and every index of a group of four gets word 2. */
+ulong philox_4x32_legacy_seed(long seed) {
+    return ((ulong)(uint)seed << 32) + (uint)seed;
+}
+
+uint4 philox_4x32_ctr_legacy(uint idx) {
+    uint x = idx & ~3u;
+    return (uint4)(x, x + 1, x, x + 3);
+}
+
+/* Group of four for either generator, selected by use_offset (uniform). */
+uint4 philox_4x32_vec4_dropout(
+        ulong idx, ulong offset, int use_offset, uint16 key0, uint4 key1) {
+    uint4 ctr = use_offset ? philox_4x32_ctr_w_offset(idx, offset)
+                           : philox_4x32_ctr_legacy((uint)idx);
+    uint4 r = philox_4x32_vec4_ctr_w_keys(ctr, key0, key1);
+    return use_offset ? r : (uint4)(r.s2);
+}
+
+uint8 philox_4x32_vec4x2_dropout(
+        ulong idx, ulong offset, int use_offset, uint16 key0, uint4 key1) {
+    uint4 cA = use_offset ? philox_4x32_ctr_w_offset(idx, offset)
+                          : philox_4x32_ctr_legacy((uint)idx);
+    uint4 cB = use_offset ? philox_4x32_ctr_w_offset(idx + 4, offset)
+                          : philox_4x32_ctr_legacy((uint)idx + 4);
+    uint8 r = philox_4x32_vec4x2_ctr_w_keys(cA, cB, key0, key1);
+    return use_offset ? r : (uint8)((uint4)(r.s2), (uint4)(r.s6));
+}
+
+uint8 philox_4x32_vec4x2_w_offset(ulong idx, ulong seed, ulong offset) {
+    philox_key_schedule_t ks = philox_4x32_key_schedule(seed);
+    return philox_4x32_vec4x2_w_keys(idx, offset, ks.key0, ks.key1);
 }
 
 uint philox_4x32_w_offset(long idx, long seed, long offset) {
