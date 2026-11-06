@@ -1,0 +1,40 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+# f16 accumulation coverage. micro.cpp only takes f16 accumulation on the FMA
+# kernel, so sweep this on parts without systolic arrays (xe_lpg); elsewhere
+# these fall back to another implementation. The --sdpa driver cannot request
+# an accumulation mode, so the lines run the in-tree graph case with the
+# matmuls' accumulation_mode overridden: op 0 is KQ, op 4 is VS.
+# Tensor ids: 1 Q [B,H,Q,D]  2 K [B,H,K,D] (head dimension contiguous)
+#   3 V [B,H,K,D]  4 scale  5 mask [1,1,Q,K]
+
+# f16 accumulation in both matmuls
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:1x32x1x128+2:1x32x1024x128+3:1x32x1024x128+5:1x1x1x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:1x32x1x128+2:1x32x4096x128+3:1x32x4096x128+5:1x1x1x4096 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:1x8x1x64+2:1x8x1500x64+3:1x8x1500x64+5:1x1x1x1500 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:2x10x1024x64+2:2x10x1024x64+3:2x10x1024x64+5:1x1x1024x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:2x5x4096x64+2:2x5x77x64+3:2x5x77x64+5:1x1x4096x77 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:2x8x1024x80+2:2x8x1024x80+3:2x8x1024x80+5:1x1x1024x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:1x32x1024x128+2:1x32x1024x128+3:1x32x1024x128+5:1x1x1024x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:1x16x1024x256+2:1x16x1024x256+3:1x16x1024x256+5:1x1x1024x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16+4:accumulation_mode:f16 --in-shapes=1:1x32x32x128+2:1x32x32x128+3:1x32x32x128+5:1x1x32x32 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+
+# f16 accumulation in one matmul only (separate key fields)
+graph="--reset --op-attrs=0:accumulation_mode:f16 --in-shapes=1:1x32x1x128+2:1x32x1024x128+3:1x32x1024x128+5:1x1x1x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=0:accumulation_mode:f16 --in-shapes=1:2x10x1024x64+2:2x10x1024x64+3:2x10x1024x64+5:1x1x1024x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=4:accumulation_mode:f16 --in-shapes=1:1x32x1x128+2:1x32x1024x128+3:1x32x1024x128+5:1x1x1x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"
+graph="--reset --op-attrs=4:accumulation_mode:f16 --in-shapes=1:2x10x1024x64+2:2x10x1024x64+3:2x10x1024x64+5:1x1x1024x1024 --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json"

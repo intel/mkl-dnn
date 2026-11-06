@@ -1,0 +1,83 @@
+# *******************************************************************************
+# Copyright 2026 Intel Corporation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# *******************************************************************************
+# SDPA KPI coverage for the forward tuner. One line per distinct selector
+# key; the KPI list repeats shapes across head counts and precisions, those
+# collapse onto the same table entry. K is stored [B,H,D,K] in the KPIs,
+# which is the --sdpa driver's default K layout. K=77 rows are 154 bytes,
+# so those shapes get a separate alignment class in the key.
+
+# Stable Diffusion 1.5 UNet, batch 2: self-attention and cross-attention
+# against the 77-token text encoder
+b=2 h=20 q=64 k=64 d=64 dt=f16
+b=2 h=20 q=64 k=77 d=64 dt=f16
+b=2 h=20 q=256 k=256 d=64 dt=f16
+b=2 h=20 q=256 k=77 d=64 dt=f16
+b=2 h=10 q=1024 k=1024 d=64 dt=f16
+b=2 h=10 q=1024 k=77 d=64 dt=f16
+b=2 h=5 q=4096 k=4096 d=64 dt=f16
+b=2 h=5 q=4096 k=77 d=64 dt=f16
+b=2 h=16 q=77 k=77 d=64 dt=f16
+
+# SDXL-style heads of 40, 80 and 160
+b=1 h=8 q=4096 k=4096 d=40 dt=f16
+b=1 h=8 q=4096 k=77 d=40 dt=f16
+b=2 h=8 q=1024 k=1024 d=80 dt=f16
+b=2 h=8 q=1024 k=77 d=80 dt=f16
+b=2 h=8 q=256 k=256 d=160 dt=f16
+b=2 h=8 q=256 k=77 d=160 dt=f16
+b=1 h=8 q=64 k=64 d=160 dt=f16
+b=1 h=8 q=64 k=77 d=160 dt=f16
+
+# LLM prefill and decode with an explicit [1,1,Q,K] mask, head sizes 64 to
+# 256 (decode masks are [1,1,1,K], which is buffer_1d)
+b=1 h=32 q=1024 k=1024 d=128 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=32 q=1 k=1025 d=128 dt=f16 mask=buffer_1d mdt=f16
+b=1 h=32 q=1025 k=1025 d=128 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=32 q=32 k=32 d=128 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=32 q=1 k=33 d=128 dt=f16 mask=buffer_1d mdt=f16
+b=1 h=28 q=1024 k=1024 d=128 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=32 q=1024 k=1024 d=80 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=32 q=1 k=1025 d=80 dt=f16 mask=buffer_1d mdt=f16
+b=1 h=32 q=1024 k=1024 d=96 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=32 q=1 k=1025 d=96 dt=f16 mask=buffer_1d mdt=f16
+b=1 h=24 q=1024 k=1024 d=64 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=24 q=1 k=1025 d=64 dt=f16 mask=buffer_1d mdt=f16
+b=1 h=16 q=1024 k=1024 d=256 dt=f16 mask=buffer_2d mdt=f16
+b=1 h=16 q=1 k=1025 d=256 dt=f16 mask=buffer_1d mdt=f16
+b=1 h=16 q=33 k=33 d=256 dt=f16 mask=buffer_2d mdt=f16
+
+# Whisper-style encoder and decoder, 8 heads of 64
+b=1 h=8 q=1500 k=1500 d=64 dt=f16
+b=1 h=8 q=1 k=1500 d=64 dt=f16
+b=1 h=8 q=3 k=1500 d=64 dt=f16
+b=1 h=8 q=1 k=83 d=64 dt=f16
+b=1 h=8 q=1 k=1333 d=64 dt=f16
+b=1 h=24 q=1178 k=1178 d=64 dt=f16
+
+# int8 K/V with per-token scales and zero points: these need the graph
+# driver. Run one of them with --all first; int8 operands have not been
+# swept on any part yet, so the tiler's limits for them are unverified.
+# Replace KPI_DIR with the directory holding the sdpa-*.json cases.
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x64x1+600:group_shape:1x1x1x64 --in-shapes=0:2x5x64x4096*abcd+1:2x5x1x4096+2:2x5x1x4096+3:2x5x4096x64*abcd+6:2x5x4096x64*abcd+7:2x5x4096x1+8:2x5x4096x1 --case=KPI_DIR/sdpa-dqk-scl-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x64x1+600:group_shape:1x1x1x64 --in-shapes=0:2x20x64x77*abcd+1:2x20x1x77+2:2x20x1x77+3:2x20x256x64*abcd+6:2x20x77x64*abcd+7:2x20x77x1+8:2x20x77x1 --case=KPI_DIR/sdpa-dqk-scl-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x40x1+600:group_shape:1x1x1x40 --in-shapes=0:1x8x40x4096*abcd+1:1x8x1x4096+2:1x8x1x4096+3:1x8x4096x40*abcd+6:1x8x4096x40*abcd+7:1x8x4096x1+8:1x8x4096x1 --case=KPI_DIR/sdpa-dqk-scl-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x80x1+600:group_shape:1x1x1x80 --in-shapes=0:2x8x80x77*abcd+1:2x8x1x77+2:2x8x1x77+3:2x8x1024x80*abcd+6:2x8x77x80*abcd+7:2x8x77x1+8:2x8x77x1 --case=KPI_DIR/sdpa-dqk-scl-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+5:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x128x1+600:group_shape:1x1x1x128 --in-shapes=0:1x32x128x1024*abcd+1:1x32x1x1024+2:1x32x1x1024+3:1x32x1024x128*abcd+5:1x1x1024x1024+6:1x32x1024x128*abcd+7:1x32x1024x1+8:1x32x1024x1 --case=KPI_DIR/sdpa-dqk-scl-msk-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+5:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x128x1+600:group_shape:1x1x1x128 --in-shapes=0:1x32x128x1025*abcd+1:1x32x1x1025+2:1x32x1x1025+3:1x32x1x128*abcd+5:1x1x1x1025+6:1x32x1025x128*abcd+7:1x32x1025x1+8:1x32x1025x1 --case=KPI_DIR/sdpa-dqk-scl-msk-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+5:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x256x1+600:group_shape:1x1x1x256 --in-shapes=0:1x16x256x1024*abcd+1:1x16x1x1024+2:1x16x1x1024+3:1x16x1024x256*abcd+5:1x1x1024x1024+6:1x16x1024x256*abcd+7:1x16x1024x1+8:1x16x1024x1 --case=KPI_DIR/sdpa-dqk-scl-msk-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+5:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x64x1+600:group_shape:1x1x1x64 --in-shapes=0:1x24x64x1025*abcd+1:1x24x1x1025+2:1x24x1x1025+3:1x24x1x64*abcd+5:1x1x1x1025+6:1x24x1025x64*abcd+7:1x24x1025x1+8:1x24x1025x1 --case=KPI_DIR/sdpa-dqk-scl-msk-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x64x1+600:group_shape:1x1x1x64 --in-shapes=0:1x8x64x1500*abcd+1:1x8x1x1500+2:1x8x1x1500+3:1x8x1x64*abcd+6:1x8x1500x64*abcd+7:1x8x1500x1+8:1x8x1500x1 --case=KPI_DIR/sdpa-dqk-scl-dqv.json"
+graph="--reset --dt=0:s8+1:f16+2:s8+3:f16+4:f16+6:s8+7:f16+8:s8+27:f16+50:f16 --attr-fpmath=f16:true --op-attrs=100:group_shape:1x1x64x1+600:group_shape:1x1x1x64 --in-shapes=0:1x8x64x1500*abcd+1:1x8x1x1500+2:1x8x1x1500+3:1x8x1500x64*abcd+6:1x8x1500x64*abcd+7:1x8x1500x1+8:1x8x1500x1 --case=KPI_DIR/sdpa-dqk-scl-dqv.json"
