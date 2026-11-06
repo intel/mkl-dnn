@@ -885,6 +885,10 @@ status_t jit_avx512_common_conv_fwd_kernel_t::init_conf(jit_conv_conf_t &jcp,
             }
         }
     }
+    // There is no block-4 kernel. With nxc, use a wider block and handle the
+    // channels as its tail. Size it by oc, which is kept in a single block.
+    if (is_data_layout_nxc && jcp.simd_w == 4)
+        jcp.simd_w = jcp.oc <= 8 ? 8 : 16;
 
     jcp.oc_block = jcp.simd_w;
     jcp.ic_block = jcp.is_1stconv ? jcp.ic : jcp.simd_w;
@@ -1988,6 +1992,10 @@ status_t jit_avx512_common_conv_bwd_data_kernel_f32_t::init_conf(
             }
         }
     }
+    // There is no block-4 kernel. With nxc, use a wider block and handle the
+    // channels as its tail. Size it by ic, which is kept in a single block.
+    if (is_data_layout_nxc && jcp.simd_w == 4)
+        jcp.simd_w = jcp.ic <= 8 ? 8 : 16;
 
     jcp.oc_block = jcp.simd_w;
     jcp.ic_block = jcp.is_1stconv ? jcp.ic : jcp.simd_w;
