@@ -591,7 +591,7 @@ status_t def_post_ops_cfg(compute::kernel_ctx_t &kernel_ctx,
 
             kernel_ctx.add_option("-DAPPLY_PO_" + idx + "=APPLY_PO_SUM");
             kernel_ctx.define_int("PO_" + idx + "_ALG", alg_kind::undef);
-
+            set_post_op_uses(e.sum.dt);
         } else {
             return status::runtime_error;
         }
