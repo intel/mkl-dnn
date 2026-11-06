@@ -45,7 +45,8 @@ struct task_t {
         , check_func_(check_func)
         , do_func_(do_func)
         , perf_template_(perf_template)
-        , idx_(idx) {}
+        , idx_(idx)
+        , fix_times_(fix_times_per_prb) {}
 
     int create(bool in_parallel) {
         // Report creation status for problems only in sequential mode as in
@@ -89,6 +90,8 @@ struct task_t {
         if (res_.state == INITIALIZED && bench_mode != bench_mode_t::init) {
             // Differentiate a message when the run happens...
             BENCHDNN_PRINT(1, "run: %s\n", prb_->str());
+            // Parallel create leaves the chunk's last parsed value.
+            fix_times_per_prb = fix_times_;
             do_func_(*v_prim_, prb_.get(), &res_);
         } else {
             // ... versus when it didn't but still indicating the problem went
@@ -113,6 +116,7 @@ private:
     std::string perf_template_;
     res_t res_ {};
     int idx_;
+    int fix_times_;
     // Use vector to handle any number of primitives needed for a driver.
     // It's a driver responsibility to initialize vector at `create()` stage
     // and it utilizes the knowledge of primitive order inside the vector.
