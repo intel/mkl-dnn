@@ -94,11 +94,11 @@ macro(append_host_compiler_options var opts)
         if(${var} MATCHES "-fsycl-host-compiler-options")
             if("${ARGV2}" STREQUAL "BEFORE") # prepend
                 string(REGEX REPLACE
-                    "(.*)(-fsycl-host-compiler-options=)\"(.*)\"(.*)"
+                    "(.*)(-fsycl-host-compiler-options=)\"([^\"]*)\"(.*)"
                     "\\1\\2\"${opts} \\3\"\\4" ${var} ${${var}})
             elseif("${ARGV2}" STREQUAL "") # append
                 string(REGEX REPLACE
-                    "(.*)(-fsycl-host-compiler-options=)\"(.*)\"(.*)"
+                    "(.*)(-fsycl-host-compiler-options=)\"([^\"]*)\"(.*)"
                     "\\1\\2\"\\3 ${opts}\"\\4" ${var} ${${var}})
             else()
                 message(FATAL_ERROR "Unknown argument: ${ARGV2}")
@@ -127,6 +127,21 @@ macro(add_definitions_with_host_compiler)
     foreach(def ${ARGV})
         add_definitions(${def})
         append_host_compiler_options(CMAKE_CXX_FLAGS "${def}")
+    endforeach()
+endmacro()
+
+macro(remove_definitions_with_host_compiler)
+    foreach(def ${ARGV})
+        remove_definitions(${def})
+        if(NOT DNNL_DPCPP_HOST_COMPILER STREQUAL "DEFAULT"
+            AND CMAKE_CXX_FLAGS MATCHES "-fsycl-host-compiler-options=\"([^\"]*)\"")
+            set(_host_opts " ${CMAKE_MATCH_1} ")
+            string(REPLACE " ${def} " " " _host_opts "${_host_opts}")
+            string(STRIP "${_host_opts}" _host_opts)
+            string(REGEX REPLACE
+                "(-fsycl-host-compiler-options=)\"[^\"]*\""
+                "\\1\"${_host_opts}\"" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+        endif()
     endforeach()
 endmacro()
 

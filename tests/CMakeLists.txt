@@ -70,6 +70,11 @@ if(WIN32 AND NOT MINGW)
             append(CMAKE_TEST_CCXX_NOWARN_FLAGS "/wd4267")
         endif()
     endif()
+    if(DPCPP_HOST_COMPILER_KIND STREQUAL "MSVC")
+        # c4244: conversion with possible loss of data
+        # c4996: unsafe / deprecated functions
+        append_host_compiler_options(CMAKE_CXX_FLAGS "/wd4996 /wd4244")
+    endif()
 endif()
 
 append(CMAKE_C_FLAGS "${CMAKE_TEST_CCXX_NOWARN_FLAGS}")

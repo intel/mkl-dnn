@@ -73,6 +73,9 @@ if(DNNL_CPU_THREADING_RUNTIME MATCHES "OMP")
     elseif(DNNL_WITH_SYCL AND DPCPP_HOST_COMPILER_KIND STREQUAL "CLANG")
         append(CMAKE_SHARED_LINKER_FLAGS "-fopenmp")
         append(CMAKE_EXE_LINKER_FLAGS "-fopenmp")
+    elseif(DNNL_WITH_SYCL AND DPCPP_HOST_COMPILER_KIND STREQUAL "MSVC")
+        # Objects compiled with `cl /openmp` request the MSVC OpenMP runtime
+        # (vcomp) from the linker, no extra flags are needed.
     elseif(OpenMP_CXX_FOUND)
         if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             list(APPEND EXTRA_SHARED_LIBS ${OpenMP_CXX_LIBRARIES})

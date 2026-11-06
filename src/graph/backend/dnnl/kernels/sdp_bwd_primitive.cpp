@@ -21,7 +21,7 @@
 #if DNNL_GPU_RUNTIME == DNNL_RUNTIME_OCL
 #include "gpu/intel/ocl/stream.hpp"
 #elif DNNL_GPU_RUNTIME == DNNL_RUNTIME_SYCL
-#include "gpu/intel/sycl/stream.hpp"
+#include "gpu/intel/sycl/sycl_stream.hpp"
 #endif
 
 #include "graph/backend/dnnl/passes/compile_ops.hpp"

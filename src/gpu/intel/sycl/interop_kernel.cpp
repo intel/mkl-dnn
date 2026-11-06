@@ -20,7 +20,7 @@
 #include "gpu/intel/compute/types_interop.hpp"
 #include "gpu/intel/compute/utils.hpp"
 #include "gpu/intel/ocl/utils.hpp"
-#include "gpu/intel/sycl/stream.hpp"
+#include "gpu/intel/sycl/sycl_stream.hpp"
 #include "gpu/intel/sycl/utils.hpp"
 #include "xpu/sycl/c_types_map.hpp"
 #include "xpu/utils.hpp"

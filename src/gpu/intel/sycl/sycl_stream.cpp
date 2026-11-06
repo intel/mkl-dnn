@@ -22,7 +22,7 @@
 
 #include "xpu/sycl/stream_profiler.hpp"
 
-#include "gpu/intel/sycl/stream.hpp"
+#include "gpu/intel/sycl/sycl_stream.hpp"
 
 #include "gpu/intel/ocl/utils.hpp"
 

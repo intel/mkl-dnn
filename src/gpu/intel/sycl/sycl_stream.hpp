@@ -14,8 +14,12 @@
 * limitations under the License.
 *******************************************************************************/
 
-#ifndef GPU_INTEL_SYCL_STREAM_HPP
-#define GPU_INTEL_SYCL_STREAM_HPP
+// The file is named sycl_stream.hpp rather than stream.hpp to avoid shadowing
+// <sycl/stream.hpp> when MSVC is used as the SYCL host compiler. The file can
+// be renamed back once https://github.com/intel/llvm/issues/23670 is fixed.
+
+#ifndef GPU_INTEL_SYCL_SYCL_STREAM_HPP
+#define GPU_INTEL_SYCL_SYCL_STREAM_HPP
 
 #include <cstring>
 #include <memory>

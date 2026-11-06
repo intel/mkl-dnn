@@ -25,7 +25,7 @@
 #include "gpu/intel/sycl/compat.hpp"
 #include "gpu/intel/sycl/device_info.hpp"
 #include "gpu/intel/sycl/engine.hpp"
-#include "gpu/intel/sycl/stream.hpp"
+#include "gpu/intel/sycl/sycl_stream.hpp"
 
 namespace dnnl {
 namespace impl {
