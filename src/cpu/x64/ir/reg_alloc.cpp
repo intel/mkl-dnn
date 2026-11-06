@@ -619,6 +619,7 @@ reg_alloc_result_t allocate_registers(
         };
 
         ir.def_use(ir.ops()[i], def_vregs, use_vregs);
+        operands[i].reserve(def_vregs.size() + use_vregs.size());
         for (int v : def_vregs)
             add_operand(v);
         for (int v : use_vregs)
