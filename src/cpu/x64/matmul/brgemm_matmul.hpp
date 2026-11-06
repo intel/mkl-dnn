@@ -66,12 +66,17 @@ struct brgemm_matmul_t : public primitive_t {
         const brgemm_desc_t &get_brg_desc(int idx) const {
             return brg_descs_[idx];
         }
+        const brgemm_desc_t &get_per_mn_comp_brg_desc(int i_M) const {
+            return per_mn_comp_brg_descs_[i_M];
+        }
         const brgemm_matmul_conf_t &get_brgemm_matmul_conf() const {
             return bgmmc_;
         }
 
     private:
         brgemm_desc_t brg_descs_[max_num_brg_kernels_matmul];
+        // f32 brgemm (M_blk, M_tail) initializing buffer C with -U * V.
+        brgemm_desc_t per_mn_comp_brg_descs_[2];
         brgemm_matmul_conf_t bgmmc_;
     };
 
@@ -136,6 +141,9 @@ private:
 
     // Per-(M, N) compensation kernel
     std::unique_ptr<per_mn_comp_kernel_t> per_mn_comp_kernel_;
+    std::unique_ptr<brgemm_kernel_t> per_mn_comp_brg_kernels_[2];
+    void prepare_per_mn_comp_brgemm(
+            const brg_matmul_exec_ctx_t &brgmm_ctx) const;
 
     using reducer_t
             = jit_brgemm_kernel_reduce_t<typename cpu_isa_traits_t<isa>::Vmm>;

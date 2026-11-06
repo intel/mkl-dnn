@@ -254,6 +254,23 @@ struct brgemm_matmul_conf_t {
     // the symmetric src/wei zero-point + 128-shift correction in the grouped
     // int8 quantization path. Mirrors brgemm_desc_t::with_per_mn_compensation.
     bool with_per_mn_compensation = false;
+    // The int4 weights zero point is subtracted in copy B (buffer_B = wei -
+    // zp, exact in int8); has_zero_point_b is cleared so that nothing else
+    // compensates for it.
+    bool wei_zp_folded_in_buffer_b = false;
+    // Per-(M, N) compensation summed over K and initialized into buffer C by
+    // one f32 brgemm per tile: C = -U * V, U (M x K'), V (K' x N).
+    bool per_mn_comp_via_brgemm = false;
+    // K' = per_mn_comp_wei_rows + (src zp ? num_K_blocks + 1 : 0). The wei zp
+    // term has one row per group of wei scales/zp along K, the src zp term
+    // one row per brgemm K call.
+    dim_t per_mn_comp_wei_gsize = 0;
+    dim_t per_mn_comp_wei_rows = 0;
+    dim_t per_mn_comp_K = 0;
+    dim_t per_mn_comp_ldv = 0; // padded N of V
+    // The AMX ukernel applies a common src scale in every per-K call, the
+    // other kernels apply it once with the post-ops.
+    bool per_mn_comp_src_scale_per_call = false;
     bool req_wei_vnni_downconvert = false;
     bool is_runtime_M = false;
     bool is_runtime_N = false;
@@ -337,6 +354,15 @@ struct brgemm_matmul_conf_t {
                 || need_to_calculate_compensation_for_b;
     }
 
+    // Int8 weights in a blocked layout carry the s8s8 and src zero-point
+    // compensations (per-N sums of the weights, memory_extra_flags::
+    // compensation_conv_*) in the extra buffer of the memory descriptor,
+    // filled by the reorder into that layout. The int8 grouped quantization
+    // path applies them per K group via the per-(M, N) tile instead.
+    inline bool wei_md_has_compensation() const {
+        return blocked_B && !with_int8_grouped_quantization;
+    }
+
     // True for a batch-only mask, since brgemm has no batch concept.
     // False when there are no weights scales at all.
     // A method, not a cached field, so it can't go stale vs. the flags below.
@@ -367,6 +393,13 @@ struct brgemm_matmul_conf_utils_t {
     inline bool get_blocked_B() const {
         return blocked_B_layouts_allowed && !bgmmc.is_runtime_N
                 && check_b_layout_blocked_by_n(bgmmc.wei_tag);
+    }
+
+    bool is_int4_blocked_B_supported() const;
+
+    // Blocked int4 weights are stored in int8 VNNI row groups in every path.
+    static dim_t int4_blocked_B_vnni_granularity() {
+        return static_cast<dim_t>(data_type_vnni_granularity(data_type::s8));
     }
 
     inline bool use_buffer_b(bool use_heuristic = true) const {
@@ -553,6 +586,10 @@ void init_scratchpad(memory_tracking::registrar_t &scratchpad,
         const brgemm_matmul_conf_t &bgmmc);
 
 int get_n_block_from_tag(format_tag_t matrix_b_tag);
+
+// Returns the K VNNI granularity of a blocked B layout and 0 for non-blocked
+// ones.
+int get_vnni_granularity_from_tag(format_tag_t matrix_b_tag);
 
 void mem_advice_init(brgemm_matmul_conf_t &bgmmc);
 
