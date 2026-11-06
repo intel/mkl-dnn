@@ -137,6 +137,9 @@ struct jit_conv_conf_t {
     dim_t ur_w_blocks;
     int ur_ic, ur_kw;
     bool is_1stconv;
+    // f32 avx512 fwd: pairs of groups with 4 channels each are computed as
+    // one group with 8 channels (see jit_avx512_common_conv_kernel.cpp)
+    bool is_g_packed;
     int nonblk_group_off;
     /* fma avx512_core */
     conv_kernel_kind_t kernel_kind;

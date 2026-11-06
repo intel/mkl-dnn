@@ -490,3 +490,20 @@ g1mb1ic48ih10iw1oc48kh128kw1ph64pw0
 --reset
 --dt=f8_e4m3:f8_e4m3:f8_e4m3
 mb1ic60ih30oc120oh15kh3sh2ph1
+
+# MFDNN-15771: grouped convolutions with 4 channels per group in nxc format
+# (paired groups on AVX-512, wider blocks with tails otherwise)
+--reset
+--dt=f32,bf16 --stag=axb --dtag=axb
+--dir=FWD_B,FWD_I --attr-post-ops=,add:f32:per_oc+relu
+g32mb2ic128ih14oc128oh14kh3ph1n"resnext50_4ch_per_group"
+g4mb2ic16ih20iw20oc16oh7ow7kh3kw3sh3sw3ph1
+g3mb2ic12ih8oc12oh8kh3ph1
+g4mb2ic16ih8oc32oh8kh3ph1
+g16mb2ic192ih8oc192oh8kh3ph1
+--dir=BWD_D --attr-post-ops=
+g32mb2ic128ih14oc128oh14kh3ph1n"resnext50_4ch_per_group"
+g4mb2ic16ih20iw20oc16oh7ow7kh3kw3sh3sw3ph1
+g3mb2ic12ih8oc12oh8kh3ph1
+g4mb2ic16ih8oc32oh8kh3ph1
+g16mb2ic192ih8oc192oh8kh3ph1

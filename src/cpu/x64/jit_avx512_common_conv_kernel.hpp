@@ -110,10 +110,27 @@ private:
     Xbyak::Reg64 imm_addr64 = r15;
     Vmm vmm_wei = Vmm(31);
 
+    // Packed groups (jcp.is_g_packed): vector lanes hold (group, ic) pairs,
+    // and each output point has one accumulator per oc of a group.
+    static constexpr int g_pack_oc = 4;
+    inline Vmm vmm_g_pack_acc(int i_ur, int i_oc) {
+        assert(i_ur * g_pack_oc + i_oc < 24);
+        return Vmm(i_ur * g_pack_oc + i_oc);
+    }
+    inline Vmm vmm_g_pack_wei(int i_oc) { return Vmm(24 + i_oc); }
+    Vmm vmm_g_pack_inp = Vmm(28);
+
+    // Size of weights for one spatial point of the kernel
+    inline dim_t ker_point_size() const {
+        return jcp.is_g_packed ? g_pack_oc * jcp.oc_block
+                               : jcp.ic_block * jcp.oc_block;
+    }
+
     std::unique_ptr<injector::jit_uni_postops_injector_t<Xbyak::Zmm>>
             postops_injector_;
 
     inline void prepare_output(int ur_w);
+    inline void reduce_g_packed_output(int ur_w);
     inline void apply_postops(int ur_w);
     inline void store_output(int ur_w);
     inline void compute_loop_fma(int ur_w, dim_t pad_l, dim_t pad_r);
