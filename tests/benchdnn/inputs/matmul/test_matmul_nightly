@@ -1,0 +1,18 @@
+--batch=test_matmul_ci
+
+--batch=harness_matmul_generated_nightly
+
+--batch=harness_matmul_precomp_reductions
+
+--batch=harness_matmul_int2
+
+# Note: post any manually added test cases below this point.
+# When a generator support must be expanded, leave a TODO note.
+
+## Non-default attr-acc-mode
+## TODO: extend test case generator to support such configuration.
+--reset --skip-impl=ref --dt=f16:f16:f32 --attr-acc-mode=f16 --attr-post-ops=add:f16:per_oc 2x16x12x34:2x16x34x56
+--reset --skip-impl=ref --dt=f16:f16:f32 --attr-acc-mode=any --stag=abx --wtag=abx --dtag=abx 16x32:32x64
+--reset --skip-impl=ref --dt=f16:f16:f16 --attr-acc-mode=any --stag=aby --wtag=abx --dtag=abx 10x25:25x117
+--reset --skip-impl=ref --dt=f16:f16:f32 --attr-acc-mode=any --stag=abx --wtag=aby --dtag=abx 128x256:256x1
+--reset --skip-impl=ref --dt=f16:f16:f16 --attr-acc-mode=any --stag=aby --wtag=aby --dtag=abx 1x30:30x128

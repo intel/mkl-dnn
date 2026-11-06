@@ -413,18 +413,10 @@ status_t post_ops_t::entry_t::validate_binary(
             VERBOSE_INCONSISTENT_NDIMS_WITH_VALS, "dst", "bin_po src1",
             dst_md->ndims, binary.user_src1_desc.ndims);
 
-    VCHECK_ATTR(IMPLICATION(engine_kind == dnnl_cpu,
-                        binary.user_src1_desc.data_type != data_type::f64),
-            VERBOSE_INVALID_DATATYPE, "bin_po src1");
-
     if (is_binary_with_ternary_op()) {
         VCHECK_ATTR(dst_md->ndims == binary.user_src2_desc.ndims,
                 VERBOSE_INCONSISTENT_NDIMS_WITH_VALS, "dst", "bin_po src2",
                 dst_md->ndims, binary.user_src2_desc.ndims);
-
-        VCHECK_ATTR(IMPLICATION(engine_kind == dnnl_cpu,
-                            binary.user_src2_desc.data_type != data_type::f64),
-                VERBOSE_INVALID_DATATYPE, "bin_po src2");
     }
 
     if (is_inplace_binary()) {

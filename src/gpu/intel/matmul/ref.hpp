@@ -109,11 +109,13 @@ struct ref_t : public primitive_t {
             // Note: fp4 bias will require sub-byte reads in the kernel.
             VDISPATCH_MATMUL(
                     (is_int8
-                            || ((is_f32 || is_f64 || is_f16 || is_f8 || is_f4
-                                        || is_bf16)
+                            || ((is_f32 || is_f16 || is_f8 || is_f4 || is_bf16)
                                     && IMPLICATION(with_bias(),
                                             utils::one_of(bia_dt_, f32, f16,
-                                                    bf16, f8_e5m2, f8_e4m3)))),
+                                                    bf16, f8_e5m2, f8_e4m3)))
+                            || (is_f64
+                                    && IMPLICATION(with_bias(),
+                                            utils::one_of(bia_dt_, f64, f32)))),
                     VERBOSE_UNSUPPORTED_DT_CFG);
             VDISPATCH_MATMUL_SC(attr_.set_default_formats(dst_md(0)),
                     VERBOSE_UNSUPPORTED_POSTOP);

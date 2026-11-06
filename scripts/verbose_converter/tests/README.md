@@ -29,7 +29,7 @@ BENCHDNN TEST: driver=eltwise, batch=shapes_eltwise: PASSED
 BENCHDNN TEST: driver=ip, batch=shapes_ci: PASSED
 BENCHDNN TEST: driver=lnorm, batch=shapes_ci: PASSED
 BENCHDNN TEST: driver=lrn, batch=shapes_ci: PASSED
-BENCHDNN TEST: driver=matmul, batch=shapes_2d_ci: PASSED
+BENCHDNN TEST: driver=matmul, batch=shapes_bert: PASSED
 BENCHDNN TEST: driver=pooling, batch=shapes_basic: PASSED
 BENCHDNN TEST: driver=prelu, batch=shapes_ci: PASSED
 BENCHDNN TEST: driver=reduction, batch=shapes_ci: PASSED

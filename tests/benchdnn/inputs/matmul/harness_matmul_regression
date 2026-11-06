@@ -86,3 +86,6 @@
 
 # BF16 destination with bias, sum, and eltwise.
 --reset --impl=brg:sve_ --dt=bf16:bf16:bf16 --bia-dt=bf16 --stag=ab --wtag=any --dtag=ab --attr-post-ops=sum:1+relu 31x72:72x128_n"bf16_epilogue"
+# AMX relaxed accumulation used the bf16/f16 dst as the K-chunk C buffer for int8 too, which gave wrong results.
+--reset --impl=brg --dt=s8:u4:f16 --attr-acc-mode=relaxed 64x4096:4096x64_n"int8_relaxed_acc_mode"
+--reset --impl=brg --dt=u8:u8:bf16 --attr-acc-mode=any --attr-scales=wei:per_ocic:f32:128x1 64x4096:4096x64_n"int8_any_acc_mode"

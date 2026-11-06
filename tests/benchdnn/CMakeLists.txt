@@ -163,8 +163,9 @@ foreach(driver ${all_drivers})
     file(GLOB test_files_gpu_ci RELATIVE ${driver_dir}
             inputs/${driver}/test_*_gpu_ci)
     file(GLOB test_files_gpu RELATIVE ${driver_dir} inputs/${driver}/test_*_gpu)
-    file(GLOB test_files_ci RELATIVE ${driver_dir} inputs/${driver}/test_*_ci)
     file(GLOB test_files_smoke RELATIVE ${driver_dir} inputs/${driver}/test_*_smoke)
+    file(GLOB test_files_ci RELATIVE ${driver_dir} inputs/${driver}/test_*_ci)
+    file(GLOB test_files_nightly RELATIVE ${driver_dir} inputs/${driver}/test_*_nightly)
     file(GLOB test_files_weekly RELATIVE ${driver_dir} inputs/${driver}/test_*_weekly)
     file(GLOB test_files_cpu RELATIVE ${driver_dir} inputs/${driver}/test_*)
     file(GLOB test_files_with_all RELATIVE ${driver_dir}
@@ -202,17 +203,16 @@ foreach(driver ${all_drivers})
         endif()
     elseif(DNNL_TEST_SET_COVERAGE EQUAL DNNL_TEST_SET_NIGHTLY)
         if(NOT DNNL_EXPERIMENTAL_GROUPED_MEMORY)
-            list(REMOVE_ITEM test_files_gpu "test_matmul_grouped_gpu")
-            list(REMOVE_ITEM test_files_cpu "test_matmul_grouped_gpu")
-            list(REMOVE_ITEM test_files_cpu "test_matmul_grouped")
+            list(REMOVE_ITEM test_files_cpu "test_matmul_grouped_nightly")
+            list(REMOVE_ITEM test_files_nightly "test_matmul_grouped_nightly")
         endif()
 
         ## Filter out gpu, large cpu, weekly and invalid inputs from cpu
         ##
         ## Note: put longer/specialized names first to keep filtering working.
         foreach(test_file ${test_files_large_cpu} ${test_files_gpu_ci}
-            ${test_files_gpu} ${test_files_ci} ${test_files_smoke}
-            ${test_files_weekly})
+            ${test_files_gpu} ${test_files_smoke} ${test_files_ci}
+            ${test_files_nightly} ${test_files_weekly})
             string(REPLACE "${test_file}" "" test_files_cpu "${test_files_cpu}")
         endforeach()
         ## Then filter files with "all" suffix by exact name since there may
@@ -225,9 +225,11 @@ foreach(driver ${all_drivers})
             register_all_tests(cpu "${driver}" "${test_files_large_cpu}")
         endif()
         if(has_gpu)
+            list(APPEND test_files_gpu ${test_files_nightly})
             register_all_tests(gpu "${driver}" "${test_files_gpu}")
         endif()
         if(has_cpu)
+            list(APPEND test_files_cpu ${test_files_nightly})
             register_all_tests(cpu "${driver}" "${test_files_cpu}")
         endif()
     elseif(DNNL_TEST_SET_COVERAGE EQUAL DNNL_TEST_SET_WEEKLY)

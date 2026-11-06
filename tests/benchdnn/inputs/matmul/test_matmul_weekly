@@ -1,4 +1,4 @@
-### TODO: add Nightly test list here to enable proper waterfall.
+--batch=test_matmul_nightly
 
 #### Harnesses below collect their problems via verbose logs manually.
 #### All of them are obtained from GPU workloads, thus, `_gpu` prefix is

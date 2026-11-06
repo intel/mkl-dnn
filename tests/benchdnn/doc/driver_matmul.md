@@ -106,10 +106,10 @@ where `m`, `n`, and `k` are inner dimensions for matrix multiplication.
 
 ## Examples
 
-Run the default validation set of MatMul using `inputs/matmul/shapes_2d`
+Run the default validation set of MatMul using `inputs/matmul/shapes_transformer`
 file:
 ``` sh
-    ./benchdnn --matmul --batch=inputs/matmul/shapes_2d
+    ./benchdnn --matmul --batch=inputs/matmul/shapes_transformer
 ```
 
 Run single precision matrix multiplication with all sizes provided at run-time
