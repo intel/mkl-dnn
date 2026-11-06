@@ -184,18 +184,10 @@ void compute_liveness(
     const int n_ops = ir.n_ops();
     const int n_words = (ir.n_vregs() + 63) / 64;
 
-    // Phase 1: build per-operation def/use sets and the control-flow graph.
+    // Phase 1: build the control-flow graph.
     //
-    // def_at[i] has the bit of vreg `v` set if operation `i` defines (writes)
-    // `v`, use_at[i] if `i` uses (reads) it.
     // successors[i] lists all operations that may execute immediately after i.
-    std::vector<std::vector<uint64_t>> def_at(
-            n_ops, std::vector<uint64_t>(n_words, 0));
-    std::vector<std::vector<uint64_t>> use_at(
-            n_ops, std::vector<uint64_t>(n_words, 0));
-
     std::vector<std::vector<int>> successors(n_ops);
-    std::vector<int> def_vregs, use_vregs;
     bool has_back_edge = false;
 
     // The _else and if_end of each if_begin, by op index. -1 for a conditional
@@ -209,14 +201,6 @@ void compute_liveness(
 
     for (int i = 0; i < n_ops; i++) {
         const op_t &op = ir.ops()[i];
-        ir.def_use(op, def_vregs, use_vregs);
-
-        for (int v : def_vregs) {
-            def_at[i][v / 64] |= uint64_t(1) << (v % 64);
-        }
-        for (int v : use_vregs) {
-            use_at[i][v / 64] |= uint64_t(1) << (v % 64);
-        }
 
         // Successor edges include fall-through to `i+1` and any explicit
         // control-flow transfers (branches and loop back-edges).
@@ -242,23 +226,31 @@ void compute_liveness(
     // `live_out[i]` is computed from `live_in` when `live_in[i]` needs it and
     // is not stored.
     live_in.assign(n_ops, std::vector<uint64_t>(n_words, 0));
+    std::vector<uint64_t> in(n_words);
+    std::vector<int> def_vregs, use_vregs;
 
     bool changed = true;
     while (changed) {
         changed = false;
         for (int i = n_ops - 1; i >= 0; i--) {
-            for (int w = 0; w < n_words; w++) {
-                // live_out[i] = OR over successors `s` of live_in[s]
-                uint64_t out = 0;
-                for (int s : successors[i]) {
-                    out |= live_in[s][w];
+            // live_out[i] = OR over successors `s` of live_in[s]
+            std::fill(in.begin(), in.end(), 0);
+            for (int s : successors[i]) {
+                for (int w = 0; w < n_words; w++) {
+                    in[w] |= live_in[s][w];
                 }
-                // live_in[i] = use[i] OR (live_out[i] AND NOT def[i])
-                const uint64_t in = use_at[i][w] | (out & ~def_at[i][w]);
-                if (in != live_in[i][w]) {
-                    live_in[i][w] = in;
-                    changed = true;
-                }
+            }
+            // live_in[i] = use[i] OR (live_out[i] AND NOT def[i])
+            ir.def_use(ir.ops()[i], def_vregs, use_vregs);
+            for (int v : def_vregs) {
+                in[v / 64] &= ~(uint64_t(1) << (v % 64));
+            }
+            for (int v : use_vregs) {
+                in[v / 64] |= uint64_t(1) << (v % 64);
+            }
+            if (in != live_in[i]) {
+                live_in[i] = in;
+                changed = true;
             }
         }
         // Without a back-edge every successor comes after its operation, so
