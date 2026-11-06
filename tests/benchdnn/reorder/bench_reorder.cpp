@@ -128,20 +128,26 @@ int verify_input(const settings_t &s, const settings_t &def) {
     for_(const auto &i_strides : s.strides)
     for_(const auto &i_stag : s.stag)
     for (const auto &i_dtag : s.dtag) {
-        const bool strided_input
-                = !i_strides[0].empty() || !i_strides[1].empty();
-        if (strided_input) {
-            const bool no_stride_with_stag
-                    = IMPLICATION(i_stag != def.stag[0], i_strides[0].empty());
-            const bool no_stride_with_dtag
-                    = IMPLICATION(i_dtag != def.dtag[0], i_strides[1].empty());
+        // Each tensor's layout must be set by exactly one of a format tag or
+        // explicit strides. The default `tag::undef` means "tag not specified",
+        // so a tensor with a default tag and no strides has no layout, while a
+        // tensor with both a tag and strides is ambiguous.
+        const bool src_has_tag = i_stag != def.stag[0];
+        const bool src_has_strides = !i_strides[0].empty();
+        if (src_has_tag == src_has_strides) {
+            BENCHDNN_PRINT(0, "%s\n",
+                    "Error: the `src` tensor layout must be set by exactly one "
+                    "of the `--stag` or `--strides` knobs.");
+            SAFE_V(FAIL);
+        }
 
-            if (!no_stride_with_stag || !no_stride_with_dtag) {
-                BENCHDNN_PRINT(0, "%s\n",
-                        "Error: both `strides` and `tag` knobs can't be used "
-                        "with either of `src`, or `dst` tensors.");
-                SAFE_V(FAIL);
-            }
+        const bool dst_has_tag = i_dtag != def.dtag[0];
+        const bool dst_has_strides = !i_strides[1].empty();
+        if (dst_has_tag == dst_has_strides) {
+            BENCHDNN_PRINT(0, "%s\n",
+                    "Error: the `dst` tensor layout must be set by exactly one "
+                    "of the `--dtag` or `--strides` knobs.");
+            SAFE_V(FAIL);
         }
     }
 

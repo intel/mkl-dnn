@@ -120,6 +120,15 @@ __kernel void custom_reorder(__global SRC_DATA_T *restrict src,
     const int d4 = GWS_GET_D4();
     const int d5 = GWS_GET_D5();
 
+    // Selection guarantees a per-dim scale never masks the two innermost dims,
+    // so a single scale per work-item is valid for the whole block.
+#if WITH_SRC_SCALE && SRC_NUM_SCALES > 1
+    src_scale = src_scales[SCALE_OFF(SRC, d0, d1, d2, d3, d4, d5)];
+#endif
+#if WITH_DST_SCALE && DST_NUM_SCALES > 1
+    dst_scale = dst_scales[SCALE_OFF(DST, d0, d1, d2, d3, d4, d5)];
+#endif
+
 #if WITH_SUM_SCALE || WITH_SUM_ZPOINT
 #define SUM_OUTPUT 1
 #else

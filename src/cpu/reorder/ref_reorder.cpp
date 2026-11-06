@@ -110,6 +110,14 @@ status_t ref_reorder_t::pd_t::init(const engine_t *engine,
                     | skip_mask_t::zero_points_groups | skip_mask_t::post_ops),
             VERBOSE_UNSUPPORTED_ATTR);
 
+    // An e8m0 source or destination goes through a dedicated raw-conversion
+    // path (see execute) that must not apply any floating-point operation
+    // around the value, thus, no attributes can be supported.
+    VDISPATCH_REORDER(IMPLICATION(utils::one_of(e8m0, input_d.data_type(),
+                                          output_d.data_type()),
+                              attr()->has_default_values()),
+            VERBOSE_UNSUPPORTED_ATTR);
+
     const auto &post_ops = attr()->post_ops_;
     VDISPATCH_REORDER(
             IMPLICATION(post_ops.len() != 0,

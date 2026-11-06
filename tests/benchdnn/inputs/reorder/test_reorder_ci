@@ -39,6 +39,7 @@
 --ddt=f32
 --attr-zero-points=src:common:-1
 --stag=adbc
+--dtag=abx
 1x12x128x33
 
 --reset

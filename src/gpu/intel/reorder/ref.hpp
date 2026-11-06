@@ -76,11 +76,11 @@ struct ref_t : public primitive_t {
 
             VDISPATCH_REORDER(
                     utils::one_of(sdt, f32, f16, bf16, f8_e5m2, f8_e4m3,
-                            f4_e2m1, s32, s8, u8, s4, u4, u2, f64),
+                            f4_e2m1, e8m0, s32, s8, u8, s4, u4, u2, f64),
                     VERBOSE_UNSUPPORTED_DT);
             VDISPATCH_REORDER(
                     utils::one_of(ddt, f32, f16, bf16, f8_e5m2, f8_e4m3,
-                            f4_e2m1, s32, s8, u8, s4, u4, u2, f64),
+                            f4_e2m1, e8m0, s32, s8, u8, s4, u4, u2, f64),
                     VERBOSE_UNSUPPORTED_DT);
 
             const auto *intel_engine = utils::downcast<const intel::engine_t *>(

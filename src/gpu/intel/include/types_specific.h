@@ -58,6 +58,10 @@
 #define SRC_TO_REF(x) into_float(x)
 #define SRC_TO_REF8(x) into_float(x)
 #define REF_TO_SRC(x) into_f4_e2m1(x)
+#elif SRC_DT_E8M0
+#define SRC_TO_REF(x) into_float(x)
+#define SRC_TO_REF8(x) into_float(x)
+#define REF_TO_SRC(x) into_e8m0(x)
 #elif SRC_DT_U4
 #define SRC_TO_REF(x) into_float(x)
 #elif SRC_DT_S4
@@ -420,6 +424,10 @@
 #define REF_TO_DST(x) into_f4_e2m1(x)
 #define DST_DATA_MAX (uchar)0x07
 #define DST_DATA_MIN (uchar)0x01
+#elif DST_DT_E8M0
+#define DST_TO_REF(x) into_float(x)
+#define DST_TO_REF8(x) into_float(x)
+#define REF_TO_DST(x) into_e8m0(x)
 #elif DST_DT_F16
 #define REF_TO_DST(x) convert_half(x)
 #define DST_TO_REF(x) convert_float(x)
@@ -497,6 +505,8 @@
 #define DST_DATA_FMAX 6.0f
 #define DST_DATA_FMIN 1.0f
 #define DST_DATA_FLOW -6.0f
+#elif DST_DT_E8M0
+#define TO_DST(x) into_e8m0(convert_float(x))
 #elif DST_DT_U2
 #undef SET_DOUBLE_HALF_BYTE
 #define TO_DST(x) into_u2(convert_float(x))

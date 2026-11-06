@@ -269,6 +269,7 @@
 # Catch overflows
 --reset
 --skip-impl=ref
+--stag=abx --dtag=abx
 2147483648_n"int_overflow"
 4294967296_n"uint_overflow"
 2147483869_n"nd_range_overflow"

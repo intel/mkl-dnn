@@ -287,7 +287,11 @@ int extended_dims(const memory_desc_t &md) {
         auto step = utils::div_up(dim.size, blocks[dim.idx]);
         if (stride != expected_stride) {
             mask |= (1 << dim.idx);
-            expected_stride = stride;
+            // A size-1 dim carries no data; don't let it reset the expected
+            // stride. Otherwise a size-1 dim whose stride matches the next
+            // outer dim would absorb a real stride gap and hide it from that
+            // outer dim, incorrectly allowing it to be combined.
+            if (dim.size != 1) expected_stride = stride;
         }
         expected_stride *= step;
     }

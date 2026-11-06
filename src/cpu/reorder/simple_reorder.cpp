@@ -155,6 +155,15 @@ status_t simple_reorder_t::pd_t::is_direct_copy(const engine_t *engine,
                     attr->scales_.get_mask(arg) == 0, VERBOSE_UNSUPPORTED_ATTR);
     }
 
+    // An e8m0 source or destination is copied through a dedicated raw-conversion
+    // path (see execute_direct_copy) that must not apply any floating-point
+    // operation around the value, thus, no attributes can be supported.
+    VDISPATCH_REORDER(
+            IMPLICATION(utils::one_of(data_type::e8m0, input_d.data_type(),
+                                output_d.data_type()),
+                    attr->has_default_values()),
+            VERBOSE_UNSUPPORTED_ATTR);
+
     // `direct_copy` requires identical src/dst layouts for every dimension but
     // the outermost one, which may carry a stride gap (e.g. a padded dim 0).
     // The dim-0-contiguous case is naturally covered as a sub-case.

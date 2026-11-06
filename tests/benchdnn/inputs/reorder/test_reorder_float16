@@ -24,6 +24,7 @@
 
 --reset
 --attr-scales=src:per_dim_1,dst:per_dim_1
+--stag=abx --dtag=abx
 --sdt=f32 --ddt=f16 3x5x7x11
 --sdt=f16 --ddt=f32 3x5x7x11
 --sdt=f16 --ddt=f16 3x5x7x11

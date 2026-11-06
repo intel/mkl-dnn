@@ -51,6 +51,7 @@ REG(s4, -8, 7);
 REG(u4, 0, 15);
 REG(u2, 0, 3);
 REG(u3, 0, 7);
+REG(e8m0, 0, int_max_exact);
 
 #undef REG
 
@@ -71,6 +72,7 @@ const dt_conf_t *dt2cfg(dnnl_data_type_t dt) {
     CASE(u4);
     CASE(u2);
     CASE(u3);
+    CASE(e8m0);
 #undef CASE
     SAFE_V(FAIL);
     return conf_f32;

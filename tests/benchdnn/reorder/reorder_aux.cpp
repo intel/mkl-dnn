@@ -167,8 +167,8 @@ std::string prb_t::set_repro_line() {
     settings_t def;
 
     s << "--dt=" << src_dt() << ":" << dst_dt() << " ";
-    s << "--stag=" << stag << " ";
-    s << "--dtag=" << dtag << " ";
+    if (canonical || stag != def.stag[0]) s << "--stag=" << stag << " ";
+    if (canonical || dtag != def.dtag[0]) s << "--dtag=" << dtag << " ";
 
     if (canonical || strides != def.strides[0])
         s << "--strides=" << vdims2str(strides) << " ";

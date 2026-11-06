@@ -61,7 +61,7 @@ struct settings_t : public base_settings_t {
 
     std::vector<std::vector<dnnl_data_type_t>> dt {{dnnl_f32}};
     std::vector<dnnl_data_type_t> sdt {dnnl_f32}, ddt {dnnl_f32};
-    std::vector<std::string> stag {tag::abx}, dtag {tag::abx};
+    std::vector<std::string> stag {tag::undef}, dtag {tag::undef};
     std::vector<vdims_t> strides {vdims_t(2)};
     std::vector<std::vector<flag_t>> oflag {{{FLAG_NONE, 0}}};
     std::vector<unsigned> runtime_dim_mask {0};

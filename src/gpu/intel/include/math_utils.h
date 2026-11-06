@@ -96,7 +96,8 @@ long __attribute__((overloadable)) rnd_down(long a, unsigned int b) {
 #define MATH_UTILS_DECLARE_BF16 1
 #endif
 
-#if DST_SCALES_DT_E8M0 || SRC_SCALES_DT_E8M0 || WEI_SCALES_DT_E8M0
+#if DST_SCALES_DT_E8M0 || SRC_SCALES_DT_E8M0 || WEI_SCALES_DT_E8M0 \
+        || SRC_DT_E8M0 || DST_DT_E8M0
 #define MATH_UTILS_DECLARE_E8M0 1
 #endif
 

@@ -362,9 +362,12 @@ custom_kernel_t select_kernel(const conf_t &conf,
     if (matches_one_NxN_layout(src_mdw, dst_mdw, 8, mask)) {
         return custom_kernel_t::transpose8x8;
     }
+    // This kernel reads a single scale per work-item; defer a per-dim scale to
+    // the unaligned path below, which reloads it per element.
     if (src_mdw.matches_one_of_tag(nhwc) && dst_mdw.matches_one_of_tag(nchw)
             && padded_dims[last] % 16 == 0
-            && dim_is_div_by_16_or_less_than_16(dst_mdw, 1)) {
+            && dim_is_div_by_16_or_less_than_16(dst_mdw, 1)
+            && !multi_scale_quant) {
         return custom_kernel_t::nchw;
     }
     if (src_mdw.matches_one_of_tag(nhwc) && dst_mdw.matches_one_of_tag(nchw)
@@ -425,16 +428,26 @@ custom_kernel_t select_kernel(const conf_t &conf,
         }
     }
 
+    // The kernel vectorizes and shuffles the two innermost dims, so it reads a
+    // single scale per work-item; a per-dim scale/zp on those dims would vary
+    // within a work-item and cannot be indexed correctly here.
+    const int xFxE_inner_mask
+            = (1 << (conf.ndims - 1)) | (1 << (conf.ndims - 2));
     if (src_mdw.matches_one_of_tag(abdfce) && dst_mdw.matches_one_of_tag(abcdef)
             && ((padded_dims[conf.ndims - 2] % 16) == 0)
-            && dim_is_div_by_16_or_less_than_16(dst_mdw, last)) {
+            && dim_is_div_by_16_or_less_than_16(dst_mdw, last)
+            && !(mask & xFxE_inner_mask)) {
         return custom_kernel_t::plain_xFxE_to_abcdef;
     }
 
+    // This kernel reads a single scale per work-item while a per-dim scale on
+    // the reordered a/b dims varies within a work-item, so defer those cases to
+    // a more generic kernel that indexes the scale per element.
     if ((src_mdw.matches_one_of_tag(abcd, acdb))
             && dst_mdw.matches_one_of_tag(
                     ABcd4a2b, ABcd4a4b, ABcd8a2b, ABcd8a4b)
-            && src_mdw.is_dense() && dst_mdw.is_dense(true)) {
+            && src_mdw.is_dense() && dst_mdw.is_dense(true)
+            && !multi_scale_quant) {
         return custom_kernel_t::plain_to_ABcd84a42b;
     }
 

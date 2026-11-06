@@ -38,7 +38,7 @@ ref_reorder(__global SRC_DATA_T *restrict src,
         __global DST_DATA_T *restrict dst,
         __global SRC_SCALES_DATA_T *restrict src_scales,
         __global SRC_ZP_DATA_T *restrict src_zps,
-        __global float *restrict dst_scales, __global int *dst_zps,
+        __global DST_SCALES_DATA_T *restrict dst_scales, __global int *dst_zps,
         float sum_scale, int sum_zp,
 #if WITH_SROUND
         __global uint *sround_seed_buf,
@@ -103,7 +103,8 @@ ref_reorder(__global SRC_DATA_T *restrict src,
         src_scale = SRC_SCALES_TO_REF(src_scales[scale_off]);
 #endif
 #if WITH_DST_SCALE
-        dst_scale = dst_scales[SCALE_OFF(DST, d0, d1, d2, d3, d4, d5)];
+        off_t dst_scale_off = SCALE_OFF(DST, d0, d1, d2, d3, d4, d5);
+        dst_scale = DST_SCALES_TO_REF(dst_scales[dst_scale_off]);
 #endif
 #if FROM_I2
         SRC_DATA_T src_value = GET_QUARTER_BYTE(src, src_off);

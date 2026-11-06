@@ -1033,6 +1033,21 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator_t {
                             movups(Xmm(1), o_addr(o_off[ur]));
                             addps(Xmm(ur), Xmm(1));
                         }
+                    } else if (utils::one_of(prb_.otype, f8_e5m2, f8_e4m3)) {
+                        /* Unlike every other data type, whose memory read
+                         * width follows the `xmm` destination, the fp8
+                         * `vcvt_f8_to_f32` routine is fixed 16-wide: it always
+                         * reads a full 16-byte vector regardless of the number
+                         * of requested elements, which over-reads an unpadded
+                         * dst buffer here (ur_step == xmm_vlen). Stage only the
+                         * valid bytes into a register and convert from the
+                         * register, so the routine's full-width read hits the
+                         * register instead of memory. This mirrors the scalar
+                         * (ur_step == 1) path above, which stages via vpinsrb
+                         * before converting. */
+                        load(Xmm(1), o_addr(o_off[ur]), ur_step * otype_sz_);
+                        cvt2ps(Xmm(1), Xmm(1), prb_.otype);
+                        uni_vaddps(Xmm(ur), Xmm(ur), Xmm(1));
                     } else {
                         cvt2ps(Xmm(1), o_addr(o_off[ur]), prb_.otype);
                         uni_vaddps(Xmm(ur), Xmm(ur), Xmm(1));
@@ -1074,7 +1089,8 @@ struct jit_uni_reorder_kernel_f32_t : public kernel_t, public jit_generator_t {
                     } else {
                         if (prb_.otype == s32) {
                             uni_vmovss(xmm_tmp_, o_addr(o_off[ur]));
-                        } else if (utils::one_of(prb_.otype, s8, u8)) {
+                        } else if (utils::one_of(prb_.otype, s8, u8, f8_e5m2,
+                                           f8_e4m3)) {
                             uni_vpinsrb(
                                     xmm_tmp_, xmm_tmp_, o_addr(o_off[ur]), 0x0);
                         } else if (utils::one_of(prb_.otype, bf16, f16)) {

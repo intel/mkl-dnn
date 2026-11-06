@@ -131,8 +131,11 @@ status_t reorder_desc_init(reorder_desc_t *reorder_desc,
         const auto &sc_src = sc.get(DNNL_ARG_SRC);
         const int mask_src = sc.get_mask(DNNL_ARG_SRC);
 
-        VCHECK_REORDER(IMPLICATION(utils::one_of(src_md->data_type,
-                                           data_type::s4, data_type::u4),
+        // The int4 source scale, when present, must be non-scalar (grouped);
+        // this constraint doesn't apply when the source carries no scale.
+        VCHECK_REORDER(IMPLICATION(!sc.has_default_values(DNNL_ARG_SRC)
+                                       && utils::one_of(src_md->data_type,
+                                               data_type::s4, data_type::u4),
                                mask_src > 0),
                 VERBOSE_INVALID_DATATYPE, "mask for int4 source");
 
