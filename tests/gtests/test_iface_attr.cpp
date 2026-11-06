@@ -1011,4 +1011,32 @@ HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestGetCppObjects) {
     ASSERT_EQ(q_po_src1_md, po_src1_md);
 }
 
+HANDLE_EXCEPTIONS_FOR_TEST_F(attr_test_t, TestBinarySelectPostOpSrc2AnyFormat) {
+    engine eng {get_test_engine_kind(), 0};
+
+    const memory::dims dims {2, 16, 4, 4};
+    const memory::desc dst_md {dims, data_type::f32, tag::nhwc};
+
+    // src1 is a per-channel tensor, src2 has the full dst shape. The layout
+    // of src2 with `any` format must be derived from src2 itself.
+    dnnl::post_ops ops;
+    ops.append_binary(algorithm::binary_select,
+            memory::desc({1, 16, 1, 1}, data_type::f32, tag::any),
+            memory::desc(dims, data_type::s8, tag::any));
+    dnnl::primitive_attr attr;
+    attr.set_post_ops(ops);
+
+    auto pd = eltwise_forward::primitive_desc(eng, prop_kind::forward_inference,
+            algorithm::eltwise_relu, dst_md, dst_md, 0.f, 0.f, attr);
+
+    const auto q_src1_md = pd.query_md(query::exec_arg_md,
+            DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1);
+    ASSERT_EQ(
+            q_src1_md, memory::desc({1, 16, 1, 1}, data_type::f32, tag::abcd));
+
+    const auto q_src2_md = pd.query_md(query::exec_arg_md,
+            DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_2);
+    ASSERT_EQ(q_src2_md, memory::desc(dims, data_type::s8, tag::nhwc));
+}
+
 } // namespace dnnl

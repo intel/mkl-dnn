@@ -352,7 +352,7 @@ status_t post_ops_t::set_default_formats(const memory_desc_t *dst_md) {
         if (entry_[idx].is_binary_with_ternary_op() && src2_mdw.format_any()) {
             assert(!dst_mdw.format_any());
 
-            if (src1_mdw.count_non_unit_dims(1))
+            if (src2_mdw.count_non_unit_dims(1))
                 CHECK(memory_desc_init_by_strides(src2_md, nullptr));
             else
                 CHECK(memory_desc_init_by_blocking_desc(
