@@ -121,11 +121,41 @@ jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::
 
 template <typename Vmm>
 void jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::prepare_output(int ur_w) {
+    if (jcp.is_g_packed) {
+        for (int j = 0; j < ur_w; j++)
+            for (int k = 0; k < g_pack_oc; k++) {
+                Vmm vmm = vmm_g_pack_acc(j, k);
+                vpxord(vmm, vmm, vmm);
+            }
+        return;
+    }
     for (int k = 0; k < jcp.nb_oc_blocking; k++)
         for (int j = 0; j < ur_w; j++) {
             Vmm vmm = vmm_out(j, k);
             vpxord(vmm, vmm, vmm);
         }
+}
+
+// Sums the accumulators of each output point over ic. Within each 128-bit lane
+// it transposes 4 accumulators (one per oc, lanes hold ic) and adds the rows,
+// which gives lanes (group, oc) in vmm_out(i_ur, 0).
+template <typename Vmm>
+void jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::reduce_g_packed_output(
+        int ur_w) {
+    const Vmm t0(28), t1(29), t2(30), t3(31);
+    // vmm_out(j, 0) overwrites accumulators of points <= j only, which are
+    // already reduced or are read before being written.
+    for (int j = 0; j < ur_w; j++) {
+        vunpcklps(t0, vmm_g_pack_acc(j, 0), vmm_g_pack_acc(j, 1));
+        vunpckhps(t1, vmm_g_pack_acc(j, 0), vmm_g_pack_acc(j, 1));
+        vaddps(t0, t0, t1);
+        vunpcklps(t2, vmm_g_pack_acc(j, 2), vmm_g_pack_acc(j, 3));
+        vunpckhps(t3, vmm_g_pack_acc(j, 2), vmm_g_pack_acc(j, 3));
+        vaddps(t2, t2, t3);
+        vshufps(t1, t0, t2, 0x44);
+        vshufps(t3, t0, t2, 0xee);
+        vaddps(vmm_out(j, 0), t1, t3);
+    }
 }
 
 template <typename F>
@@ -395,8 +425,7 @@ void jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::compute_loop_fma_core(
 
     Label kh_label, kd_label;
     std::vector<Label> ic_tail_jmp(kw);
-    dim_t shift_kernel_ptr
-            = jcp.typesize_in * jcp.kw * jcp.oc_block * jcp.ic_block;
+    dim_t shift_kernel_ptr = jcp.typesize_in * jcp.kw * ker_point_size();
     dim_t inp_mul = is_source_layout_nxc ? jcp.ngroups * jcp.ic
                                          : (!jcp.is_1stconv ? ic_block : 1);
 
@@ -439,6 +468,26 @@ void jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::compute_loop_fma_core(
         for (int ki = 0; ki < kw; ki++) {
             const int jj_start = get_ow_start(ki, pad_l);
             const int jj_end = get_ow_end(ur_w, ki, pad_r);
+            if (jcp.is_g_packed) {
+                assert(ic_tail == 0 && nb_oc_block == 1);
+                if (jj_end - jj_start <= 0) continue;
+                for (int k = 0; k < g_pack_oc; k++)
+                    vmovups(vmm_g_pack_wei(k),
+                            EVEX_compress_addr(aux_reg_ker,
+                                    jcp.typesize_in
+                                            * (ki * ker_point_size()
+                                                    + k * oc_block)));
+                for (int jj = jj_start; jj < jj_end; jj++) {
+                    vmovups(vmm_g_pack_inp,
+                            EVEX_compress_addr_safe(aux_reg_inp,
+                                    get_input_offset(ki, 0, jj, pad_l),
+                                    reg_long_offt));
+                    for (int k = 0; k < g_pack_oc; k++)
+                        vfmadd231ps(vmm_g_pack_acc(jj, k), vmm_g_pack_wei(k),
+                                vmm_g_pack_inp);
+                }
+                continue;
+            }
             for (int ic = 0; ic < ic_block; ic++) {
                 if (ic_tail && ic >= ic_tail) {
                     // if src has only tails to compute, skip early
@@ -493,8 +542,7 @@ void jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::compute_loop_fma_core(
     if (jcp.ndims == 5) {
         add(aux_reg_inp_d,
                 typesize * (jcp.dilate_d + 1) * jcp.ih * jcp.iw * inp_mul);
-        const dim_t ker_shift
-                = typesize * jcp.kw * jcp.kh * jcp.oc_block * jcp.ic_block;
+        const dim_t ker_shift = typesize * jcp.kw * jcp.kh * ker_point_size();
         add(aux_reg_ker_d, ker_shift);
 
         dec(reg_ki);
@@ -561,6 +609,8 @@ void jit_avx512_common_conv_fwd_kernel_vmm_t<Vmm>::compute_loop(
         pop(reg_ker);
         pop(reg_inp);
     }
+
+    if (jcp.is_g_packed) reduce_g_packed_output(ur_w);
 
     L(skip_compute_loop);
     store_output(ur_w);
@@ -890,6 +940,42 @@ status_t jit_avx512_common_conv_fwd_kernel_t::init_conf(jit_conv_conf_t &jcp,
     if (is_data_layout_nxc && jcp.simd_w == 4)
         jcp.simd_w = jcp.oc <= 8 ? 8 : 16;
 
+    // Groups with 4 channels: compute pairs of groups as one group with
+    // 8 channels in a Ymm. Lanes hold (group, ic), each output point
+    // accumulates 4 vectors (one per oc) that are reduced over ic at the end.
+    // It needs weights blocked as [g/2][kd][kh][kw][4o][2g][4i].
+    memory_desc_t g_packed_wei_md = weights_md;
+    {
+        const int wei_ndims = weights_md.ndims;
+        blocking_desc_t blk = {};
+        blk.inner_nblks = 3;
+        blk.inner_blks[0] = 4;
+        blk.inner_idxs[0] = 1;
+        blk.inner_blks[1] = 2;
+        blk.inner_idxs[1] = 0;
+        blk.inner_blks[2] = 4;
+        blk.inner_idxs[2] = 2;
+        for (int d = 0; d < wei_ndims; d++)
+            blk.strides[d] = wei_ndims - d;
+        if (with_groups)
+            CHECK(memory_desc_init_by_blocking_desc(g_packed_wei_md, blk));
+    }
+    const dim_t g_packed_ur_w = nstl::min<dim_t>(jcp.ow, 6);
+    jcp.is_g_packed = is_data_layout_nxc && with_groups && jcp.ngroups % 2 == 0
+            && jcp.ic == 4 && jcp.oc == 4
+            && IMPLICATION(weights_d.format_kind() != format_kind::any,
+                    weights_md == g_packed_wei_md)
+            && jcp.l_pad <= g_packed_ur_w
+            && calculate_end_padding(jcp.l_pad, jcp.ow - jcp.ow % g_packed_ur_w,
+                       jcp.iw, jcp.stride_w, ext_kw)
+                    <= g_packed_ur_w;
+    if (jcp.is_g_packed) {
+        jcp.ngroups /= 2;
+        jcp.ic = jcp.ic_without_padding = 8;
+        jcp.oc = jcp.oc_without_padding = 8;
+        jcp.simd_w = 8;
+    }
+
     jcp.oc_block = jcp.simd_w;
     jcp.ic_block = jcp.is_1stconv ? jcp.ic : jcp.simd_w;
 
@@ -949,9 +1035,15 @@ status_t jit_avx512_common_conv_fwd_kernel_t::init_conf(jit_conv_conf_t &jcp,
                 curr_dst_tag == dst_tag, VERBOSE_UNSUPPORTED_TAG_S, "dst");
     jcp.dst_tag = dst_tag;
 
-    VDISPATCH_CONV_IC(init_tag(jcp.wei_tag, weights_md, weights_d, wei_tag)
-                    == status::success,
-            VERBOSE_UNSUPPORTED_TAG);
+    if (jcp.is_g_packed) {
+        if (weights_d.format_kind() == format_kind::any)
+            weights_md = g_packed_wei_md;
+        jcp.wei_tag = format_tag::undef;
+    } else {
+        VDISPATCH_CONV_IC(init_tag(jcp.wei_tag, weights_md, weights_d, wei_tag)
+                        == status::success,
+                VERBOSE_UNSUPPORTED_TAG);
+    }
 
     jcp.with_bias = cd.bias_desc.format_kind != format_kind::undef;
     if (jcp.with_bias) {
@@ -1231,13 +1323,23 @@ status_t jit_avx512_common_conv_fwd_kernel_t::init_conf(jit_conv_conf_t &jcp,
         }
     }
 
+    if (jcp.is_g_packed) {
+        // 4 accumulators per output point, 4 weights and 4 temporary
+        // registers.
+        jcp.kernel_kind = expl_bcast;
+        jcp.nb_ic_blocking = jcp.nb_oc_blocking = 1;
+        jcp.ur_w = static_cast<int>(g_packed_ur_w);
+    }
+
     jcp.ur_w_tail = jcp.ow % jcp.ur_w;
 
     bool args_ok = true && jcp.l_pad <= jcp.ur_w
             && jcp.ic <= src_d.padded_dims()[1]
             && jcp.oc <= dst_d.padded_dims()[1]
-            && jcp.ic <= weights_d.padded_dims()[with_groups + 1]
-            && jcp.oc <= weights_d.padded_dims()[with_groups + 0];
+            && IMPLICATION(!jcp.is_g_packed,
+                    jcp.ic <= weights_d.padded_dims()[with_groups + 1]
+                            && jcp.oc <= weights_d.padded_dims()[with_groups
+                                       + 0]);
     VDISPATCH_CONV_IC(args_ok, VERBOSE_UNSUPPORTED_PAD_FEATURE,
             "weight and src size mismatch");
 
