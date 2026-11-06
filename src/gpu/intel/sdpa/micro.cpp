@@ -16,6 +16,7 @@
 
 #include "gpu/intel/sdpa/micro.hpp"
 #include "gpu/intel/sdpa/configs.hpp"
+#include "gpu/intel/sdpa/select.hpp"
 
 #include "common/c_types_map.hpp"
 #include "common/math_utils.hpp"
@@ -89,6 +90,108 @@ constexpr int host_argument_bytes_bwd = 256;
 compute::gpu_arch_t gpu_arch(const micro::HWInformation &hw_info) {
     return jit::convert_ngen_arch_to_dnnl(
             getCore(ngen::npack::decodeHWIPVersion(hw_info.gmdid).family));
+}
+
+int data_type_bits(data_type_t dt) {
+    switch (dt) {
+        case data_type::u4:
+        case data_type::s4: return 4;
+        default: return static_cast<int>(types::data_type_size(dt)) * 8;
+    }
+}
+
+// Device facts for the forward tile selector
+fwd_hw_t make_fwd_hw(
+        const compute::device_info_t *dev_info, int sg_size, bool systolic) {
+    fwd_hw_t hw;
+    hw.arch = dev_info->gpu_arch();
+    hw.eu_count = dev_info->eu_count();
+    hw.eus_per_subslice = dev_info->max_eus_per_wg();
+    hw.threads_per_eu_128 = dev_info->threads_per_eu(128);
+    hw.threads_per_eu_256 = dev_info->threads_per_eu(256);
+    hw.grf_bytes = dev_info->grf_size();
+    const auto &product = dev_info->product();
+    hw.slm_per_wg = compute::device_info_t::max_slm_size_per_tg(product);
+    hw.slm_per_subslice = compute::device_info_t::max_slm_size(product);
+    hw.max_wg_items_128 = static_cast<int>(dev_info->max_wg_size(128));
+    hw.l3_bytes = dev_info->l3_cache_size();
+    hw.subgroup_size = sg_size;
+    hw.integrated = dev_info->is_integrated();
+    hw.systolic = systolic;
+    return hw;
+}
+
+// Problem features for the forward tile selector, alignments and GQA
+// decode folding as in init_conf
+fwd_problem_t make_fwd_problem(const micro_fwd_t::pd_t *pd) {
+    const auto *d = pd->desc();
+    const memory_desc_wrapper qry_mdw(d->qry_md());
+    const memory_desc_wrapper key_mdw(d->key_md());
+    const memory_desc_wrapper val_mdw(d->val_md());
+    const memory_desc_wrapper dst_mdw(pd->dst_md());
+
+    fwd_problem_t p;
+    p.d_qk = into<int>(d->head_size());
+    p.d_v = into<int>(d->values());
+    p.d_max_kq = pd->d_max_kq();
+    p.d_max_v = pd->d_max_v();
+    p.keys = d->keys();
+    p.queries = d->queries();
+    p.kv_group_size = into<int>(d->num_q_heads() / d->num_kv_heads());
+    const bool gqa_q1 = (p.queries == 1 && p.kv_group_size > 1);
+    p.batch_heads
+            = d->batch() * (gqa_q1 ? d->num_kv_heads() : d->num_q_heads());
+
+    if (pd->with_causal_mask()) {
+        p.mask = (d->mask_type == attn_mask_type::top_left)
+                ? fwd_mask_t::causal_top_left
+                : fwd_mask_t::causal_bottom_right;
+    } else if (pd->with_attn_mask()) {
+        const memory_desc_wrapper msk_mdw(d->attn_mask_md());
+        p.mask = fwd_mask_t::buffer;
+        p.mask_bits = data_type_bits(msk_mdw.data_type());
+        p.mask_broadcast_q
+                = (msk_mdw.dims()[micro_fwd_t::pd_t::mask_q_index] == 1);
+    }
+
+    p.q_bits = data_type_bits(qry_mdw.data_type());
+    p.k_bits = data_type_bits(key_mdw.data_type());
+    p.v_bits = data_type_bits(val_mdw.data_type());
+    p.dst_bits = data_type_bits(dst_mdw.data_type());
+
+    p.k_quantized = pd->with_key_scales() || pd->with_key_zp();
+    p.v_quantized = pd->with_value_scales() || pd->with_value_zp();
+    const bool kq_common = with_quantize_common(d->kq_scales)
+            || with_quantize_common(d->kq_zero_points);
+    const bool vs_common = with_quantize_common(d->vs_scales)
+            || with_quantize_common(d->vs_zero_points);
+    if (p.k_quantized) p.k_group_size = kq_common ? 0 : pd->key_group_size();
+    if (p.v_quantized) p.v_group_size = vs_common ? 0 : pd->value_group_size();
+
+    p.kq_f16_acc = (pd->kq_acc_dt() == data_type::f16);
+    p.vs_f16_acc = (pd->vs_acc_dt() == data_type::f16);
+    p.f32 = (qry_mdw.data_type() == data_type::f32);
+    p.fma = !pd->use_systolic_ukernel();
+
+    const dim_t ldq = (gqa_q1 ? qry_mdw.strides()[1]
+                              : gemm_desc_t::get_ld(*d->qry_md()))
+            * qry_mdw.data_type_size();
+    const dim_t ldk
+            = gemm_desc_t::get_ld(*d->key_md()) * key_mdw.data_type_size();
+    const dim_t ldv
+            = gemm_desc_t::get_ld(*d->val_md()) * val_mdw.data_type_size();
+    const dim_t lda = (gqa_q1 ? dst_mdw.strides()[1]
+                              : gemm_desc_t::get_ld(*pd->dst_md()))
+            * dst_mdw.data_type_size();
+    p.q_align = alignment_for_md(qry_mdw, ldq);
+    p.k_align = alignment_for_md(key_mdw, ldk);
+    p.v_align = alignment_for_md(val_mdw, ldv);
+    p.dst_align = alignment_for_md(dst_mdw, lda);
+    p.transpose_k = gemm_desc_t::get_trans(*d->key_md()) == dnnl_trans;
+
+    p.training = (d->prop_kind == prop_kind::forward_training);
+    p.dropout = !pd->attr()->dropout_.has_default_values();
+    return p;
 }
 
 } // namespace
@@ -187,9 +290,8 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
     VCHECK_SDPA_COND(compute::mayiuse_microkernels(intel_engine),
             "Microkernels not supported by the OpenCL driver.");
 
-    /* Retrieve pre-tuned kernel configuration */
-    fwd_config_t *config = nullptr;
-    const dim_t thin_q_threshold = 16;
+    /* Select the microkernel tile configuration */
+    const dim_t thin_q_threshold = fwd_thin_q_threshold;
     auto queries = d->queries();
     if (queries == 1) { queries = (d->q_desc.dims[1] / d->num_kv_heads()); }
 
@@ -204,17 +306,57 @@ status_t micro_fwd_t::pd_t::init_conf_microkernels(
             || (vs_acc_dt() == data_type::f16);
     VDISPATCH_SDPA(IMPLICATION(is_f16_accumulate_gemm, !use_systolic_ukernel()),
             "f16 accumulate only available with FMA matmul."); //TODO: update once matmul primitive supports systolic f16 accumulate for testing
+
+    const fwd_problem_t sel_problem = make_fwd_problem(this);
+    const fwd_hw_t sel_hw
+            = make_fwd_hw(dev_info, sg_size(), use_systolic_ukernel());
+    // Hand-tuned table: the fallback, and the reference in the verbose line
     // Query using max(D_qk, D_v) so the selected config's tiles are large
     // enough to hold both the QK and V head sizes when they differ.
     const dim_t query_head_size = std::max(d->head_size(), d->values());
-    config = choose_config(arch_, query_head_size, d->keys(), thin_q, quantized,
-            is_integrated, use_fma_config, is_f32, is_f16_accumulate_gemm);
+    const fwd_config_t *legacy = choose_config(arch_, query_head_size,
+            d->keys(), thin_q, quantized, is_integrated, use_fma_config, is_f32,
+            is_f16_accumulate_gemm);
 
-    VDISPATCH_SDPA(config != nullptr,
+    fwd_selection_t selection;
+    if (!fwd_select(sel_problem, sel_hw, selection) && legacy) {
+        selection.config = *legacy;
+        selection.source = "legacy";
+        std::string reason;
+        if (!fwd_describe(selection.config, sel_problem, sel_hw,
+                    fwd_model_coefs(sel_hw.arch), selection.info, &reason))
+            VDEBUGINFO(4, primitive, sdpa,
+                    "legacy config %s fails the selector constraints: %s",
+                    fwd_config_str(selection.config).c_str(), reason.c_str());
+    }
+
+    fwd_config_t config_storage = selection.config;
+    fwd_config_t *config = &config_storage;
+    CHECK(update_config_from_devenv_values(config, quantized));
+    if (fwd_config_str(*config) != fwd_config_str(selection.config)) {
+        selection.source = "env";
+        fwd_describe(*config, sel_problem, sel_hw, fwd_model_coefs(sel_hw.arch),
+                selection.info);
+    }
+
+    // One machine-readable line per selection for scripts/sdpa_tuner
+    VDEBUGINFO(4, primitive, sdpa,
+            "fwd_select,key:%s,src:%s,cfg:%s,legacy:%s,kv:%d,q:%d,sg:%d,slm:%d,"
+            "grf:%d,wgss:%d,cost_us:%.3f,hw:%s,prb:%s",
+            fwd_make_key(sel_problem, sel_hw).str().c_str(), selection.source,
+            fwd_config_str(*config).c_str(),
+            legacy ? fwd_config_str(*legacy).c_str() : "none",
+            selection.info.kv_tile, selection.info.q_tile,
+            selection.info.sg_per_wg, selection.info.slm_bytes,
+            selection.info.grfs, selection.info.wg_per_subslice,
+            selection.info.cost_us, fwd_hw_str(sel_hw).c_str(),
+            fwd_problem_str(sel_problem).c_str());
+
+    // Checked after the line above so problems without any config can still
+    // be swept with SDPA_CONFIG
+    VDISPATCH_SDPA(config->unroll_m_kq > 0,
             "No suitable kernel configuration found for the given problem "
             "size and attributes.");
-
-    CHECK(update_config_from_devenv_values(config, quantized));
 
     VDEBUGINFO(4, primitive, sdpa,
             "D=%d,K=%d,%s%s%s"
@@ -1328,8 +1470,9 @@ status_t micro_fwd_params_t::get_kernel_ctx(
     }
     CHECK(compute::validate_microkernel(gemm_vs, "gemm_vs"));
 
-    VDEBUGINFO(4, primitive, sdpa, "kq_gemm: %s, vs_gemm: %s,",
-            problem_kq.toString().c_str(), problem_vs.toString().c_str());
+    VDEBUGINFO(4, primitive, sdpa, "kq_gemm: %s, vs_gemm: %s, grf_min: %d/%d,",
+            problem_kq.toString().c_str(), problem_vs.toString().c_str(),
+            gemm_kq.grfMin, gemm_vs.grfMin);
 
     /* Generate microkernel shims */
     compute::microkernel_shims_t shims(kernel_ctx, subgroup_size, hw_arch);
