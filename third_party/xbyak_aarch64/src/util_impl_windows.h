@@ -34,6 +34,10 @@
 #include <malloc.h>
 #include <windows.h>
 
+#ifndef PF_ARM_V86_BF16_INSTRUCTIONS_AVAILABLE
+#define PF_ARM_V86_BF16_INSTRUCTIONS_AVAILABLE (68)
+#endif
+
 namespace Xbyak_aarch64 {
 namespace util {
 
@@ -110,6 +114,8 @@ private:
       type_ |= (Type)XBYAK_AARCH64_HWCAP_CRC;
     if (IsProcessorFeaturePresent(PF_ARM_V83_JSCVT_INSTRUCTIONS_AVAILABLE))
       type_ |= (Type)XBYAK_AARCH64_HWCAP_JSCVT;
+    if (IsProcessorFeaturePresent(PF_ARM_V86_BF16_INSTRUCTIONS_AVAILABLE))
+      type_ |= (Type)XBYAK_AARCH64_HWCAP_BF16;
 #ifdef PF_ARM_SME_INSTRUCTIONS_AVAILABLE
     if (IsProcessorFeaturePresent(PF_ARM_SME_INSTRUCTIONS_AVAILABLE))
       type_ |= (Type)XBYAK_AARCH64_HWCAP_SME;

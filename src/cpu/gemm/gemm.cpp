@@ -42,6 +42,10 @@
 #include "cpu/x64/gemm/gemm_driver.hpp"
 
 using namespace dnnl::impl::cpu::x64;
+#elif DNNL_AARCH64
+#include "cpu/aarch64/gemm/bf16/neon_gemm_bf16bf16f32.hpp"
+
+using namespace dnnl::impl::cpu::aarch64;
 #elif DNNL_PPC64
 #include "cpu/ppc64/gemm/gemm_driver.hpp"
 using namespace dnnl::impl::cpu::ppc64;
@@ -304,6 +308,12 @@ dnnl_status_t gemm_bf16bf16f32(const char *transa, const char *transb,
         auto status = gemm_driver(transa, transb, dummyOffsetC, M, N, K, alpha,
                 (const bfloat16_t *)A, lda, dummy_ao, (const bfloat16_t *)B,
                 ldb, dummy_bo, beta, (float *)C, ldc, dummy_co, false);
+        if (status != status::unimplemented) return status;
+    }
+#elif DNNL_AARCH64
+    {
+        auto status = neon_gemm_bf16bf16f32(
+                transa, transb, M, N, K, alpha, A, lda, B, ldb, beta, C, ldc);
         if (status != status::unimplemented) return status;
     }
 #elif DNNL_PPC64
