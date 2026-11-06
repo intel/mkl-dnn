@@ -352,17 +352,20 @@ struct gen_t : public primitive_t {
 
             // Why an override or a pinned rank does not run.
             std::string reject_reason;
-            size_t begin = index >= 0 ? index : 0;
-            size_t end = index >= 0 ? index + 1 : entries.size();
-            for (size_t entry_idx = begin; entry_idx < end; entry_idx++) {
-                auto *entry = entries[entry_idx];
-                int g = (int)(entry - jit::catalog().entries);
+            // entry: none for an override.
+            auto try_entry = [&](const gemmstone::kcatalog::Entry *entry,
+                                     size_t entry_idx) -> bool {
+                bool ovr = kernel_desc_.has_override();
+                std::string g = ovr ? "override"
+                                    : lpad(entry - jit::catalog().entries, 4);
+                auto pos = std::to_string(entry_idx) + "/"
+                        + std::to_string(entries.size());
                 auto skip = [&](const std::string &why) {
-                    gpu_debug() << "[" << lpad(g, 4) << "] skip " << entry_idx
-                                << "/" << entries.size() << " " << entry->str()
+                    gpu_debug() << "[" << g << "] skip "
+                                << (ovr ? kernel_desc_.resolved_str()
+                                        : pos + " " + entry->str())
                                 << "," << why;
-                    if ((!kernel_desc_.has_entry() || index >= 0)
-                            && reject_reason.empty())
+                    if ((ovr || index >= 0) && reject_reason.empty())
                         reject_reason = why;
                 };
                 kernel_desc_.set_entry(entry);
@@ -442,25 +445,29 @@ struct gen_t : public primitive_t {
                     status = try_create();
                     if (status == status::success) {
                         kernel_success = true;
-                        if (kernel_desc_.has_entry())
-                            gpu_info() << "[" << lpad(g, 4) << "] use "
-                                       << entry_idx << "/" << entries.size()
-                                       << (index >= 0 ? " pin" : "") << " "
-                                       << kernel_desc_.resolved_str();
-                        else
-                            gpu_info() << "[override] use "
-                                       << kernel_desc_.resolved_str();
+                        gpu_info() << "[" << g << "] use "
+                                   << (ovr ? ""
+                                           : pos + (index >= 0 ? " pin " : " "))
+                                   << kernel_desc_.resolved_str();
                         gpu_debug()
                                 << "final " << kernel_desc_.str()
                                 << ", launch k0="
                                 << kernel_desc_.aux_params()->k0
                                 << " wgK=" << kernel_desc_.aux_params()->wgK;
-                        break;
+                        return true;
                     }
                     skip("Kernel generation failed.");
                 }
-                // Overrides do not depend on the entry.
-                if (!kernel_desc_.has_entry()) break;
+                return false;
+            };
+
+            if (kernel_desc_.has_override()) {
+                try_entry(entries.empty() ? nullptr : entries[0], 0);
+            } else {
+                size_t begin = index >= 0 ? index : 0;
+                size_t end = index >= 0 ? index + 1 : entries.size();
+                for (size_t i = begin; i < end; i++)
+                    if (try_entry(entries[i], i)) break;
             }
 
             VDISPATCH_GEMM(kernel_success, "%s",

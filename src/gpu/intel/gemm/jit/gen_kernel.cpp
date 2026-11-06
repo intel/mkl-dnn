@@ -281,7 +281,13 @@ status_t gen_desc_t::finalize(
     };
     problem_.CO.setAlignment(problem_.Tco.paddedSize());
 
-    const auto *base = entry_;
+    kcatalog::Entry bare = {};
+    bare.selector.hw = catalog_hw_;
+    bare.selector.kernelType = bare.selector.precisions[0]
+            = bare.selector.precisions[1] = bare.selector.precisions[2]
+            = bare.selector.layouts[0] = bare.selector.layouts[1]
+            = bare.selector.layouts[2] = "";
+    const auto *base = entry_ ? entry_ : &bare;
     std::string str = kernel_override_;
     try {
         if (str.empty()) {
@@ -533,6 +539,7 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     /* Reuse PVC strategies for legacy mode on Xe3p */
     if (hw_ == ngen::HW::Xe3p && !efficient_64b_)
         base.selector.hw = kcatalog::HWTagXeHPC;
+    catalog_hw_ = base.selector.hw;
 
     // By default gemmstone assumes that the accumulation type must be at least
     // as wide as the output type. For oneDNN this restriction is not needed.
@@ -698,6 +705,16 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
 
 status_t gen_nocopy_desc_t::finalize() {
     // Update A/B/C types from entry.
+    if (entry_) update_types();
+    problem_.Ts = Ts_;
+
+    if (problem_.Ts == Type::invalid) problem_.Ts = problem_.Tc;
+
+    problem_.beta = beta_;
+    return gen_desc_t::finalize(tags_.c_str(), eval_params_);
+}
+
+void gen_nocopy_desc_t::update_types() {
     Type Ta_new, Ta_ext_new, Tb_new, Tb_ext_new, Tc_new;
     parsePrecisions(entry_->selector.precisions[0], Ta_ext_new, Ta_new);
     parsePrecisions(entry_->selector.precisions[1], Tb_ext_new, Tb_new);
@@ -726,12 +743,6 @@ status_t gen_nocopy_desc_t::finalize() {
     };
     use_tf32(problem_.Ta_ext, Ta_ext_new);
     use_tf32(problem_.Tb_ext, Tb_ext_new);
-    problem_.Ts = Ts_;
-
-    if (problem_.Ts == Type::invalid) problem_.Ts = problem_.Tc;
-
-    problem_.beta = beta_;
-    return gen_desc_t::finalize(tags_.c_str(), eval_params_);
 }
 
 status_t gen_xe_systolic_kernel_desc_t::select_kernel(

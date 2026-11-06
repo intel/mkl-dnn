@@ -108,6 +108,7 @@ struct gen_desc_t {
     void set_kernel_override(const std::string &kernel) {
         kernel_override_ = kernel;
     }
+    bool has_override() const { return !kernel_override_.empty(); }
     // Why the override does not run.
     const std::string &reject_reason() const { return reject_reason_; }
 
@@ -124,6 +125,7 @@ protected:
     gemmstone::CommonDriverInfo driver_info_;
 
     bool efficient_64b_ = false;
+    char catalog_hw_ = 0;
 
     std::string kernel_override_;
     std::string resolved_str_;
@@ -176,6 +178,8 @@ struct gen_nocopy_desc_t : public gen_desc_t {
     status_t finalize();
 
 private:
+    void update_types();
+
     std::string tags_;
     gemmstone::EvaluateParams eval_params_;
     gemmstone::Type Ts_;
