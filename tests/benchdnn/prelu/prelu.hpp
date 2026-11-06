@@ -86,6 +86,9 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
     std::vector<int> supported_exec_args(
             bool override_dir_with_fwd) const override;
 
+    std::unique_ptr<base_perf_report_t> create_perf_report(
+            const char *perf_template) const override;
+
 private:
     std::string set_repro_line() override;
 };

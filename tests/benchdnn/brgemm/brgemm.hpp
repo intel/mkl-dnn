@@ -191,6 +191,9 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
     void skip_unimplemented(res_t *res) const override;
     void skip_invalid(res_t *res) const override;
 
+    std::unique_ptr<base_perf_report_t> create_perf_report(
+            const char *perf_template) const override;
+
 private:
     std::string set_repro_line() override;
 

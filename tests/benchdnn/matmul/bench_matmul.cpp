@@ -30,8 +30,6 @@
 
 namespace matmul {
 
-TASK_EXECUTOR_DECL_TYPES;
-
 #ifdef DNNL_DEV_MODE
 // Parses `A-B`; false for any other string.
 static bool parse_range(const std::string &v, int &beg, int &end) {
@@ -79,8 +77,7 @@ static std::vector<std::string> expand_gpu_kernel(
 }
 #endif // DNNL_DEV_MODE
 
-void check_correctness(
-        const settings_t &s, driver_task_executor_t &task_executor) {
+void check_correctness(const settings_t &s, task_executor_t &task_executor) {
     std::vector<std::pair<dnnl_data_type_t, int>> bia_cfg;
     for (const auto &i_bia_dt : s.bia_dt) {
         if (i_bia_dt == dnnl_data_type_undef) {
@@ -328,7 +325,7 @@ int bench(int argc, char **argv) {
     using namespace parser;
     static settings_t s;
     static const settings_t def {};
-    static driver_task_executor_t task_executor;
+    static task_executor_t task_executor;
     for (; argc > 0; --argc, ++argv) {
         const bool parsed_options = parse_bench_settings(argv[0])
                 || parse_batch(bench, argv[0])

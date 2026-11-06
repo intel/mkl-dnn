@@ -63,8 +63,7 @@ struct settings_t : public base_settings_t {
     std::vector<float> eps {1.f / 16};
 
     const char *perf_template_csv() const {
-        static const std::string args
-                = "%dir%,%dt%,%tag%,%stat_tag%,%flags%,%eps%";
+        static const std::string args = "%dir%,%dt%,%tag%,%stat_tag%,%flags%";
         return perf_template_csv_base(args);
     }
 
@@ -135,6 +134,9 @@ struct prb_t : public prb_dims_t, public base_prb_t {
     void skip_invalid(res_t *res) const override;
     std::vector<int> supported_exec_args(
             bool override_dir_with_fwd) const override;
+
+    std::unique_ptr<base_perf_report_t> create_perf_report(
+            const char *perf_template) const override;
 
 private:
     std::string set_repro_line() override;

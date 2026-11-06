@@ -25,10 +25,7 @@
 
 namespace ip {
 
-TASK_EXECUTOR_DECL_TYPES;
-
-void check_correctness(
-        const settings_t &s, driver_task_executor_t &task_executor) {
+void check_correctness(const settings_t &s, task_executor_t &task_executor) {
     for_(const auto &i_dir : s.dir)
     for_(const auto &i_dt : s.dt)
     for_(const auto &i_bia_dt_ : s.bia_dt)
@@ -82,7 +79,7 @@ int bench(int argc, char **argv) {
     using namespace parser;
     static settings_t s;
     static const settings_t def {};
-    static driver_task_executor_t task_executor;
+    static task_executor_t task_executor;
     for (; argc > 0; --argc, ++argv) {
         const bool parsed_options = parse_bench_settings(argv[0])
                 || parse_batch(bench, argv[0])

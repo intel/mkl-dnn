@@ -138,8 +138,8 @@ void base_perf_report_t::handle_option(std::ostream &s, const char *&option,
     HANDLE("tag", if (tag()) s << *tag());
     HANDLE("stat_tag", if (stat_tag()) s << *stat_tag());
     HANDLE("wtag", if (wtag()) s << *wtag());
-    HANDLE("ctx-init", s << *ctx_init());
-    HANDLE("ctx-exe", s << *ctx_exe());
+    HANDLE("ctx-init", if (ctx_init()) s << *ctx_init());
+    HANDLE("ctx-exe", if (ctx_exe()) s << *ctx_exe());
     // Options operating on driver independent objects, e.g. timer values.
     HANDLE("bw", s << get_bw(res->timer_map.perf_timer()));
     HANDLE("driver", s << driver_name);
