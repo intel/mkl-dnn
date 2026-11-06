@@ -237,12 +237,11 @@ void compute_liveness(
         }
     }
 
-    // Phase 2: compute `live_in` and `live_out` using backward dataflow
-    // analysis. Iterate until reaching a fixed point (no changes in a full
-    // pass).
+    // Phase 2: compute `live_in` using backward dataflow analysis. Iterate
+    // until reaching a fixed point (no change of `live_in` in a full pass).
+    // `live_out[i]` is computed from `live_in` when `live_in[i]` needs it and
+    // is not stored.
     live_in.assign(n_ops, std::vector<uint64_t>(n_words, 0));
-    std::vector<std::vector<uint64_t>> live_out(
-            n_ops, std::vector<uint64_t>(n_words, 0));
 
     bool changed = true;
     while (changed) {
@@ -256,8 +255,7 @@ void compute_liveness(
                 }
                 // live_in[i] = use[i] OR (live_out[i] AND NOT def[i])
                 const uint64_t in = use_at[i][w] | (out & ~def_at[i][w]);
-                if (out != live_out[i][w] || in != live_in[i][w]) {
-                    live_out[i][w] = out;
+                if (in != live_in[i][w]) {
                     live_in[i][w] = in;
                     changed = true;
                 }
