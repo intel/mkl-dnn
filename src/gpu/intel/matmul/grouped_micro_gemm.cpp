@@ -373,26 +373,9 @@ status_t grouped_micro_gemm_t::pd_t::init_k_axis(const impl::engine_t *engine) {
 
     const data_type_t src_dt = src_d.data_type();
 
-    VDISPATCH_MATMUL(!with_reduce(), VERBOSE_UNSUPPORTED_FEATURE, "reduce");
     VDISPATCH_MATMUL(attr()->has_default_values(), VERBOSE_UNSUPPORTED_ATTR);
-    VDISPATCH_MATMUL(!with_bias(), VERBOSE_UNSUPPORTED_BIAS_CFG);
 
     // src is col-major, wei is row-major
-    const sparse_desc_t::grouped_desc_t &src_grouped
-            = src_d.sparse_desc().grouped_desc;
-    const sparse_desc_t::grouped_desc_t &wei_grouped
-            = wei_d.sparse_desc().grouped_desc;
-
-    VDISPATCH_MATMUL(src_grouped.variable_dim_idx == 1
-                    && wei_grouped.variable_dim_idx == 0,
-            VERBOSE_UNSUPPORTED_SPARSE_CFG);
-    VDISPATCH_MATMUL(src_grouped.group_count == wei_grouped.group_count,
-            VERBOSE_INCONSISTENT_NDIMS_WITH_VALS, "src ngroups", "wei ngroups",
-            (int)src_grouped.group_count, (int)wei_grouped.group_count);
-    VDISPATCH_MATMUL(utils::everyone_is(s32, src_d.metadata_type(0),
-                             wei_d.metadata_type(0)),
-            VERBOSE_UNSUPPORTED_SPARSE_CFG);
-
     const dims_t &src_strides = src_d.strides();
     const dims_t &wei_strides = wei_d.strides();
     VDISPATCH_MATMUL(src_strides[0] == 1 && src_strides[1] == src_d.dims()[0],
@@ -430,21 +413,11 @@ status_t grouped_micro_gemm_t::pd_t::init_m_axis(const impl::engine_t *engine) {
     data_type_t wei_dt = wei_d.data_type();
     data_type_t dst_dt = dst_d.data_type();
 
-    // Check for grouped encoding on dst
-    VDISPATCH_MATMUL(dst_d.is_grouped_desc(), VERBOSE_UNSUPPORTED_SPARSE_CFG);
-
     // Weights should be dense
-    VDISPATCH_MATMUL(!wei_d.is_sparse_desc() && !wei_d.is_grouped_desc(),
-            VERBOSE_UNSUPPORTED_SPARSE_CFG);
+    VDISPATCH_MATMUL(!wei_d.is_sparse_desc(), VERBOSE_UNSUPPORTED_SPARSE_CFG);
 
     VDISPATCH_MATMUL_SC(attr_.post_ops_.set_default_formats(dst_md(0)),
             VERBOSE_UNSUPPORTED_POSTOP);
-
-    // Extract grouped encoding
-    const sparse_desc_t::grouped_desc_t &src_grouped
-            = src_d.sparse_desc().grouped_desc;
-    const sparse_desc_t::grouped_desc_t &dst_grouped
-            = dst_d.sparse_desc().grouped_desc;
 
     // Resolve format_any to plain dense
     if (wei_d.format_any())
@@ -452,11 +425,6 @@ status_t grouped_micro_gemm_t::pd_t::init_m_axis(const impl::engine_t *engine) {
 
     VDISPATCH_MATMUL(wei_d.matches_one_of_tag(format_tag::abc, format_tag::acb),
             VERBOSE_UNSUPPORTED_TAG_S, "weights");
-
-    // Validate matching number of groups
-    VDISPATCH_MATMUL(src_grouped.group_count == dst_grouped.group_count,
-            VERBOSE_INCONSISTENT_NDIMS_WITH_VALS, "src ngroups", "dst ngroups",
-            (int)src_grouped.group_count, (int)dst_grouped.group_count);
 
     VDISPATCH_MATMUL(utils::one_of(src_dt, f32, f16, bf16, u8, s8, f8_e5m2,
                              f8_e4m3, f4_e2m1),
@@ -489,13 +457,6 @@ status_t grouped_micro_gemm_t::pd_t::init_m_axis(const impl::engine_t *engine) {
                 (int)ld_bytes, pitch_alignment);
     }
 
-    // WOQ (fp src + int wei) requires weight scales and fpmath apply_to_int
-    VDISPATCH_MATMUL(
-            IMPLICATION(!types::is_integral_dt(src_dt)
-                            && types::is_integral_dt(wei_dt),
-                    wei_quant().with_scale() && attr()->fpmath_.apply_to_int_),
-            VERBOSE_UNSUPPORTED_DT_CFG);
-
     const bool wei_subbyte = utils::one_of(wei_dt, s4, u4);
     VDISPATCH_MATMUL(IMPLICATION(wei_subbyte, (K() % 2) == 0), VERBOSE_BAD_DIM,
             "weights", 1);
@@ -505,25 +466,6 @@ status_t grouped_micro_gemm_t::pd_t::init_m_axis(const impl::engine_t *engine) {
             "weights", 1);
     VDISPATCH_MATMUL(IMPLICATION(wei_dt == u3, (N() % 8) == 0), VERBOSE_BAD_DIM,
             "weights", 2);
-
-    // Check offsets are int32
-    VDISPATCH_MATMUL(utils::everyone_is(s32, src_d.metadata_type(0),
-                             dst_d.metadata_type(0)),
-            VERBOSE_UNSUPPORTED_SPARSE_CFG);
-
-    // Check for limited Bias support
-    if (with_bias()) {
-        memory_desc_wrapper bia_d(weights_md(1));
-        VDISPATCH_MATMUL(!bia_d.is_sparse_desc() && !bia_d.is_grouped_desc(),
-                VERBOSE_UNSUPPORTED_BIAS_CFG);
-        VDISPATCH_MATMUL(bia_d.ndims() == 2, VERBOSE_UNSUPPORTED_BIAS_CFG);
-        // Bias shape should be [num_experts, N]
-        VDISPATCH_MATMUL(bia_d.dims()[0] == src_grouped.group_count,
-                VERBOSE_INCONSISTENT_DIM, "bia_d", 0, "src_grouped.group_count",
-                -1);
-        VDISPATCH_MATMUL(bia_d.dims()[1] == wei_d.dims()[2],
-                VERBOSE_INCONSISTENT_DIM, "bia_d", 1, "wei_d", 2);
-    }
 
     // Check for supported quantization schemes
     if (src_quant().with_scale()) {
@@ -925,41 +867,12 @@ status_t grouped_micro_gemm_t::pd_t::init(const impl::engine_t *engine) {
     if (dev_info->ip_version() == 0) return status::unimplemented;
 
     memory_desc_wrapper src_d(src_md());
-    memory_desc_wrapper wei_d(weights_md(0));
     memory_desc_wrapper dst_d(dst_md());
 
-    // Grouped src is common to both workloads; the tensor grouped alongside it
-    // selects which axis is partitioned.
+    // Grouped src is common to both workloads, its variable dim selects which
+    // axis is partitioned (grouped_matmul_desc_init() checked the others)
     VDISPATCH_MATMUL(src_d.is_grouped_desc(), VERBOSE_UNSUPPORTED_SPARSE_CFG);
-    auto get_var_dim_axis = [](const memory_desc_wrapper &md) {
-        if (md.is_grouped_desc()) {
-            return md.sparse_desc().grouped_desc.variable_dim_idx;
-        } else {
-            return -1;
-        }
-    };
-
-    int src_var_dim_axis = get_var_dim_axis(src_d);
-    int wei_var_dim_axis = get_var_dim_axis(wei_d);
-    int dst_var_dim_axis = get_var_dim_axis(dst_d);
-
-    VDISPATCH_MATMUL(src_var_dim_axis != -1, VERBOSE_UNSUPPORTED_SPARSE_CFG);
-
-    if (wei_var_dim_axis == -1) {
-        VDISPATCH_MATMUL(src_var_dim_axis == dst_var_dim_axis,
-                VERBOSE_UNSUPPORTED_SPARSE_CFG
-                "src axis(%d) and dst axis(%d) must vary along the same axis "
-                "when weights are dense",
-                src_var_dim_axis, dst_var_dim_axis);
-    } else {
-        VDISPATCH_MATMUL(src_var_dim_axis == 1 && wei_var_dim_axis == 0,
-                VERBOSE_UNSUPPORTED_SPARSE_CFG
-                "src axis(%d) and weights axis(%d) must vary along the k "
-                "axis when weights are grouped",
-                src_var_dim_axis, wei_var_dim_axis);
-    }
-
-    switch (src_var_dim_axis) {
+    switch (src_d.sparse_desc().grouped_desc.variable_dim_idx) {
         case 0: CHECK(init_m_axis(engine)); break;
         case 1: CHECK(init_k_axis(engine)); break;
         default: return status::unimplemented;

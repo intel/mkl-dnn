@@ -67,6 +67,29 @@
 --batch=shapes_grouped_moe
 
 ########################################
+# scaled_grouped_mm 2Dx2D (wgrad):     #
+# MxFP8                                #
+# scale_a: e8m0 block (M, total_K/32)  #
+# scale_b: e8m0 block (total_K/32, N)  #
+########################################
+
+--reset
+--dt=f8_e4m3:f8_e4m3:bf16
+--attr-scales=src:3:e8m0:1x32+wei:3:e8m0:32x1
+--batch=shapes_grouped_moe_k_axis
+
+########################################
+# DeepSeek Wgrad (2Dx2D):              #
+# scale_a: f32 block (M, total_K/128)  #
+# scale_b: f32 block (total_K/128, N)  #
+########################################
+
+--reset
+--dt=f8_e4m3:f8_e4m3:f32
+--attr-scales=src:3:f32:1x128+wei:3:f32:128x1
+--batch=shapes_grouped_moe_k_axis
+
+########################################
 # WoQ F16/U4/F16                       #
 # scale_b: f16 block (E, K/128, N)     #
 # zero-point_b: u4 block (E, K/128, N) #

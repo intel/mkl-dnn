@@ -782,6 +782,25 @@ void prb_t::skip_invalid(res_t *res) const {
             return;
         }
     }
+
+    // var_K K-grouped scales are a grid over total_K, so every group size
+    // must be a multiple of the scales K group
+    if (prb->sparse_options.is_2dby2d()) {
+        const int64_t gK = prb->scales_k_group();
+        const auto &sizes = prb->sparse_options.get_group_sizes(DNNL_ARG_SRC);
+        bool sizes_ok = true;
+        for (const auto size : sizes)
+            sizes_ok = sizes_ok && size % gK == 0;
+        if (!sizes_ok) {
+            BENCHDNN_PRINT(2,
+                    "[INVALID][%s:%d]: var_K group sizes must be multiples of "
+                    "the scales K group (%lld).\n",
+                    __FILE__, __LINE__, (long long)gK);
+            res->state = SKIPPED;
+            res->reason = reason_t::invalid;
+            return;
+        }
+    }
 }
 
 void setup_cmp(compare::compare_t &cmp, const base_prb_t *base_prb,

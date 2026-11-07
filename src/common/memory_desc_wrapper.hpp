@@ -627,6 +627,14 @@ struct memory_desc_wrapper {
      * represents the position in already padded area */
     dim_t off_v(const dims_t pos, bool is_pos_padded = false) const {
         if (is_host_scalar_desc()) return 0;
+        // Grouped values have no blocking, and an index along the variable
+        // dim spans all groups
+        if (is_grouped_desc()) {
+            dim_t phys_offset = 0;
+            for (int d = 0; d < ndims(); ++d)
+                phys_offset += pos[d] * strides()[d];
+            return phys_offset;
+        }
         assert(is_blocking_desc() || is_sparse_packed_desc());
         const blocking_desc_t &blk = blocking_desc();
 

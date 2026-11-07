@@ -695,8 +695,9 @@ struct sparse_options_t {
         return get_profile(DNNL_ARG_SRC).kind != grouped_data_t::profile_none;
     }
 
-    // Generate group_sizes for deferred profiles
-    int resolve_profile(dnnl_dim_t total_size);
+    // Generate group_sizes for deferred profiles, in multiples of
+    // `granularity` except for a remainder in the last group
+    int resolve_profile(dnnl_dim_t total_size, dnnl_dim_t granularity = 1);
 
     int get_variable_dim_idx(int arg) const {
         const auto it = grouped_data_.find(arg);

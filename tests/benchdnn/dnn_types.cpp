@@ -2323,7 +2323,8 @@ int sparse_options_t::from_str(const std::string &s) {
     return options_count == expected_num_options ? OK : FAIL;
 }
 
-int sparse_options_t::resolve_profile(dnnl_dim_t total_size) {
+int sparse_options_t::resolve_profile(
+        dnnl_dim_t total_size, dnnl_dim_t granularity) {
     grouped_data_t::profile_spec_t spec;
     dnnl_dim_t G = 0, user_hint = 0;
     for (const auto &kv : grouped_data_) {
@@ -2335,15 +2336,19 @@ int sparse_options_t::resolve_profile(dnnl_dim_t total_size) {
         }
     }
 
+    // Profiles distribute units of `granularity` elements, a remainder goes
+    // to the last group
+    const dnnl_dim_t units = total_size / granularity;
+
     std::vector<dnnl_dim_t> sizes(G, 0);
     switch (spec.kind) {
         case grouped_data_t::profile_balanced: {
-            // expected that total_size tokens distributed over G groups
-            // more or less evenly
+            // expected that units are distributed over G groups more or less
+            // evenly
             const dnnl_dim_t seed = spec.get_param_val();
-            std::minstd_rand msr(G * total_size + seed + 1);
+            std::minstd_rand msr(G * units + seed + 1);
             msr.discard(1);
-            for (dnnl_dim_t i = 0; i < total_size; i++)
+            for (dnnl_dim_t i = 0; i < units; i++)
                 sizes[msr() % (uint64_t)G]++;
             break;
         }
@@ -2353,10 +2358,9 @@ int sparse_options_t::resolve_profile(dnnl_dim_t total_size) {
             // pctg == 100 is the extreme where one
             // group takes all and the rest are 0
             const dnnl_dim_t pctg = spec.get_param_val();
-            const dnnl_dim_t hot_total
-                    = (G > 1) ? total_size * pctg / 100 : total_size;
+            const dnnl_dim_t hot_total = (G > 1) ? units * pctg / 100 : units;
             sizes[0] = hot_total;
-            const dnnl_dim_t rest = total_size - hot_total, cnt = G - 1;
+            const dnnl_dim_t rest = units - hot_total, cnt = G - 1;
             if (cnt > 0) {
                 const dnnl_dim_t q = rest / cnt, r = rest % cnt;
                 for (dnnl_dim_t j = 0; j < cnt; j++)
@@ -2365,22 +2369,27 @@ int sparse_options_t::resolve_profile(dnnl_dim_t total_size) {
             break;
         }
         case grouped_data_t::profile_decode: {
-            // each of the total_size tokens gets its own group
-            if (total_size > G) {
+            // each of the units gets its own group
+            if (units > G) {
                 BENCHDNN_PRINT(0,
-                        "Error: decode profile requires total_M (%lld) <= "
-                        "NUM_GROUPS (%lld)\n",
-                        (long long)total_size, (long long)G);
+                        "Error: decode profile requires total size / unit "
+                        "(%lld / %lld) <= NUM_GROUPS (%lld)\n",
+                        (long long)total_size, (long long)granularity,
+                        (long long)G);
                 return FAIL;
             }
-            for (dnnl_dim_t i = 0; i < total_size; i++)
-                sizes[i * G / total_size] = 1;
+            for (dnnl_dim_t i = 0; i < units; i++)
+                sizes[i * G / units] = 1;
             break;
         }
         default:
             BENCHDNN_PRINT(0, "%s\n", "Error: unknown grouped profile");
             return FAIL;
     }
+
+    for (auto &size : sizes)
+        size *= granularity;
+    sizes.back() += total_size % granularity;
 
     // max_variable_dim dispatcher hint,
     // if not provided, use the largest group size from generated

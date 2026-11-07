@@ -449,49 +449,6 @@ TEST(iface_grouped_test_t, TestGroupedMatmulPatterns) {
             dnnl::error);
 }
 
-TEST(iface_grouped_test_t, TestGrouped2Dby2DUnsupportedAttr) {
-    engine eng = get_test_engine();
-
-    const int ngroups = 2;
-    const int M = 4, K = 8, N = 6;
-
-    // Valid 2Dx2D config: grouped(varK) * grouped(varK) -> dense 3D
-    auto src_md = memory::desc::grouped({M, K}, dt::f32, 1, ngroups);
-    auto wei_md = memory::desc::grouped({K, N}, dt::f32, 0, ngroups);
-    auto dst_md
-            = memory::desc({ngroups, M, N}, dt::f32, memory::format_tag::abc);
-
-    // Default attributes are supported
-    EXPECT_NO_THROW(matmul::primitive_desc(eng, src_md, wei_md, dst_md));
-
-    // 2Dx2D supports only default attributes
-    // Scales
-    {
-        primitive_attr attr;
-        attr.set_scales_mask(DNNL_ARG_SRC, 0);
-        EXPECT_THROW(matmul::primitive_desc(eng, src_md, wei_md, dst_md, attr),
-                dnnl::error);
-    }
-
-    // Zero points
-    {
-        primitive_attr attr;
-        attr.set_zero_points_mask(DNNL_ARG_WEIGHTS, 0);
-        EXPECT_THROW(matmul::primitive_desc(eng, src_md, wei_md, dst_md, attr),
-                dnnl::error);
-    }
-
-    // Post-ops
-    {
-        post_ops po;
-        po.append_eltwise(algorithm::eltwise_swish, 1.f, 0.f);
-        primitive_attr attr;
-        attr.set_post_ops(po);
-        EXPECT_THROW(matmul::primitive_desc(eng, src_md, wei_md, dst_md, attr),
-                dnnl::error);
-    }
-}
-
 HANDLE_EXCEPTIONS_FOR_TEST(iface_grouped_test_t, TestMaxGroupMHint) {
     engine eng = get_test_engine();
     SKIP_IF(eng.get_kind() == engine::kind::gpu

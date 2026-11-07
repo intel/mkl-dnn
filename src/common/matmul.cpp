@@ -166,32 +166,40 @@ status_t grouped_matmul_desc_init(matmul_desc_t *matmul_desc,
 // Grouped matmul attribute checks.
 // Separated from regular matmul as grouped gemm coverage is experimental
 // and limited
-//
-// Note: 2Dx2D supports only default attribues for now
 status_t grouped_matmul_attr_check(
         const matmul_desc_t &desc, const primitive_attr_t *attr) {
     using smask_t = primitive_attr_t::skip_mask_t;
     using namespace data_type;
 
+    const auto src_dt = desc.src_desc.data_type;
+    const auto wei_dt = desc.weights_desc.data_type;
+
+    // Weight-only quantization (fp src with integer wei) requires wei scales
+    // and fpmath with apply_to_int, also when no attributes are set
+    VCHECK_MATMUL_UNIMPL(
+            IMPLICATION(!types::is_integral_dt(src_dt)
+                            && types::is_integral_dt(wei_dt),
+                    attr && !attr->scales_.has_default_values(DNNL_ARG_WEIGHTS)
+                            && attr->fpmath_.apply_to_int_),
+            VERBOSE_UNSUPPORTED_DT_CFG);
+
     if (attr == nullptr) return status::success;
     if (attr->has_default_values()) return status::success;
 
-    // Reject 2Dx2D as no support so far
     const memory_desc_wrapper src_d(&desc.src_desc);
     const memory_desc_wrapper wei_d(&desc.weights_desc);
     const bool is_2dby2d = src_d.is_grouped_desc() && wei_d.is_grouped_desc();
-    VCHECK_MATMUL_UNIMPL(!is_2dby2d, VERBOSE_UNSUPPORTED_ATTR);
 
-    // Grouped matmul supports scales, zero points, woq, and post-ops
-    auto allowed_mask = smask_t::scales_data_type | smask_t::scales_groups
-            | smask_t::fpmath_mode | smask_t::zero_points_data_type
-            | smask_t::zero_points_groups | smask_t::post_ops;
+    // Grouped matmul 2Dx3D supports scales, zero points, woq, and post-ops
+    // 2Dx2D variant supports scales only
+    auto allowed_mask = smask_t::scales_data_type | smask_t::scales_groups;
+    if (!is_2dby2d)
+        allowed_mask |= smask_t::fpmath_mode | smask_t::zero_points_data_type
+                | smask_t::zero_points_groups | smask_t::post_ops;
     VCHECK_MATMUL_UNIMPL(
             attr->has_default_values(allowed_mask, desc.dst_desc.data_type),
             VERBOSE_UNSUPPORTED_ATTR);
 
-    const auto src_dt = desc.src_desc.data_type;
-    const auto wei_dt = desc.weights_desc.data_type;
     const auto &sc = attr->scales_;
 
     // Dissalow scales on fp src/wei/dst data as real-world applications
@@ -204,6 +212,100 @@ status_t grouped_matmul_attr_check(
             VERBOSE_UNSUPPORTED_SCALES_CFG);
     VCHECK_MATMUL_UNIMPL(sc.has_default_values(DNNL_ARG_DST),
             VERBOSE_UNSUPPORTED_SCALES_CFG);
+
+    // Scales and zero points groups are {1, gK} for src and {gK, gN} for wei,
+    // and must divide K (total_K for 2Dx2D) and N. Note, get_group() returns
+    // 1 when no groups were requested
+    const dim_t K = src_d.dims()[1];
+    const dim_t N = wei_d.dims()[wei_d.ndims() - 1];
+    const dim_t src_gK = sc.get_group(DNNL_ARG_SRC, -1);
+    const dim_t wei_gK = sc.get_group(DNNL_ARG_WEIGHTS, -2);
+    VCHECK_MATMUL(K % src_gK == 0 && K % wei_gK == 0
+                    && N % sc.get_group(DNNL_ARG_WEIGHTS, -1) == 0,
+            VERBOSE_UNSUPPORTED_SCALES_CFG);
+    // src scales are grouped along K only, and src/wei K-groups must be
+    // multiples of each other
+    VCHECK_MATMUL_UNIMPL(sc.get_group(DNNL_ARG_SRC, -2) == 1
+                    && (src_gK % wei_gK == 0 || wei_gK % src_gK == 0),
+            VERBOSE_UNSUPPORTED_SCALES_CFG);
+
+    if (is_2dby2d) {
+        // src [M, total_K / gK] and wei [total_K / gK, N / gN] are a grid
+        // over total_K, so they must be K-grouped
+        const int k_grouped_mask = (1 << 0) | (1 << 1);
+        if (!sc.has_default_values(DNNL_ARG_SRC)) {
+            VCHECK_MATMUL_UNIMPL(
+                    sc.get_mask(DNNL_ARG_SRC) == k_grouped_mask && src_gK > 1,
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+        }
+        if (!sc.has_default_values(DNNL_ARG_WEIGHTS)) {
+            VCHECK_MATMUL_UNIMPL(sc.get_mask(DNNL_ARG_WEIGHTS) == k_grouped_mask
+                            && wei_gK > 1,
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+        }
+    } else {
+        // src per token [total_M] or [total_M, K / gK], wei per expert [G, N]
+        // or [G, K / gK, N / gN], groups go with the K-grouped masks only
+        const int src_rowwise = 1 << 0, src_k_grouped = (1 << 0) | (1 << 1);
+        const int wei_colwise = (1 << 0) | (1 << 2);
+        const int wei_k_grouped = (1 << 0) | (1 << 1) | (1 << 2);
+        if (!sc.has_default_values(DNNL_ARG_SRC)) {
+            const int mask = sc.get_mask(DNNL_ARG_SRC);
+            VCHECK_MATMUL_UNIMPL(utils::one_of(mask, src_rowwise, src_k_grouped)
+                            && (mask == src_k_grouped ? src_gK > 1
+                                                      : sc.has_default_groups(
+                                                                DNNL_ARG_SRC)),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+        }
+        if (!sc.has_default_values(DNNL_ARG_WEIGHTS)) {
+            const int mask = sc.get_mask(DNNL_ARG_WEIGHTS);
+            VCHECK_MATMUL_UNIMPL(utils::one_of(mask, wei_colwise, wei_k_grouped)
+                            && (mask == wei_k_grouped
+                                            ? wei_gK > 1
+                                            : sc.has_default_groups(
+                                                      DNNL_ARG_WEIGHTS)),
+                    VERBOSE_UNSUPPORTED_SCALES_CFG);
+        }
+
+        // Zero points: integer src/wei only, with the masks of the scales or
+        // a common one for u3 wei
+        const auto &zp = attr->zero_points_;
+        const dim_t src_zp_gK = zp.get_group(DNNL_ARG_SRC, -1);
+        const dim_t wei_zp_gK = zp.get_group(DNNL_ARG_WEIGHTS, -2);
+        VCHECK_MATMUL(K % src_zp_gK == 0 && K % wei_zp_gK == 0
+                        && N % zp.get_group(DNNL_ARG_WEIGHTS, -1) == 0,
+                VERBOSE_UNSUPPORTED_ZP_CFG);
+        VCHECK_MATMUL_UNIMPL(zp.has_default_values(DNNL_ARG_DST)
+                        && zp.get_group(DNNL_ARG_SRC, -2) == 1,
+                VERBOSE_UNSUPPORTED_ZP_CFG);
+        if (!zp.has_default_values(DNNL_ARG_SRC)) {
+            const int mask = zp.get_mask(DNNL_ARG_SRC);
+            VCHECK_MATMUL_UNIMPL(types::is_integral_dt(src_dt)
+                            && utils::one_of(mask, src_rowwise, src_k_grouped)
+                            && (mask == src_k_grouped ? src_zp_gK > 1
+                                                      : zp.has_default_groups(
+                                                                DNNL_ARG_SRC)),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+        }
+        if (!zp.has_default_values(DNNL_ARG_WEIGHTS)) {
+            const int mask = zp.get_mask(DNNL_ARG_WEIGHTS);
+            VCHECK_MATMUL_UNIMPL(types::is_integral_dt(wei_dt)
+                            && (utils::one_of(mask, wei_colwise, wei_k_grouped)
+                                    || (mask == 0 && wei_dt == u3))
+                            && (mask == wei_k_grouped
+                                            ? wei_zp_gK > 1
+                                            : zp.has_default_groups(
+                                                      DNNL_ARG_WEIGHTS)),
+                    VERBOSE_UNSUPPORTED_ZP_CFG);
+        }
+        // Weights scales and zero points K-groups must match
+        VCHECK_MATMUL_UNIMPL(
+                IMPLICATION(!sc.has_default_values(DNNL_ARG_WEIGHTS)
+                                && !zp.has_default_groups(DNNL_ARG_WEIGHTS),
+                        wei_gK == wei_zp_gK),
+                VERBOSE_INCONSISTENT_DIM, "wei_scale_group_k", (int)wei_gK,
+                "wei_zp_group_k", (int)wei_zp_gK);
+    }
 
     // Post-ops: only eltwise and binary_mul are supported
     const memory_desc_wrapper dst_d(&desc.dst_desc);

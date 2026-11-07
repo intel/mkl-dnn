@@ -114,7 +114,9 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
         if (this->sparse_options.has_deferred_profile()) {
             const int vdi
                     = this->sparse_options.get_variable_dim_idx(DNNL_ARG_SRC);
-            SAFE_V(this->sparse_options.resolve_profile(srcdims[vdi]));
+            // var_K group sizes follow the scales K group
+            SAFE_V(this->sparse_options.resolve_profile(
+                    srcdims[vdi], vdi == 1 ? scales_k_group() : 1));
         }
 
         dst_dims[ndims - 2] = m;
@@ -167,6 +169,17 @@ struct prb_t : public prb_vdims_t, public base_prb_t {
         return prb_vdims_t::get_broadcast_mask(1);
     }
     int bias_broadcast_mask() const { return bia_mask; }
+
+    // The coarsest of the src and wei scales K groups (1 if there are none),
+    // every var_K group size must be a multiple of it
+    int64_t scales_k_group() const {
+        const auto &sg = attr.scales.get(DNNL_ARG_SRC).groups;
+        const auto &wg = attr.scales.get(DNNL_ARG_WEIGHTS).groups;
+        int64_t gK = 1;
+        if (!sg.empty()) gK = std::max<int64_t>(gK, sg[1]);
+        if (!wg.empty()) gK = std::max<int64_t>(gK, wg[0]);
+        return gK;
+    }
 
     bool weights_decompression() const {
         return src_dt() != dnnl_s8 && src_dt() != dnnl_u8

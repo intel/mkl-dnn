@@ -319,27 +319,33 @@ The computation for grouped GEMM with \f$G\f$ groups is defined as:
 
 \f[
     \dst_g(m, n) =
-        \sum_{k=0}^{K - 1}
+        \sum_{k=0}^{K_g - 1}
             \src_g(m, k) \cdot \weights_g(k, n)
         , \quad g = 0, \ldots, G-1
 \f]
 
-where \f$m \in [0, M_g)\f$ and \f$M_g\f$ is the number of rows in group \f$g\f$.
+where \f$m \in [0, M_g)\f$, and \f$M_g\f$ and \f$K_g\f$ are the number of rows
+and the contraction size of group \f$g\f$.
 
-Two variants are supported defined to which dimension varies across groups.
+Two variants are supported depending on which dimension varies across groups.
 Grouped tensors use the [grouped memory format](@ref dev_guide_grouped_mem):
 values are stored as concatenated buffers with an offsets array marking group
-boundaries.
+boundaries. The concatenated size of the variable dimension is denoted
+`total_M` \f$= \sum_g M_g\f$ or `total_K` \f$= \sum_g K_g\f$.
 
-- **Variable token dimension (M)** (e.g., MoE forward pass).
-  The token count varies per expert, so source `[total_M, K]` and destination
+- **Variable-M variant** (e.g., MoE forward pass).
+  The number of rows varies per group, so source `[total_M, K]` and destination
   `[total_M, N]` are grouped (row-major),
   while weights are represented as a regular dense 3D tensor `[num_groups, K, N]`.
-- **Variable contraction dimension (K)** (e.g., MoE backward pass).
+- **Variable-K variant** (e.g., MoE weight gradient).
   The contraction dimension varies per group, so source `[M, total_K]` (col-major)
   and weights `[total_K, N]` are grouped and with the same partition,
   while the destination is represented as a regular dense 3D tensor
   `[num_groups, M, N]`.
+
+In MoE workloads, the variable dimension is the token dimension in both
+variants: `total_M` and `total_K` are the total number of tokens routed to all
+experts.
 
 
 ### Code Snippet
@@ -353,13 +359,13 @@ const memory::dim K = 512, N = 256;
 // Expert 1: 600 tokens
 // Expert 2: 0 tokens
 // Expert 3: 950 tokens
-const memory::dim total_tokens = 2350;  // Sum of all token counts
+const memory::dim total_M = 2350;  // Sum of all token counts
 
 // Source: grouped encoding for variable M dimension
-// Descriptor: [total_tokens, K] with grouped encoding
+// Descriptor: [total_M, K] with grouped encoding
 // Memory layout: [expert0_tokens | expert1_tokens | expert2_tokens | expert3_tokens]
 auto src_md = memory::desc::grouped(
-    {total_tokens, K}, memory::data_type::f32,
+    {total_M, K}, memory::data_type::f32,
     0, num_groups);  // dimension 0 (M) varies per group
 
 // Weights: standard 3D dense tensor [num_groups, K, N]
@@ -369,7 +375,7 @@ auto weights_md = memory::desc({num_groups, K, N},
 
 // Destination: grouped encoding matching source structure
 auto dst_md = memory::desc::grouped(
-    {total_tokens, N}, memory::data_type::f32,
+    {total_M, N}, memory::data_type::f32,
     0, num_groups);
 
 auto matmul_pd = matmul::primitive_desc(engine, src_md, weights_md, dst_md);
@@ -396,17 +402,17 @@ Tensors must use dense memory descriptors.
 The data in the scales/zero points tensor must follow the same flat concatenated
 order as the grouped source/weights.
 
-Per-token source scales:
+Row-wise source scales:
 ~~~cpp
 attr.set_scales_mask(DNNL_ARG_SRC, (1 << 0));  // Varies along M dimension
-// Scale tensor: [total_tokens] - one scale per token
+// Scale tensor: [total_M] - one scale per row
 // Layout: concatenated like source data, uses same offsets
 ~~~
 
 K-grouped source scales with group size of 128:
 ~~~cpp
 attr.set_scales(DNNL_ARG_SRC, (1 << 0) | (1 << 1), {1, 128}, memory::data_type::f16);
-// Scale tensor: [total_tokens, K/128] - one scale per (token, K-block)
+// Scale tensor: [total_M, K/128] - one scale per (row, K-block)
 // Layout: concatenated like source data, uses same offsets
 ~~~
 
@@ -424,6 +430,18 @@ attr.set_scales(DNNL_ARG_WEIGHTS, (1 << 0) | (1 << 1) | (1 << 2),
 // Groups are 2D {gK, gN} and are applied to the last two dimensions of the tensor
 // Scale tensor: [num_groups, K/32, N] - dense 3D tensor
 // Layout: standard abc layout
+~~~
+
+K-grouped source and weight scales for the variable-K variant (e.g., MXFP8
+with block size 32):
+~~~cpp
+// Source [M, total_K] and weights [total_K, N] are grouped along K
+attr.set_scales(DNNL_ARG_SRC, (1 << 0) | (1 << 1), {1, 32},
+    memory::data_type::e8m0);
+attr.set_scales(DNNL_ARG_WEIGHTS, (1 << 0) | (1 << 1), {32, 1},
+    memory::data_type::e8m0);
+// Scale tensors: [M, total_K/32] and [total_K/32, N] - dense 2D tensors
+// Layout: standard ab layout, blocks run over the concatenated K dimension
 ~~~
 
 Bias per expert:
@@ -446,7 +464,7 @@ partition as the grouped destination tensor.
 
 SiLU and element-wise matrix multiplication as post-op:
 ~~~cpp
-// [total_tokens, N] tensor, that could be either grouped or dense with
+// [total_M, N] tensor, that could be either grouped or dense with
 // memory::format_tag::ab
 auto binary_md = /*...*/;
 
@@ -460,9 +478,9 @@ Note that the dense tensor must follow the same flat concatenated order as the g
 
 Binary multiply with per-row broadcast:
 ~~~cpp
-// [total_tokens, 1] tensor, that is one scalar per row
+// [total_M, 1] tensor, that is one scalar per row
 // in the same flat concatenated order as the grouped destination
-auto routing_md = memory::desc({total_tokens, 1},
+auto routing_md = memory::desc({total_M, 1},
     memory::data_type::f32, memory::format_tag::ab);
 
 post_ops po;
@@ -509,45 +527,56 @@ responsibility to ensure the hint is a valid upper bound.
 ### Implementation Notes
 
 The following are supported:
-- Source and destination must use identical grouping.
 - Scales attribute for source and weights tensors:
+
   - Source Scales: row-wise (`mask = (1 << 0)`) and K-grouped
     (`mask = (1 << 0) | (1 << 1)`) with group specification are supported.
     The scale tensor follows the same concatenated layout as src, with total
-    size `[total_tokens, K/gK]`.
+    size `[total_M, K/gK]`.
+    For the variable-K variant, only K-grouped scales with groups `{1, gK}`
+    are supported. The scale tensor is `[M, total_K/gK]`, covering all groups
+    along K.
   - Weight Scales: column-wise (`mask = (1 << 0) | (1 << 2)`) and
     K-grouped or K- and N-grouped (`mask = (1 << 0) | (1 << 1) | (1 << 2)`)
     with group specification are supported. The scale tensor has size
     `[num_groups, K/gK, N/gN]`.
-  - Scales are not supported when the corresponding tensor data type is
-    `f32`, `bf16`, or `f16`. Scale data type depends on tensor data type:
+    For the variable-K variant, only K-grouped or K- and N-grouped scales
+    (`mask = (1 << 0) | (1 << 1)` with groups `{gK, gN}`) are supported.
+    The scale tensor is `[total_K/gK, N/gN]`, covering all groups along K.
+
+    @warning For the variable-K variant, every group size must be a multiple of
+    the scales K group size `gK`.
+
+  - Supported scales and input tensors data types configurations:
 
     | Tensor data type           | Scale data type           |
     |:---------------------------|:--------------------------|
     | f8_e5m2, f8_e4m3, f4_e2m1  | f32, e8m0, f8_e4m3        |
     | u8, s8, s4, u4, u3         | f32, bf16, f16            |
-- Zero points attribute for source and weights tensors:
+
+- Zero points attribute for source and weights tensors (variable-M variant
+  only):
   - The masks must match the scales mask. The exception is a common weights
     zero point (`mask = 0`), which is supported for `u3` weights only.
   - Source zero points data types include `u8`, `s8`, `s32`
   - Weights zero points data types include `u8`, `s8`, `u4`, `s4`, `s32`
-- Post-ops: eltwise and binary multiplication post-ops are supported. Binary post-op
+- Post-ops (variable-M variant only): eltwise and binary multiplication
+  post-ops are supported. Binary post-op
   tensors accept both dense and grouped memory descriptors.
   Common patterns include `eltwise_swish` (SiLU) or
   `eltwise_gelu_tanh` / `eltwise_gelu_erf` (GELU) for the gate activation,
-  `binary_mul` with a `[total_tokens, N]` grouped or dense tensor,
-  `binary_mul` with a `[total_tokens, 1]` dense tensor,
+  `binary_mul` with a `[total_M, N]` grouped or dense tensor,
+  `binary_mul` with a `[total_M, 1]` dense tensor,
   and `[num_groups, 1]` for a per-group global scale (e.g. NVFP4).
   Scalar `[1, 1]` binary post-ops are not supported for grouped matmul.
   For grouped binary tensors, the per-group offsets must match the grouped dst
   partition.
 
- @attention The GPU implementation supports at most one dense binary multiplication
+ @warning The GPU implementation supports at most one dense binary multiplication
   post-op and at most one grouped binary multiplication post-op. Providing more
   than one of either kind is not supported on GPU.
 
-- Bias supports per-expert shape.
-- Only default attributes are supported for the variable-K variant.
+- Bias (variable-M variant only) supports per-group shape `[num_groups, N]`.
 - Supported on CPU and GPU engines.
 
 #### Supported Data Types
