@@ -511,6 +511,11 @@ void GEMMStrategy::preflight(HW hw, const GEMMProblem &problem)
         if (kchunk0 <= 0) stub("k-interleave incompatible with SLM copy");
         kInterleaveChunk = align_up(kInterleaveChunk, kchunk0);
         kInterleaveChunk = std::max(kInterleaveChunk, kchunk0);
+        // A chunk must not straddle quantization groups: it must divide, or be a multiple of, each group size.
+        if (problem.quantized2DA() && problem.aqGroupK % kInterleaveChunk)
+            kInterleaveChunk = lcm(kInterleaveChunk, problem.aqGroupK);
+        if (problem.quantized2DB() && problem.bqGroupK % kInterleaveChunk)
+            kInterleaveChunk = lcm(kInterleaveChunk, problem.bqGroupK);
     }
 
     // k unroll wrangling.

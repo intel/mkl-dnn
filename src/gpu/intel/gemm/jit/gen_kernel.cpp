@@ -276,7 +276,7 @@ status_t gen_desc_t::finalize(const char *tags) {
     if (enable_generator_dsl()) { fixup_dsl_strategy(strategy_); }
 
     // Align k slice size and quantization group size
-    if (strategy_.kParallelLocal) {
+    if (strategy_.kParallelLocal || strategy_.kParallel) {
         if (problem_.quantized2DA())
             aux_params_.k0 = utils::rnd_up(aux_params_.k0, problem_.aqGroupK);
         if (problem_.quantized2DB())
