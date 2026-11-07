@@ -276,6 +276,61 @@ TEST(test_interface_compiled_partition, CacheFpmath) {
 #endif
 }
 
+TEST(test_interface_compiled_partition, CacheDeterministic) {
+    namespace graph = dnnl::impl::graph;
+
+    graph::engine_t &eng = *get_engine();
+    const std::vector<bool> deterministic_vec {false, false, true, true};
+
+    // Flush the cache
+    set_compiled_partition_cache_capacity(0);
+    set_compiled_partition_cache_capacity(1024);
+
+    graph::logical_tensor_t src = utils::logical_tensor_init(0, {1, 1, 1, 1},
+            graph::data_type::f32, graph::layout_type::strided);
+    graph::logical_tensor_t weight = utils::logical_tensor_init(1, {1, 1, 1, 1},
+            graph::data_type::f32, graph::layout_type::strided);
+    graph::logical_tensor_t dst = utils::logical_tensor_init(2, {1, 1, 1, 1},
+            graph::data_type::f32, graph::layout_type::strided);
+    graph::op_t matmul {0, graph::op_kind::MatMul, "matmul"};
+    matmul.add_input(src);
+    matmul.add_input(weight);
+    matmul.add_output(dst);
+
+    for (const bool deterministic : deterministic_vec) {
+        graph::graph_t g {eng.kind()};
+        g.set_deterministic(deterministic);
+        g.add_op(&matmul);
+        g.finalize();
+        std::vector<const graph::backend_t *> &backends
+                = graph::backend_registry_t::get_singleton()
+                          .get_registered_backends();
+        for (const auto &cbkd : backends) {
+            graph::backend_t *bkd = const_cast<graph::backend_t *>(cbkd);
+            bkd->get_partitions(g, graph::partition_policy::fusion);
+        }
+        graph::partition_t par = graph::partition_t();
+        std::vector<graph::partition_t *> parts {&par};
+        g.get_ordered_partitions(parts);
+        ASSERT_EQ(par.get_attr().get_deterministic(), deterministic);
+
+        graph::compiled_partition_t cp(par);
+        std::pair<graph::compiled_partition_t *, cache_state_t> cpcache {
+                &cp, cache_state_t::miss};
+        std::vector<const graph::logical_tensor_t *> inputs {&src, &weight};
+        std::vector<const graph::logical_tensor_t *> outputs {&dst};
+        ASSERT_EQ(par.compile(cpcache, inputs, outputs, &eng),
+                graph::status::success);
+    }
+
+#ifdef DNNL_GRAPH_DISABLE_COMPILED_PARTITION_CACHE
+    ASSERT_EQ(get_compiled_partition_cache_size(), 0);
+#else
+    ASSERT_EQ(get_compiled_partition_cache_size(),
+            static_cast<int>(deterministic_vec.size() / 2));
+#endif
+}
+
 TEST(test_interface_compiled_partition, CacheMethod) {
     namespace graph = dnnl::impl::graph;
 

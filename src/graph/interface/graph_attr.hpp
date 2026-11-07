@@ -42,24 +42,32 @@ struct fpmath_t {
 struct graph_attr_t {
     graph_attr_t() = default;
 
-    explicit graph_attr_t(const fpmath_t &fpmath) : fpmath_(fpmath) {}
+    explicit graph_attr_t(const fpmath_t &fpmath, bool deterministic = false)
+        : fpmath_(fpmath), deterministic_(deterministic) {}
 
     const fpmath_t &get_fpmath() const { return fpmath_; }
     void set_fpmath(const fpmath_t &fpmath) { fpmath_ = fpmath; }
 
+    bool get_deterministic() const { return deterministic_; }
+    void set_deterministic(bool deterministic) {
+        deterministic_ = deterministic;
+    }
+
     bool operator==(const graph_attr_t &rhs) const {
-        return fpmath_ == rhs.fpmath_;
+        return fpmath_ == rhs.fpmath_ && deterministic_ == rhs.deterministic_;
     }
 
     size_t hash() const {
         size_t seed = 0;
         seed = hash_combine(seed, static_cast<size_t>(fpmath_.mode_));
         seed = hash_combine(seed, fpmath_.apply_to_int_);
+        seed = hash_combine(seed, deterministic_);
         return seed;
     }
 
 private:
     fpmath_t fpmath_;
+    bool deterministic_ = false;
 };
 
 } // namespace graph

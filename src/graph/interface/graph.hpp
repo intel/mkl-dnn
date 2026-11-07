@@ -143,6 +143,11 @@ public:
         return graph::status::success;
     }
 
+    graph::status_t set_deterministic(bool deterministic) {
+        attr_.set_deterministic(deterministic);
+        return graph::status::success;
+    }
+
     graph::status_t set_fpmath_mode(
             graph::fpmath_mode_t mode, bool apply_to_int) {
         attr_.set_fpmath({mode, apply_to_int});

@@ -36,6 +36,23 @@ TEST(APIGraph, SetAndGetFloatingPointMathMode) {
     EXPECT_EQ(apply_to_int, 1U);
 }
 
+TEST(APIGraph, SetAndGetDeterministic) {
+    using namespace dnnl::graph;
+
+    graph g(dnnl::engine::kind::cpu);
+    EXPECT_FALSE(g.get_deterministic());
+
+    g.set_deterministic(true);
+    EXPECT_TRUE(g.get_deterministic());
+
+    g.set_deterministic(false);
+    EXPECT_FALSE(g.get_deterministic());
+
+    g.finalize();
+    EXPECT_THROW(g.set_deterministic(true), dnnl::error);
+    EXPECT_FALSE(g.get_deterministic());
+}
+
 TEST(APIGraph, GetPartitions) {
     using namespace dnnl::graph;
     dnnl::engine::kind engine_kind = dnnl::engine::kind::cpu;

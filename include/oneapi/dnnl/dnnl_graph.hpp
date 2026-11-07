@@ -1508,6 +1508,31 @@ public:
         apply_to_int = static_cast<bool>(c_apply_to_int);
     }
 
+    /// Sets the deterministic mode for the graph. When enabled, the mode is
+    /// applied to all partitions of the graph so that their execution is
+    /// run-to-run deterministic.
+    ///
+    /// The mode must be set before the graph is finalized; otherwise an
+    /// exception is thrown.
+    ///
+    /// @param value True to enable deterministic mode, false (default) to
+    ///     disable it.
+    void set_deterministic(bool value) {
+        error::wrap_c_api(dnnl_graph_graph_set_deterministic(
+                                  get(), static_cast<int>(value)),
+                "could not set deterministic mode");
+    }
+
+    /// Returns the deterministic mode of the graph.
+    ///
+    /// @returns True if deterministic mode is enabled, false otherwise.
+    bool get_deterministic() const {
+        int result = 0;
+        error::wrap_c_api(dnnl_graph_graph_get_deterministic(get(), &result),
+                "could not get deterministic mode");
+        return static_cast<bool>(result);
+    }
+
     /// Adds an op into the graph to construct a computational DAG. The API will
     /// return failure if the operator has already been added to the graph or
     /// the operation cannot pass the schema check in the library (eg. input and

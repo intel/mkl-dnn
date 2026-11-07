@@ -217,9 +217,11 @@ std::string init_info_partition(const engine_t *engine,
         }
     }
 
-    const auto &fpm = partition.get_pimpl()->get_attr().get_fpmath();
+    const auto &graph_attr = partition.get_pimpl()->get_attr();
+    const auto &fpm = graph_attr.get_fpmath();
     ss << ",fpm:" << fpmath_mode2str(fpm.mode_);
     if (fpm.apply_to_int_) ss << ":true";
+    if (graph_attr.get_deterministic()) ss << " deterministic:true";
 
     ss << ",scratchpad:" << compiled_partition->get_scratchpad_size();
 

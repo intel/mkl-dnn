@@ -219,6 +219,8 @@ status_t dnnl_graph_graph::serialize(const std::string &filename) const {
             "fpmath_mode", std::string(utils::fpmath_mode2str(fpmath.mode_)));
     writer.write_keyvalue("fpmath_mode_apply_to_int",
             std::string(fpmath.apply_to_int_ ? "true" : "false"));
+    writer.write_keyvalue("deterministic",
+            std::string(get_attr().get_deterministic() ? "true" : "false"));
     std::vector<size_t> inputs_id;
     inputs_id.reserve(get_input_values().size());
     for (const auto &val : get_input_values()) {
@@ -322,8 +324,7 @@ status_t dnnl_graph_graph_destroy(graph_t *graph) {
 
 status_t dnnl_graph_graph_set_fpmath_mode(
         dnnl_graph_graph_t graph, dnnl_fpmath_mode_t mode, int apply_to_int) {
-
-    if (graph == nullptr) { return status::invalid_arguments; }
+    if (!graph) { return status::invalid_arguments; }
 
     if (graph->is_finalized()) { return status::invalid_graph; }
 
@@ -332,13 +333,33 @@ status_t dnnl_graph_graph_set_fpmath_mode(
 
 status_t dnnl_graph_graph_get_fpmath_mode(
         dnnl_graph_graph_t graph, dnnl_fpmath_mode_t *mode, int *apply_to_int) {
-
-    if (graph == nullptr) { return status::invalid_arguments; }
-    if (graph->is_finalized()) { return status::invalid_graph; }
+    if (utils::any_null(graph, mode, apply_to_int)) {
+        return status::invalid_arguments;
+    }
 
     const auto &fpmath = graph->get_attr().get_fpmath();
     if (mode) *mode = fpmath.mode_;
     if (apply_to_int) *apply_to_int = fpmath.apply_to_int_;
+
+    return status::success;
+}
+
+status_t dnnl_graph_graph_set_deterministic(
+        dnnl_graph_graph_t graph, int deterministic) {
+    if (!graph) { return status::invalid_arguments; }
+
+    if (graph->is_finalized()) { return status::invalid_graph; }
+
+    return graph->set_deterministic(static_cast<bool>(deterministic));
+}
+
+status_t dnnl_graph_graph_get_deterministic(
+        dnnl_graph_graph_t graph, int *deterministic) {
+    if (utils::any_null(graph, deterministic)) {
+        return status::invalid_arguments;
+    }
+
+    *deterministic = static_cast<int>(graph->get_attr().get_deterministic());
 
     return status::success;
 }
