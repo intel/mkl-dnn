@@ -947,7 +947,10 @@ RegisterBlock RegisterBlock::trySlice(Type T, bool column, int x1, int x2, int x
             blockDst.offsetBytes += int3RowSpreadOffset(phase + x1 / 8 * 3, ld, crosspack) - phase;
         } else {
             if (x1 % crosspack) return RegisterBlock();
-            blockDst.offsetBytes += (x1 * bytes) / oldNS;
+            int offNonLd = colMajor ? blockDst.offsetC : blockDst.offsetR;
+            int offLd    = colMajor ? blockDst.offsetR : blockDst.offsetC;
+            int ldScale  = (crosspack > 1) ? int(crosspack) : oldNS;
+            blockDst.offsetBytes = (offNonLd * int(ld) + offLd * ldScale) * Telem;
         }
 
         if (isLoadBlock()) switch (effAccessType) {
