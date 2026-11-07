@@ -13,7 +13,9 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
+#include <functional>
 #include <memory>
+#include <vector>
 
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
@@ -189,6 +191,24 @@ private:
     // transformed(downconverted), to reuse when needed.
     std::unordered_map<std::string, dim_t> transform_buf_map_A_;
     std::unordered_map<std::string, dim_t> transform_buf_map_B_;
+
+    // Deferred micro-kernel body.
+    // rdb_loop_call_based() emits `call(*entry)` into the hot path and
+    // registers here an emitter that will later emit
+    // `L(*entry); rdb_loop_body(bi); ret();` out of the hot path.
+    // The label and the emitter are one object with one lifetime: top_loop()
+    // owns them, emits every registered body exactly once and then destroys
+    // both. No label outlives the code generation of the loop nest that
+    // referenced it.
+    // The label is held by shared_ptr because the emitter is created before
+    // the `call` that references it: a copy of a not-yet-used Xbyak::Label is
+    // an independent label, so the very same object must be shared by the
+    // call site and by the deferred `L()`.
+    struct deferred_uk_body_t {
+        std::shared_ptr<Xbyak::Label> entry;
+        std::function<void()> emit;
+    };
+    std::vector<deferred_uk_body_t> deferred_uk_bodies_;
 
     dim_t LDA_size_ = 0, LDA2_size_ = 0;
     dim_t LDB_size_ = 0, LDB2_size_ = 0;
@@ -379,6 +399,16 @@ private:
     bool use_sat_cvt_ = false;
 
     bool ununroll_bd_loop = false;
+    // If set, the rd loop is emitted as a sequence of calls to a few shared
+    // micro-kernel bodies instead of being fully unrolled. It keeps the code
+    // size small while still allowing rd iterations to use different
+    // (statically known) offsets: the shared bodies address A, B and the
+    // transform buffer relative to registers that the caller advances once
+    // per group of call_based_rd_unroll iterations.
+    bool call_based_rd_loop = false;
+    // Number of rd iterations sharing one group of micro-kernel bodies. All
+    // matrix pointers are advanced once per group.
+    static constexpr int call_based_rd_unroll = 4;
     // Number of ZMM registers per bd block for ACE microkernel.
     static constexpr int ace_zmms_per_bd_block
             = brgemm_desc_t::ace_zmms_per_bd_block;
@@ -610,6 +640,12 @@ private:
     void gemm_microkernel_ace(brgemm_iteration_t &bi);
 
     void rdb_loop_body(brgemm_iteration_t &bi);
+    // Emits the rd loop as a sequence of calls to a small set of shared
+    // micro-kernel bodies (see call_based_rd_loop).
+    void rdb_loop_call_based(brgemm_iteration_t &bi);
+    // Emits, out of the hot path, the bodies registered by
+    // rdb_loop_call_based() and destroys them together with their labels.
+    void emit_deferred_uk_bodies();
     void rdb_loop(brgemm_iteration_t &bi);
 
     void bs_loop_body(brgemm_iteration_t &bi);
@@ -2910,9 +2946,101 @@ void jit_brgemm_amx_uker_t::rdb_loop_body(brgemm_iteration_t &bi) {
     else
         gemm_microkernel_amx(bi);
 }
+void jit_brgemm_amx_uker_t::rdb_loop_call_based(brgemm_iteration_t &bi) {
+    // Note: the micro-kernel bodies registered below are entered with `call`,
+    // so inside them rsp is 8 bytes lower than here (return address). The
+    // register scratchpad is addressed relative to rsp, hence
+    // reg64_savable_t::save()/restore() (and anything else touching the
+    // scratchpad) must not be emitted inside a body. rdb_loop_body() only
+    // reads A, B and the transform buffer through registers, so the
+    // save/restore of these pointers stays here, in the caller.
+    // reg_C, reg_D and reg_ldb_loop are not modified by rdb_loop_body() and
+    // therefore are not preserved.
+    const auto &tloop = imap_[bi.apply_postops];
+    assert(tloop.rdis.size() > 1);
+
+    const bool separate_last_iteration = brg.rdb_tail > 0;
+    const auto *last_rdi = &tloop.rdis.back();
+    auto rdb_loop_count = static_cast<int>(tloop.rdis.size());
+    if (separate_last_iteration) rdb_loop_count--;
+
+    // Calculate the A and B increments using the next rdi assuming that they
+    // are the same for all iterations.
+    bi.rdi = &tloop.rdis[0];
+    brgemm_iteration_t next_rdi_bi = bi;
+    next_rdi_bi.rdi = &tloop.rdis[1];
+    const auto reg_A_increment = A_offset(next_rdi_bi, 0) - A_offset(bi, 0);
+    const auto reg_B_increment = B_offset(next_rdi_bi, 0) - B_offset(bi, 0);
+
+    // save registers advanced by the loop below
+    reg_A.save();
+    reg_B.save();
+    if (brg.save_transform_A()) reg_buf.save();
+
+    // Defer the generation of the micro-kernel bodies: they are emitted out
+    // of the hot path by top_loop(), which owns them.
+    const int rd_unroll = call_based_rd_unroll;
+    const auto n_variants = nstl::min(rdb_loop_count, rd_unroll);
+    std::vector<std::shared_ptr<Label>> variant_labels;
+    variant_labels.reserve(n_variants);
+    for (int v = 0; v < n_variants; v++) {
+        auto entry = std::make_shared<Label>();
+        auto variant_bi = bi;
+        variant_bi.rdi = &tloop.rdis[v];
+        deferred_uk_bodies_.push_back({entry, [this, entry, variant_bi]() {
+            auto body_bi = variant_bi;
+            L(*entry);
+            rdb_loop_body(body_bi);
+            ret();
+        }});
+        variant_labels.push_back(std::move(entry));
+    }
+
+    for (int rdb = 0; rdb < rdb_loop_count; rdb += rd_unroll) {
+        const auto n_calls = nstl::min(rd_unroll, rdb_loop_count - rdb);
+        for (int v = 0; v < n_calls; v++)
+            call(*variant_labels[v]);
+
+        add(reg_A, reg_A_increment * n_calls);
+        add(reg_B, reg_B_increment * n_calls);
+        if (brg.save_transform_A())
+            add(reg_buf, brg.ace_transformed_A_bd_block2_size() * n_calls);
+    }
+
+    // restore registers
+    if (brg.save_transform_A()) reg_buf.restore();
+    reg_B.restore();
+    reg_A.restore();
+
+    // separate last iteration if needed
+    if (separate_last_iteration) {
+        bi.rdi = last_rdi;
+        rdb_loop_body(bi);
+    } else {
+        bi.rdi = last_rdi;
+    }
+}
+
+void jit_brgemm_amx_uker_t::emit_deferred_uk_bodies() {
+    if (deferred_uk_bodies_.empty()) return;
+
+    Label end_uk_bodies;
+    jmp(end_uk_bodies, T_NEAR);
+    for (auto &body : deferred_uk_bodies_)
+        body.emit();
+    L(end_uk_bodies);
+
+    // The labels are bound now and nothing may reference them anymore: they
+    // are destroyed together with the emitters that own them.
+    deferred_uk_bodies_.clear();
+}
 
 void jit_brgemm_amx_uker_t::rdb_loop(brgemm_iteration_t &bi) {
     const auto &tloop = imap_[bi.apply_postops];
+    if (call_based_rd_loop) {
+        rdb_loop_call_based(bi);
+        return;
+    }
     for (auto &rdi : tloop.rdis) {
         bi.rdi = &rdi;
         rdb_loop_body(bi);
@@ -3156,6 +3284,11 @@ void jit_brgemm_amx_uker_t::top_loop(brgemm_iteration_t &bi) {
             add(reg_zp_comp_pad_a, bi.bdi->zp_comp_pad_a_shift);
     }
     interleave_store(bi, true);
+
+    // top_loop owns the deferred micro-kernel bodies registered by
+    // rdb_loop_call_based(): emit them here, out of the hot path, and destroy
+    // them together with their labels.
+    emit_deferred_uk_bodies();
 }
 
 void jit_brgemm_amx_uker_t::fill_imap() {
@@ -3357,6 +3490,11 @@ void jit_brgemm_amx_uker_t::init(brgemm_iteration_t &bi) {
             && IMPLICATION(!bi.skip_accumulation,
                     (brg.brgattr.max_bs == 1 || brg.type == brgemm_static_offs)
                             && !brg.brgattr.var_bs);
+
+    // TODO: extend the call based rd loop to non-ACE kernels and add a
+    // heuristic based on the estimated kernel size.
+    call_based_rd_loop = brg.is_ace() && brg.rdb > 1;
+
     if (brg.type == brgemm_static_offs && !bi.skip_accumulation) {
         reg_A.restore();
         reg_B.restore();
@@ -3582,6 +3720,10 @@ void jit_brgemm_amx_uker_t::generate() {
         top_loop(bi);
     }
     L(label_to_ret);
+
+    // Every deferred micro-kernel body must have been emitted by top_loop();
+    // an undrained one would leave an unbound label referenced by a `call`.
+    assert(deferred_uk_bodies_.empty());
 
     add(rsp, regscratchpad_.Size());
 
