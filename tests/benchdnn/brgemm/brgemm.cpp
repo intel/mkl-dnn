@@ -318,6 +318,10 @@ struct kernel_args_t {
     size_t scratchpad_size_;
     bool generate_skip_accumulation_;
 
+    // A benchdnn infrastructure unit, kept here for re-use between
+    // `init_kernel` and `init_memory_args`.
+    attr_args_t attr_args_;
+
     // Input members
     const prb_t *prb_;
 };
@@ -387,16 +391,29 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
     SAFE(check_dnnl_status(status_init, prb, res), WARN);
     if (res->state == SKIPPED) return OK;
 
-    attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dst_dims.data());
-    const auto &wei_scale = prb->attr.scales.get(DNNL_ARG_WEIGHTS);
-    if (wei_scale.policy == policy_t::PER_OC) {
-        attr_args.prepare_quant(
-                prb->attr, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, 2);
+    // BRGEMM cannot resolve `any` layouts; default binary RHS tensors
+    // to the plain `abx` layout.
+    attr_t attr = prb->attr;
+    for (int idx = 0; idx < attr.post_ops.len(); ++idx) {
+        auto &e = attr.post_ops.entry[idx];
+        if (e.is_binary_kind() && e.binary.tag == tag::any) {
+            e.binary.tag = tag::abx;
+        }
     }
+
+    kernel_args.attr_args_.prepare_post_ops_mds(
+            attr, prb->ndims, prb->dst_dims.data());
+    const auto &wei_scale = attr.scales.get(DNNL_ARG_WEIGHTS);
+    if (wei_scale.policy == policy_t::PER_OC) {
+        kernel_args.attr_args_.prepare_quant(
+                attr, DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, 2);
+    }
+
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
-    DNN_SAFE(create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims),
+    DNN_SAFE(create_dnnl_attr(
+                     dnnl_attr, attr, kernel_args.attr_args_, prb->ndims),
             WARN);
+
     dims_t dst_strides = {prb->get_ldd(), 1};
     auto dst_md = dnn_mem_t::init_md(
             prb->ndims, prb->dst_dims.data(), prb->dst_dt(), "", dst_strides);
@@ -456,10 +473,22 @@ int init_kernel(kernel_args_t &kernel_args, res_t *res) {
     kernel_args.is_b_data_layout_vnni_ = brgemm_desc.is_b_data_layout_vnni();
     kernel_args.scratchpad_size_ = brgemm_desc.get_wsp_buffer_size();
 #else // !defined(DNNL_EXPERIMENTAL_UKERNEL)
-    attr_args_t attr_args;
-    attr_args.prepare_post_ops_mds(prb->attr, prb->ndims, prb->dst_dims.data());
+
+    // BRGEMM cannot resolve `any` layouts; default binary RHS tensors
+    // to the plain `abx` layout.
+    attr_t attr = prb->attr;
+    for (int idx = 0; idx < attr.post_ops.len(); ++idx) {
+        auto &e = attr.post_ops.entry[idx];
+        if (e.is_binary_kind() && e.binary.tag == tag::any) {
+            e.binary.tag = tag::abx;
+        }
+    }
+
+    kernel_args.attr_args_.prepare_post_ops_mds(
+            attr, prb->ndims, prb->dst_dims.data());
     benchdnn_dnnl_wrapper_t<dnnl_primitive_attr_t> dnnl_attr;
-    DNN_SAFE(create_dnnl_attr(dnnl_attr, prb->attr, attr_args, prb->ndims),
+    DNN_SAFE(create_dnnl_attr(
+                     dnnl_attr, attr, kernel_args.attr_args_, prb->ndims),
             WARN);
     auto dnnl_post_ops = query_post_ops(dnnl_attr);
 
@@ -745,33 +774,28 @@ void init_memory_args(
                 dnn_mem_t(scratchpad_md, test_engine, /* prefill = */ true));
     }
 
-    // Binary post-op.
     const auto &po = prb->attr.post_ops;
+    // Binary post-ops
     for (int idx = 0; idx < po.len(); ++idx) {
-        const auto &e = po.entry[idx];
-        if (!e.is_binary_kind()) continue;
+        if (!po.entry[idx].is_binary_kind()) continue;
 
         int po_arg = DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) | DNNL_ARG_SRC_1;
-        const auto &b = e.binary;
-        int ndims = 2;
-        dims_t dims = prb->dst_dims;
-
-        const int mask = b.mask_input == attr_t::mask_input_t::mask
-                ? b.mask
-                : attr_t::policy2mask(po_arg, b.policy, ndims, dnnl_matmul);
-
-        switch (mask) {
-            case 0: dims = {1, 1}; break;
-            case 1: dims = {dims[0], 1}; break;
-            case 2: dims = {1, dims[1]}; break;
-            // Masks can be bigger than values above depending on the policy.
-            default: break;
-        }
-
-        auto po_md
-                = dnn_mem_t::init_md(ndims, dims.data(), b.src1_dt, tag::abx);
+        const auto &po_md = kernel_args.attr_args_.get_md(po_arg);
         mem_map.emplace(
                 po_arg, dnn_mem_t(po_md, test_engine, /* prefill = */ true));
+    }
+
+    // PReLU post-ops
+    for (int idx = 0; idx < po.len(); ++idx) {
+        if (!po.entry[idx].is_prelu_kind()) continue;
+
+        int po_arg = DNNL_ARG_ATTR_MULTIPLE_POST_OP(idx) | DNNL_ARG_WEIGHTS;
+        const int mask = kernel_args.attr_args_.get_mask(po_arg);
+        dims_t dims = md2dims(dst_md, mask);
+
+        mem_map.emplace(po_arg,
+                dnn_mem_t(prb->ndims, dims.data(), dnnl_f32, tag::axb,
+                        test_engine, /* prefill = */ true));
     }
 
     if (!prb->attr.scales.is_def()) {
