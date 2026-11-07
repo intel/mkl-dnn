@@ -89,3 +89,8 @@
 --reset --tensor-property=18:host_scalar+21:host_scalar --in-shapes=18:scalar+21:scalar --case=complex_fusion/mha/sdpa-dynamic-fp8-bf16.json
 --reset --dt=0:f8_e5m2+4:f8_e5m2+19:f8_e5m2+24:f8_e5m2 --case=complex_fusion/mha/sdpa-dynamic-fp8-bf16.json
 --reset --op-attrs=3:mask:0+7:mask:0+27:mask:0 --in-shapes=1:scalar+5:scalar+25:scalar --case=complex_fusion/mha/sdpa-dynamic-fp8-bf16.json
+
+--reset --case=complex_fusion/mha/gqa-dynamic-fp8-bf16.json
+--reset --dt=0:f8_e5m2+4:f8_e5m2+19:f8_e5m2+24:f8_e5m2 --case=complex_fusion/mha/gqa-dynamic-fp8-bf16.json
+--reset --op-attrs=3:mask:0+7:mask:0+27:mask:0 --in-shapes=1:scalar+5:scalar+25:scalar --case=complex_fusion/mha/gqa-dynamic-fp8-bf16.json
+--reset --tensor-property=18:host_scalar+21:host_scalar --in-shapes=18:scalar+21:scalar --case=complex_fusion/mha/gqa-dynamic-fp8-bf16.json
