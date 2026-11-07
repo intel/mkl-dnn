@@ -143,7 +143,7 @@ status_t brgemm_matmul_t<isa>::pd_t::init(const engine_t *engine) {
     const auto dst_dt = dst_md_.data_type;
 
     const bool is_f32 = everyone_is(f32, src_dt, wei_dt, dst_dt);
-    const bool is_int8 = one_of(src_dt, u8, s8) && wei_dt == s8
+    const bool is_int8 = one_of(src_dt, u8, s8) && one_of(wei_dt, u8, s8)
             && one_of(dst_dt, u8, s8, s32, f32, f16, bf16);
     const bool is_f8 = one_of(src_dt, f8_e5m2, f8_e4m3)
             && one_of(wei_dt, f8_e5m2, f8_e4m3)
@@ -373,11 +373,13 @@ status_t brgemm_matmul_t<isa>::pd_t::init(const engine_t *engine) {
             = bgmmc_.is_runtime_N ? max_num_dynamic_n_tails + 1 : 2;
 
     const bool is_amx = isa_has_tile_accumulators(isa);
-    const bool is_s8s8 = src_dt == s8 && wei_dt == s8;
-    // In the case of dynamic M for amx the last tail kernel generate using
-    // non-amx isa. s8s8 proplem type is exception to avoid compensations
-    // processing for tail kernel
-    const auto backup_isa = is_amx && bgmmc_.is_runtime_M && !is_s8s8
+    // In the case of dynamic M for amx the last tail kernel is generated using
+    // a non-amx isa. VNNI implements u8 x s8 only: s8 x s8 would require
+    // compensation processing in the tail kernel and u8 weights have no VNNI
+    // kernel at all, so every other int8 combination keeps the amx isa.
+    const bool int8_has_non_amx_kernel = src_dt == u8 && wei_dt == s8;
+    const auto backup_isa = is_amx && bgmmc_.is_runtime_M
+                    && IMPLICATION(is_int8, int8_has_non_amx_kernel)
             ? (is_f16 || is_f32_f16 || is_f16_with_int_wei
                               ? avx512_core_fp16
                               : (is_bf16 || is_f32_bf16 || is_bf16_with_int_wei

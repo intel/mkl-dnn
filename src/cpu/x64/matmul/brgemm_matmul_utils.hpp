@@ -475,6 +475,17 @@ struct brgemm_matmul_conf_utils_t {
         return int8_grouped_quantization_dt;
     }
 
+    // Plain (non-grouped) int8 problem with unsigned weights. Such a problem
+    // requires a kernel with a u8 x u8 outer product, i.e. AMX-INT8 or ACE;
+    // VNNI implements u8 x s8 only.
+    inline bool is_int8_unsigned_wei() const { return int8_unsigned_wei_dt; }
+
+    // Grouped int8 quantization with u8 weights. Supported on the VNNI code
+    // path only, not on the AMX/ACE one.
+    inline bool is_int8_grouped_unsigned_wei() const {
+        return int8_grouped_unsigned_wei_dt;
+    }
+
     inline bool with_weights_decompression() const {
         return !utils::one_of(bgmmc.src_dt, data_type::s8, data_type::u8,
                        data_type::s4, data_type::u4)
@@ -520,6 +531,7 @@ private:
     const bool weights_decompression_support, bf16_with_int_wei_dt, f32_f16_dt,
             f32_bf16_dt, f16_with_int_wei_dt, f32_with_int_wei_dt,
             int8_grouped_quantization_dt, bf16_fp8_dt, f16_fp8_dt;
+    const bool int8_unsigned_wei_dt, int8_grouped_unsigned_wei_dt;
     const bool A_any_layout;
     const bool B_any_layout;
     const bool C_any_layout;

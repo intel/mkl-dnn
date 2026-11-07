@@ -291,7 +291,18 @@ status_t check_isa_with_datatype(
                     is_superset(isa, avx512_core_amx_fp16)
                             || is_superset(isa, avx10_2))
             && IMPLICATION(
-                    bm_conf_utils.is_f4_via_convert(), one_of(isa, avx10_2));
+                    bm_conf_utils.is_f4_via_convert(), one_of(isa, avx10_2))
+            // u8 weights need a u8 x u8 outer product. AMX-INT8 provides it
+            // with TDPBUUD, ACE with TOP4BUUD. VNNI implements u8 x s8 only.
+            // Note: `avx10_2_ace` does not include `amx_int8` by design, hence
+            // the explicit second alternative.
+            && IMPLICATION(bm_conf_utils.is_int8_unsigned_wei(),
+                    is_superset(isa, amx_int8) || is_superset(isa, avx10_2_ace))
+            // Grouped int8 quantization with u8 weights is implemented for the
+            // VNNI code path only.
+            && IMPLICATION(bm_conf_utils.is_int8_grouped_unsigned_wei(),
+                    !is_superset(isa, amx_int8)
+                            && !is_superset(isa, avx10_2_ace));
     return ok ? status::success : status::unimplemented;
 }
 
@@ -350,7 +361,8 @@ brgemm_matmul_conf_utils_t::brgemm_matmul_conf_utils_t(
               && one_of(bgmmc.dst_dt, f16, f32, bf16, f8_e5m2, f8_e4m3))
     , bf8_dt(everyone_is(f8_e5m2, bgmmc.src_dt, bgmmc.wei_dt)
               && one_of(bgmmc.dst_dt, f16, f32, bf16, f8_e5m2, f8_e4m3))
-    , int8_dt(utils::one_of(bgmmc.src_dt, u8, s8) && bgmmc.wei_dt == s8
+    , int8_dt(utils::one_of(bgmmc.src_dt, u8, s8)
+              && utils::one_of(bgmmc.wei_dt, u8, s8)
               && one_of(bgmmc.dst_dt, u8, s8, s32, f32, f16, bf16))
     , bf32_dt(f32_dt
               && one_of(attr.fpmath_.mode_, fpmath_mode::bf16, fpmath_mode::any)
@@ -396,6 +408,15 @@ brgemm_matmul_conf_utils_t::brgemm_matmul_conf_utils_t(
               && one_of(bgmmc.dst_dt, f16, f32, bf16, f8_e5m2, f8_e4m3))
     , f16_fp8_dt(bgmmc.src_dt == f16 && one_of(bgmmc.wei_dt, f8_e5m2, f8_e4m3)
               && one_of(bgmmc.dst_dt, f16, f32, bf16, f8_e5m2, f8_e4m3))
+    // Plain int8 with u8 weights. The grouped quantization path is excluded
+    // on purpose: it has its own (VNNI-based) kernels and its own dispatch
+    // conditions, see `int8_grouped_unsigned_wei_dt`.
+    , int8_unsigned_wei_dt(
+              int8_dt && bgmmc.wei_dt == u8 && !int8_grouped_quantization_dt)
+    // Grouped int8 quantization with u8 weights runs on the VNNI code path
+    // only; the AMX/ACE path does not implement it.
+    , int8_grouped_unsigned_wei_dt(
+              int8_grouped_quantization_dt && bgmmc.wei_dt == u8)
     , A_any_layout(A_any_layout)
     , B_any_layout(B_any_layout)
     , C_any_layout(C_any_layout)
@@ -2194,6 +2215,15 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
     bgmmc.has_zero_point_a = bgmmc.src_zp_type != brgemm_broadcast_t::none;
     bgmmc.has_zero_point_b = bgmmc.wei_zp_type != brgemm_broadcast_t::none;
     bgmmc.has_zero_point_c = bgmmc.dst_zp_type != brgemm_broadcast_t::none;
+
+    // The src zero point compensation accumulates the B column sums in copy_b
+    // with vpdpbusd, which reads B as signed bytes. That is incorrect for u8
+    // weights, so reject the combination until the compensation kernel becomes
+    // aware of the weights signedness.
+    VCONDCHECK_BG(IMPLICATION(bm_conf_utils.is_int8_unsigned_wei(),
+                          !bgmmc.has_zero_point_a),
+            VERBOSE_UNSUPPORTED_ZP_CFG);
+
     // Non-default src zero points (per-tensor, common, host_scalar) with
     // int8 grouped quantization: the per-(M,N) compensation tile (set via
     // bgmmc.with_per_mn_compensation later in init) covers the remaining
