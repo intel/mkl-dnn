@@ -200,6 +200,12 @@ private:
     static const dim_t min_mn_dim = 64;
     static const dim_t k_threshold_write_bound_layer = 256;
     static const dim_t min_n_dim_write_bound_layer = 256;
+
+    static const dim_t ace_m_tmul = 16;
+    static const dim_t ace_m_tiles = 2;
+    static const dim_t ace_n_tiles = 4;
+    static const dim_t ace_m_decomposition = ace_m_tiles * ace_m_tmul;
+
     dim_t n_decomposition = 32;
     dim_t m_decomposition = 32;
     size_t gemm_dt_sz {};

@@ -257,7 +257,12 @@ bool matmul_amx_blocking_params_macro_t::maybe_small_dims_heuristics(
 
     } else if (bgmmc.K <= best_blocking.wei_k_blk && bgmmc.batch == 1) {
 
-        const dim_t m_per_core = div_up(bgmmc.M, bgmmc.nthr);
+        dim_t m_per_core = div_up(bgmmc.M, bgmmc.nthr);
+        if (bgmmc.is_ace) {
+            const dim_t ace_m_dec = ace_m_decomposition;
+            m_per_core = nstl::max(
+                    m_per_core, nstl::min(ace_m_dec, (dim_t)bgmmc.M));
+        }
         best_blocking.set_core_divs(
                 1, static_cast<int>(div_up(bgmmc.M, m_per_core)), 1, 1);
         best_blocking.set_tmul_sizes();
@@ -297,8 +302,16 @@ bool matmul_amx_blocking_params_macro_t::maybe_small_dims_heuristics(
 
         best_blocking.m_per_thread = m_per_core;
         // in this case 2 full are preferable
-        best_blocking.m_decomposition
-                = determine_tmul_size(best_blocking.m_per_thread, 2 * 16);
+        // On ACE the two tiles are a fixed ace_m_decomposition rows; there is
+        // no reduced-row form of the accumulator to fall back to.
+        if (bgmmc.is_ace) {
+            const dim_t ace_m_dec = ace_m_decomposition;
+            best_blocking.m_decomposition
+                    = nstl::min(ace_m_dec, (dim_t)bgmmc.M);
+        } else {
+            best_blocking.m_decomposition
+                    = determine_tmul_size(best_blocking.m_per_thread, 2 * 16);
+        }
         best_blocking.n_tmul = 16; // B blocked layout is a multiply of 16
         best_blocking.n_decomposition = 2 * best_blocking.n_tmul;
         best_blocking.k_tmul = nstl::min(
@@ -984,14 +997,21 @@ float matmul_amx_blocking_params_macro_t::evaluate_single_core_blocking(
 }
 
 void matmul_amx_blocking_params_macro_t::set_tmul_sizes() {
-    this->m_tmul = determine_tmul_size(this->m_per_thread, 16);
+    // determine_tmul_size() models TMUL's ability to compute on a reduced
+    // number of rows. ACE has no such degree of freedom: an accumulator tile
+    // always spans ace_m_tmul rows.
+    this->m_tmul = is_ace ? static_cast<size_t>(ace_m_tmul)
+                          : determine_tmul_size(this->m_per_thread, 16);
     this->n_tmul = 16; // B blocked layout is a multiply of 16
     this->k_tmul = nstl::min((size_t)wei_k_blk, (size_t)K);
 }
 
 void matmul_amx_blocking_params_macro_t::set_decomposition() {
+    // The M multiplier is the same on both paths (ace_m_tiles == 2); only the
+    // N direction differs, ACE covering ace_n_tiles tiles per iteration.
+    const size_t n_tiles = is_ace ? static_cast<size_t>(ace_n_tiles) : 2;
     m_decomposition = nstl::min((size_t)M, 2 * m_tmul);
-    n_decomposition = nstl::min((size_t)N, 2 * n_tmul);
+    n_decomposition = nstl::min((size_t)N, n_tiles * n_tmul);
 }
 
 bool matmul_amx_blocking_params_macro_t::is_horizontal_selected(
@@ -1028,8 +1048,8 @@ bool matmul_amx_blocking_params_macro_t::set_blocking_parameters(
             = blk_candidates(m_per_thread, m_decomposition);
     std::set<dim_t> n_candidates
             = blk_candidates(n_per_thread, n_decomposition);
-    dim_t best_k_h, best_n_h;
-    dim_t best_m_v, best_k_v;
+    dim_t best_k_h = 0, best_n_h = 0;
+    dim_t best_m_v = 0, best_k_v = 0;
     float best_score_h = 0, best_score_v = 0;
     bool horizontal_not_possible = false;
     bool vertical_not_possible = force_horizontal;
@@ -1189,7 +1209,11 @@ bool matmul_amx_blocking_params_macro_t::set_blocking_parameters(
         bool l1_set_issues = k_blk_h < K
                 && l1_eff_factor * a_l1 + 2 * c_l1 + d_post > L1_threshold();
 
-        if (l1_set_issues || is_postops_bound(k_blk_h)) {
+        // ACE always takes this path.
+        // There are no NT loads in AVX instructions for ACE => l1 blocking is not possible.
+        // Select the L2-level blocking directly instead.
+        if (l1_set_issues || is_postops_bound(k_blk_h) || is_ace) {
+            assert(best_n_h != 0);
             // Give up on the L1 blocking
             best_score_h = 0;
             // Calculate k_blk_h and n_blk_h that can fit in the L2 when k_blk is wei_k_blk
@@ -1197,6 +1221,8 @@ bool matmul_amx_blocking_params_macro_t::set_blocking_parameters(
             // Give up on the L1.
             k_blk_h = nstl::min(wei_k_blk * best_k_h, K);
             best_k_h = 1;
+            // No effect on ACE: the NT hints are only read by the tile-load
+            // path, which ACE does not use (it loads A/B through ZMMs).
             is_a_nt_ = true;
         }
 
@@ -1249,7 +1275,10 @@ bool matmul_amx_blocking_params_macro_t::set_blocking_parameters(
         is_a_nt_ = true;
         is_b_nt_ = false;
 
-        if (is_postops_bound(k_blk_v)) {
+        // ACE always takes this path, for the same reason as the horizontal
+        // branch above
+        if (is_postops_bound(k_blk_v) || is_ace) {
+            assert(best_m_v != 0);
             // Give up on the L1 blocking
             best_score_v = 0;
             // Calculate k_blk_h and n_blk_h that can fit in the L2 when k_blk is wei_k_blk
@@ -1257,6 +1286,7 @@ bool matmul_amx_blocking_params_macro_t::set_blocking_parameters(
             // Give up on the L1.
             k_blk_v = nstl::min(wei_k_blk * best_k_v, K);
             best_k_v = 1;
+            // No effect on ACE, see the horizontal branch.
             is_b_nt_ = true;
         }
 
