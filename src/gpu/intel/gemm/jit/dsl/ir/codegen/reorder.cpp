@@ -40,121 +40,6 @@ int64_t size_in_bytes(const dsl::layout_t &layout) {
             / layout.type().packing();
 }
 
-layout_t reinterpret(const layout_t &layout, const type_t &new_type,
-        bool do_normalize = true) {
-    int old_size = layout.type().size();
-    int new_size = new_type.size();
-    if (new_size == old_size) return layout;
-
-    expr_t new_offset = 0;
-    if (!layout.offset().is(0)) {
-        dsl_assert(is_const(layout.offset())) << "Expected constant offset.";
-        int64_t off = to_cpp<int64_t>(layout.offset()) * old_size;
-        dsl_assert(off % new_size == 0);
-        new_offset = off / new_size;
-    }
-
-    if (old_size % new_size != 0 && new_size % old_size != 0) {
-        dsl_error();
-        return layout_t();
-    }
-
-    auto new_blocks = layout.blocks();
-    if (new_blocks.empty()) {
-        dsl_error() << "Can't reinterpret.";
-        return layout_t();
-    }
-
-    auto &b0 = new_blocks.front();
-    if (int64_t(b0.stride) != 1) {
-        dsl_error();
-        return layout_t();
-    }
-
-    if (new_size < old_size) {
-        int factor = (old_size / new_size);
-        b0.size *= factor;
-        // Recompute strides.
-        for (auto &b : new_blocks) {
-            if (&b == &b0) continue;
-            b.stride *= factor;
-        }
-    } else {
-        int factor = (new_size / old_size);
-        if (b0.size % factor != 0) {
-            dsl_error();
-            return layout_t();
-        }
-        b0.size /= factor;
-        // Recompute strides.
-        for (auto &b : new_blocks) {
-            if (&b == &b0) continue;
-            if (b.stride % factor != 0) {
-                dsl_error();
-                return layout_t();
-            }
-            b.stride /= factor;
-        }
-    }
-
-    return layout_t(new_type, new_blocks, new_offset, layout.ndims(false),
-            do_normalize);
-}
-
-// Reinterprets layouts to wider data type (up to 4 bytes).
-// Example: 16a16b (s8 type) -> 16a4b (s32 type)
-bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
-        const tile_t &tile = {}, bool do_update = true,
-        int *new_size_out = nullptr) {
-    if (src.blocks().empty() || dst.blocks().empty()) return false;
-    if (src.type() != dst.type()) return false;
-
-    auto &s0 = src[0];
-    auto &d0 = dst[0];
-    if (s0.idx != d0.idx) return false;
-    if (int(s0.stride) != 1) return false;
-    if (int(d0.stride) != 1) return false;
-
-    int old_size = src.type().size();
-    int s0_old_size = int(s0.size) * old_size;
-    int d0_old_size = int(d0.size) * old_size;
-
-    int new_size = gcd(s0_old_size, d0_old_size);
-    new_size = gcd(new_size, 4); // Try types up to 4 bytes.
-    if (new_size <= old_size) return false;
-
-    auto tile_ok = [&](const layout_t &l) {
-        if (tile.is_empty()) return true;
-        int factor = new_size / old_size;
-        if (tile[l[0].idx] % factor != 0) return false;
-        return true;
-    };
-
-    auto strides_ok = [&](const layout_t &l) {
-        for (int i = 1; i < int(l.blocks().size()); i++) {
-            auto &b = l[i];
-            if (int(b.stride) * old_size % new_size != 0) return false;
-        }
-        return true;
-    };
-
-    while (new_size > old_size) {
-        bool ok = true;
-        ok &= (tile_ok(src) && tile_ok(dst));
-        ok &= (strides_ok(src) && strides_ok(dst));
-        if (ok) {
-            if (do_update) {
-                src = reinterpret(src, type_t::s(new_size * 8));
-                dst = reinterpret(dst, type_t::s(new_size * 8));
-            }
-            if (new_size_out) *new_size_out = new_size;
-            return true;
-        }
-        new_size /= 2;
-    }
-    return false;
-}
-
 void align_layouts(layout_t &a, layout_t &b) {
     for (auto &d : a.tile()) {
         auto a_blocks = a.blocks();
@@ -343,7 +228,7 @@ void reorder_2d_impl_t::emit(
         dsl_assert(y_blocks.size() <= 1);
         int x_stride = (x_blocks.empty() ? 1 : int(x_blocks[0].stride));
         int y_stride = (y_blocks.empty() ? 1 : int(y_blocks[0].stride));
-        int width = int(tile.elems()) * orig_type.size() / type.size();
+        int width = int(tile.elems()) * orig_bits / type_bits;
 
         const auto &src_layout = *prev_layout, &dst_layout = *next_layout;
         auto swizzle = [&](const icoord_t &start) {
@@ -573,7 +458,7 @@ void reorder_2d_impl_t::generate_all_layouts_impl(
 
 void reorder_2d_impl_t::vertex_t::set_edges(const std::vector<edge_t> &edges) {
     adj_edge_type_masks.resize(edges.size());
-    int type_size = layout.type().size();
+    int type_size = layout.type().bitsize();
     for (int i = 0; i < int(edges.size()); i++) {
         auto &e = edges[i];
         auto tile = e.tile();
@@ -584,7 +469,7 @@ void reorder_2d_impl_t::vertex_t::set_edges(const std::vector<edge_t> &edges) {
         int from = ilog2(type_size);
         int to = ilog2(max_type_size);
         for (int j = from; j <= to; j++) {
-            type_t type = type_t::u(8 << j);
+            type_t type = type_t::u(1 << j);
             if (can_reorder(tile, type)) adj_edge_type_masks[i] |= (1 << j);
         }
     }
@@ -635,20 +520,20 @@ int reorder_2d_impl_t::vertex_t::cost(
         const edge_t &e, const vertex_t &v, type_t &type) const {
     uint32_t mask = (adj_edge_type_masks[e.idx] & v.adj_edge_type_masks[e.idx]);
     if (mask == 0) return std::numeric_limits<int>::max();
-    int cur_size = layout.type().size();
+    int cur_bits = layout.type().bitsize();
     int cur_cost = into<int>(layout.elems() / (e.a * e.b));
-    int min_log_bytes = ilog2(cur_size);
-    int max_log_bytes = 3;
+    int min_log_bits = ilog2(cur_bits);
+    int max_log_bits = 6;
     int min_cost = std::numeric_limits<int>::max();
-    for (int i = min_log_bytes; i <= max_log_bytes; i++) {
+    for (int i = min_log_bits; i <= max_log_bits; i++) {
         if ((mask & (1 << i)) == 0) continue;
-        if (i > min_log_bytes) {
+        if (i > min_log_bits) {
             dsl_assert(!layout.blocks().empty());
             dsl_assert(!v.layout.blocks().empty());
             if (layout[0].idx != v.layout[0].idx) continue;
         }
         min_cost = cur_cost;
-        type = type_t::u(8 << i);
+        type = type_t::u(1 << i);
         break;
     }
     return min_cost;
@@ -657,13 +542,8 @@ int reorder_2d_impl_t::vertex_t::cost(
 reorder_impl_t::reorder_impl_t(ngen::HW hw, const dsl::layout_t &src_layout,
         const dsl::layout_t &dst_layout)
     : hw_(hw), src_layout_(src_layout), dst_layout_(dst_layout) {
+    move_to_integer_pipe(src_layout_, dst_layout_);
     try_reinterpret_to_wider_type(src_layout_, dst_layout_);
-
-    if (src_layout_.type() == dst_layout_.type()) {
-        auto type = type_t::u(src_layout_.type().bitsize());
-        src_layout_ = src_layout_.with(type);
-        dst_layout_ = dst_layout_.with(type);
-    }
 }
 
 void reorder_impl_t::emit(copy_plan_t &plan, const reorder_operand_t &src,
@@ -689,7 +569,8 @@ void reorder_impl_t::emit(copy_plan_t &plan, const reorder_operand_t &src,
         if (src == dst) return;
         if (!try_emit_2d(plan, dst, src)) emit_1d(plan, dst, src);
         if (is_subset(src.type(), dst.type()))
-            dst.buffer.range = src.buffer.type;
+            dst.buffer.range
+                    = to_ngen(src.type()); // src.type() forwards src range
     };
 
     const bool direct_copy = layouts_compatible(src.layout, dst.layout);
@@ -744,51 +625,152 @@ void reorder_impl_t::emit(copy_plan_t &plan, const reorder_operand_t &src,
     }
 }
 
-std::vector<tile_t> reorder_impl_t::tiles() const {
-    auto make_tiles = [](const layout_t &l) {
-        const auto &blocks = l.blocks();
-        tile_t base = l.tile();
-        std::vector<tile_t> tiles = {base};
-        auto it = blocks.rbegin();
-        const auto end = blocks.rend();
-        for (; it != end; ++it) {
-            auto block = it->size;
-            for (int64_t factor = 2; factor <= block; ++factor) {
-                if (tiles.size() >= 8) return tiles;
-                if (block % factor) continue;
-                tile_t tile = base;
-                tile[it->idx] /= factor;
-                tiles.push_back(std::move(tile));
-            }
-            base[it->idx] /= block;
-        }
-        return tiles;
+std::vector<int64_t> valid_dims(
+        const std::vector<layout_t> &layouts, const idx_t &idx) {
+    // Find all tile sizes for the given idx that maps to each of the layouts
+    // Suppose two block layouts for a given index are:
+    //   5a*6a*2a     and    2a*5a*6a*
+    // The cumulative products of the block sizes are
+    //   1, 2, 12, 60    and   1, 6, 30, 60
+    // respectively. A valid dim is an integer d such that
+    //   d is divisible by all cumulative products <= d
+    //     and     divides all cumulative products >= d
+    // The valid dims for these layouts / idx are 1, 2, 6, and 60.
+
+    using iterator_t = std::vector<layout::block_t>::const_iterator;
+    auto advance_iterator = [&](iterator_t &it, const iterator_t &end) {
+        while (it != end && (it->idx != idx || it->size == 1))
+            it++;
     };
 
-    auto src_tiles = make_tiles(src_layout_);
-    auto dst_tiles = make_tiles(dst_layout_);
-    std::vector<tile_t> tiles;
-    if (src_tiles.empty() && dst_tiles.empty()) return tiles;
-    tiles.reserve(src_tiles.size() + dst_tiles.size() - 1);
+    const auto n = layouts.size();
+    std::vector<iterator_t> it, end;
+    std::vector<int64_t> size, curr, next;
+    std::vector<int64_t> dims = {1};
+    if (n == 0) return dims;
+    it.reserve(n);
+    end.reserve(n);
+    size.reserve(n);
+    curr.reserve(n);
+    next.reserve(n);
 
-    auto src_it = src_tiles.begin();
-    auto dst_it = dst_tiles.begin();
-    const auto src_end = src_tiles.end();
-    const auto dst_end = dst_tiles.end();
+    for (auto &l : layouts) {
+        it.push_back(l.blocks().begin());
+        end.push_back(l.blocks().end());
+        advance_iterator(it.back(), end.back());
+        if (it.back() == end.back()) return dims;
 
-    while (src_it != src_end || dst_it != dst_end) {
-        if (dst_it == dst_end)
-            tiles.push_back(*src_it++);
-        else if (src_it == src_end)
-            tiles.push_back(*dst_it++);
-        else if (*src_it == *dst_it)
-            tiles.push_back((dst_it++, *src_it++));
-        else if (src_it->elems() >= dst_it->elems())
-            tiles.push_back(*src_it++);
-        else
-            tiles.push_back(*dst_it++);
+        curr.push_back(1);
+        size.push_back(it.back()->size);
+        next.push_back(size.back() * curr.back());
     }
-    return tiles;
+
+    while (true) {
+        int64_t lower = 1, upper = 0;
+        for (size_t i = 0; i < n; ++i) {
+            // lcm is divisible by all smaller cumulative products
+            lower = lcm(lower, curr[i]);
+            // gcd divides all larger cumulative products
+            upper = gcd(upper, next[i]);
+        }
+
+        if (upper % lower == 0) {
+            auto factor = upper / lower;
+            for (int64_t d = 1; d <= factor; ++d) {
+                if (factor % d == 0 && dims.back() != lower * d)
+                    dims.push_back(lower * d);
+            }
+            for (size_t i = 0; i < n; ++i) {
+                curr[i] *= factor;
+                size[i] /= factor;
+            }
+        }
+
+        auto m = std::numeric_limits<int64_t>::max();
+        for (auto &n : next)
+            m = std::min(m, n);
+        for (size_t i = 0; i < n; ++i) {
+            if (next[i] != m) continue;
+
+            advance_iterator(++it[i], end[i]);
+            if (it[i] == end[i]) return dims;
+
+            curr[i] = next[i];
+            size[i] = it[i]->size;
+            next[i] = size[i] * curr[i];
+        }
+    }
+}
+
+bool less(const layout::block_t &a, const layout::block_t &b) {
+    dsl_assert(!a.stride.is_undefined() && !b.stride.is_undefined());
+    if (a.stride.is_fixed() ^ b.stride.is_fixed()) return a.stride.is_fixed();
+    // Runtime dims are not comparable, so treat them as equal.
+    if (!(a.stride.is_fixed() && b.stride.is_fixed())) return false;
+    return (int64_t)a.stride * a.size < (int64_t)b.stride * b.size;
+}
+
+const layout::block_t &max(const layout::block_t &a, const layout::block_t &b) {
+    return less(a, b) ? b : a;
+}
+
+std::vector<tile_t> reorder_impl_t::tiles() const {
+    using mark_t = std::pair<int64_t, layout::block_t>;
+    constexpr size_t max_num_tiles = 8;
+
+    auto src = src_layout_.make_dense();
+    auto dst = dst_layout_.make_dense();
+    auto keys = src.tile().keys();
+
+    std::vector<layout_t> layouts = {std::move(src), std::move(dst)};
+
+    auto max_offset = [&](const std::vector<layout::block_t> &blocks) {
+        if (blocks.empty()) return layout::block_t();
+        layout::block_t block = blocks[0];
+        for (auto &b : blocks)
+            block = max(block, b);
+        return block;
+    };
+
+    std::vector<mark_t> marks;
+    for (auto &k : keys) {
+        auto dims = valid_dims(layouts, k);
+        marks.reserve(marks.size() + dims.size());
+        for (auto &d : dims) {
+            std::vector<layout::block_t> blocks;
+            tile_t tile;
+            tile[k] = d;
+            for (auto &l : layouts) {
+                auto mapped = l.sub(tile);
+                if (!mapped.nblocks()) continue;
+                blocks.push_back(mapped.blocks().back());
+            }
+            auto block = max_offset(blocks);
+            if (block.stride.is_undefined()) continue;
+            marks.emplace_back(d, block);
+        }
+    }
+
+    auto cmp = [](const mark_t &a, const mark_t &b) {
+        return less(a.second, b.second);
+    };
+    std::sort(marks.begin(), marks.end(), cmp);
+
+    std::vector<tile_t> tiles;
+    tiles.reserve(marks.size() + 1);
+    tile_t tile;
+    tiles.push_back(tile);
+    for (auto &m : marks) {
+        if (m.first == 1) continue;
+        tile[m.second.idx] = m.first;
+        tiles.push_back(tile);
+    }
+
+    // Delete all but the last `max_num_tiles` tiles, which are the largest.
+    if (tiles.size() > max_num_tiles)
+        tiles.erase(tiles.begin(), tiles.end() - max_num_tiles);
+
+    return {tiles.rbegin(), tiles.rend()}; // largest tiles first
 }
 
 bool reorder_impl_t::layouts_compatible(
@@ -796,25 +778,36 @@ bool reorder_impl_t::layouts_compatible(
     // Test to see if all of the non-size-1 blocks of the two layouts are
     // listed in the same order, ignoring strides.
     using iterator_t = decltype(a.blocks().begin());
+    using block_t = layout_t::block_t;
     iterator_t a_block_it = a.blocks().begin();
     iterator_t b_block_it = b.blocks().begin();
     const iterator_t a_block_end = a.blocks().end();
     const iterator_t b_block_end = b.blocks().end();
 
-    auto skip_size_1_blocks = [](iterator_t &it, const iterator_t &end) {
+    // Skips size-1 blocks and loads the next real block, if any.
+    auto load = [](iterator_t &it, const iterator_t &end, block_t &block) {
         while (it != end && it->size == 1)
-            it++;
+            ++it;
+        if (it != end) block = *it;
     };
 
-    while (true) {
-        skip_size_1_blocks(a_block_it, a_block_end);
-        skip_size_1_blocks(b_block_it, b_block_end);
-        if (a_block_it == a_block_end || b_block_it == b_block_end) break;
+    // Consumes `size` from the current block, moving on once it is used up.
+    auto consume = [&](iterator_t &it, const iterator_t &end, block_t &block,
+                           int64_t size) {
+        block.size /= size;
+        if (block.size == 1) load(++it, end, block);
+    };
 
-        if (a_block_it->idx != b_block_it->idx) return false;
-        if (a_block_it->size != b_block_it->size) return false;
-        a_block_it++;
-        b_block_it++;
+    block_t a_block, b_block;
+    load(a_block_it, a_block_end, a_block);
+    load(b_block_it, b_block_end, b_block);
+
+    while (a_block_it != a_block_end && b_block_it != b_block_end) {
+        if (a_block.idx != b_block.idx) return false;
+        auto size = std::min(a_block.size, b_block.size);
+        if (std::max(a_block.size, b_block.size) % size) return false;
+        consume(a_block_it, a_block_end, a_block, size);
+        consume(b_block_it, b_block_end, b_block, size);
     }
 
     return a_block_it == a_block_end && b_block_it == b_block_end;

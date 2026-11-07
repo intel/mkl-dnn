@@ -145,6 +145,8 @@ inline ir::fma_kind_t to_enum(const std::string &s) {
 
 // Legacy interfaces from gemmstone/dsl/reorder.hpp
 using reorder_t = ir::reorder_t;
+using gemmstone::dsl::ir::move_to_integer_pipe;
+using gemmstone::dsl::ir::try_reinterpret_to_wider_type;
 
 // Legacy interfaces from gemmstone/dsl/reduce.hpp
 using reduce_t = ir::reduce_t;

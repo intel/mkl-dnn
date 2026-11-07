@@ -344,10 +344,19 @@ layout_t layout_t::split_block(
 tile_t layout_t::max_subtile(
         int64_t max, bool is_dense, bool perfectly_divides) const {
     tile_t subtile;
+    auto packing = type().packing();
     int64_t elems = 1;
     for (size_t i = 0; i < nblocks(); i++) {
         auto &b = blocks()[i];
+        if (b.size == 1) continue;
         dsl_assert(!b.stride.is_undefined());
+
+        // Force byte-alignment for packed types.
+        dsl_assert(b.size % packing == 0);
+        auto size = b.size / packing;
+        subtile[b.idx] *= packing;
+        elems *= packing;
+
         if (is_dense) {
             if (b.stride.is_unknown()) return subtile;
             if (i > 0) {
@@ -355,15 +364,16 @@ tile_t layout_t::max_subtile(
                 if (b.stride != b0.size * b0.stride) break;
             }
         }
-        if (b.size * elems >= max) {
+        if (size * elems >= max) {
             if (perfectly_divides)
-                subtile[b.idx] *= utils::max_div(b.size, max / elems);
+                subtile[b.idx] *= utils::max_div(size, max / elems);
             else
                 subtile[b.idx] *= max / elems;
             break;
         }
-        subtile[b.idx] *= b.size;
-        elems *= b.size;
+        subtile[b.idx] *= size;
+        elems *= size;
+        packing = 1; // Outer blocks are already byte-aligned.
     }
     return subtile;
 }

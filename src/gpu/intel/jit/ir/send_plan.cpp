@@ -839,7 +839,7 @@ struct send_2d_params_t {
         add_block(vnni_factor > 1 ? h_vidx : w_vidx, c);
         l = add_padded_block(w_vidx, w_rcount, grf_size);
         l = add_padded_block(h_vidx, h_rcount, grf_size);
-        if (type != mem_type) l = reinterpret(l, mem_type);
+        if (type != mem_type) l = ir::reinterpret(l, mem_type);
         return l;
     }
 
@@ -1338,7 +1338,7 @@ public:
     }
 
     int init_scattered_params(const send_params_t &send_params, int inner_bytes,
-            int total_bytes) const {
+            int innermost_bytes, int total_bytes) const {
         // atomic_fadd messages imply direct type match
         if (send_params.send_op == send_op_t::atomic_fadd)
             return send_params.mem_type.size();
@@ -1363,6 +1363,9 @@ public:
             slot_size = std::min(
                     slot_size, ir_utils::max_divisor(align, {1, 2, 4, 8}));
         }
+
+        if (slot_size == 2 && innermost_bytes & 1) slot_size = 1;
+
         return slot_size;
     }
 
@@ -1538,10 +1541,12 @@ private:
         gpu_assert(total_elems * type.size() % type.packing() == 0);
         gpu_assert(inner_elems * type.size() % type.packing() == 0);
 
-        int inner_bytes = inner_elems * type.size() / type.packing();
-        int total_bytes = total_elems * type.size() / type.packing();
-        int slot_size
-                = init_scattered_params(send_params_, inner_bytes, total_bytes);
+        auto inner_bytes = type.elems_to_bytes(inner_elems);
+        auto innermost_elems = inner_idx_ > 0 ? (int)blocks[0].size : 1;
+        auto innermost_bytes = type.elems_to_bytes(innermost_elems);
+        auto total_bytes = type.elems_to_bytes(total_elems);
+        int slot_size = init_scattered_params(
+                send_params_, inner_bytes, innermost_bytes, total_bytes);
         reg_bits_per_elem = std::max(1, 4 / slot_size) * type.bitsize();
 
         int max_slots = get_max_slots(hw_, send_params_);
@@ -2583,21 +2588,18 @@ send_group_t init_scattered(const view_info_t &info,
         layout_t &reg_layout, bool fill_buf) {
     auto &vlayout = info.vlayout();
     auto &blocks = vlayout.blocks();
-    int type_size = vlayout.type().size();
-    int type_packing = vlayout.type().packing();
-    int slot_size = info.init_scattered_params(send_params, it.inner_bytes(),
-            into<int>(vlayout.elems() * type_size / type_packing));
-    // If not dword aligned, ensure that packing elements from the inner block
-    // results in a valid layout. Otherwise, pack fewer elements per slot.
-    if ((slot_size & 0x3) && !blocks.empty()) {
-        auto inner_block = blocks.front().size * type_size / type_packing;
-        auto masked = inner_block & (slot_size - 1);
-        if (masked) slot_size = into<int>(masked & ~(masked - 1));
-    }
+    const auto &type = vlayout.type();
+    auto innermost_elems = info.inner_idx() > 0 ? (int)blocks[0].size : 1;
+    auto innermost_bytes = type.elems_to_bytes(innermost_elems);
+    auto total_elems = into<int>(info.vlayout().elems());
+    auto total_bytes = type.elems_to_bytes(total_elems);
+
+    int slot_size = info.init_scattered_params(
+            send_params, it.inner_bytes(), innermost_bytes, total_bytes);
     int slot_stride = std::max(4, slot_size);
     int inner_slots = ir_utils::safe_divide(it.inner_bytes(), slot_size);
 
-    gpu_assert((slot_size * type_packing % type_size == 0)
+    gpu_assert((slot_size * type.packing() % type.size() == 0)
             || (slot_stride == slot_size));
 
     send_group_t ret;
@@ -2622,15 +2624,14 @@ send_group_t init_scattered(const view_info_t &info,
             0, vlayout.ndims());
     reg_layout = reg_layout.make_dense();
     if (slot_stride != slot_size) {
-        if (slot_size * type_packing == type_size) {
+        const auto inner = type.bytes_to_elems(slot_size);
+        if (inner == 1) {
             reg_layout = make_strided(reg_layout, slot_stride / slot_size);
         } else {
             gpu_assert(reg_layout.nblocks() > 0);
             auto &b0 = reg_layout[0];
-            int inner = slot_size * type_packing / type_size;
             reg_layout = reg_layout.split_block(b0, inner, b0.size / inner);
-            int stride1 = ir_utils::safe_divide(
-                    slot_stride * type_packing, type_size);
+            int stride1 = type.bytes_to_elems(slot_stride);
             reg_layout = make_strided(reg_layout, stride1, 1);
         }
     }

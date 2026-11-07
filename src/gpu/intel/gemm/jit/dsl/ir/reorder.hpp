@@ -24,13 +24,24 @@ GEMMSTONE_NAMESPACE_START
 namespace dsl {
 namespace ir {
 
+layout_t reinterpret(const layout_t &layout, const type_t &new_type,
+        bool do_normalize = true);
+bool move_to_integer_pipe(layout_t &src, layout_t &dst);
+bool try_reinterpret_to_wider_type(layout_t &src, layout_t &dst,
+        const tile_t &tile = {}, bool do_update = true,
+        int *new_size_out = nullptr);
+
 // Implements reorder between GRF buffers in given layouts. Conversion between
 // data types is supported.
 class reorder_t : public func_impl_t, public object::info_t<reorder_t> {
 public:
     static func_t make(dsl::layout_t src_layout, dsl::layout_t dst_layout,
             bool do_normalize = true) {
-        if (do_normalize) normalize(src_layout, dst_layout);
+        if (do_normalize) {
+            normalize(src_layout, dst_layout);
+            move_to_integer_pipe(src_layout, dst_layout);
+            try_reinterpret_to_wider_type(src_layout, dst_layout);
+        }
         return func_t(
                 new reorder_t(std::move(src_layout), std::move(dst_layout)));
     }
