@@ -2016,14 +2016,14 @@ void top4busd(const Tmm& x1, const Zmm& x2, const Zmm& x3) { opVex(x1, &x3, x2, 
 void top4bsud(const Tmm& x1, const Zmm& x2, const Zmm& x3) { opVex(x1, &x3, x2, T_F3 | T_0F38 | T_W0 | T_EVEX, 0x5e); }
 void top4bssd(const Tmm& x1, const Zmm& x2, const Zmm& x3) { opVex(x1, &x3, x2, T_F2 | T_0F38 | T_W0 | T_EVEX, 0x5e); }
 // BSRINIT bsr0: VEX.128.F2.0F38.W1 49 C0 -- initializes BSR0 to all 0x7F (scale=1.0)
-void bsrinit() { db(0xc4); db(0xe2); db(0xfb); db(0x49); db(0xc0); }
-// ACE v1 Block Scale Register moves. Only one BSR is architected (bsr0), so
-// it is implicit and encoded as reg field 000.
-void bsrmovf(const Zmm& x1, const Operand& op) { opVex(zmm0, &x1, op, T_MAP6 | T_EW1 | T_MUST_EVEX, 0x95); }
-void bsrmovh(const Operand& op) { opVex(zmm0, 0, op, T_F2 | T_MAP6 | T_EW1 | T_MUST_EVEX, 0x95); }
-void bsrmovh_store(const Operand& op) { opVex(zmm0, 0, op, T_F2 | T_MAP6 | T_W0 | T_MUST_EVEX, 0x95); }
-void bsrmovl(const Operand& op) { opVex(zmm0, 0, op, T_F3 | T_MAP6 | T_EW1 | T_MUST_EVEX, 0x95); }
-void bsrmovl_store(const Operand& op) { opVex(zmm0, 0, op, T_F3 | T_MAP6 | T_W0 | T_MUST_EVEX, 0x95); }
+void bsrinit(const Bsr& b) { opVex(b, &bsr0, bsr0, T_F2 | T_0F38 | T_W1, 0x49); }
+// ACE v1 Block Scale Register moves. The BSR is taken as an explicit operand so
+// that if a later generation adds more of them it does not change these signatures.
+void bsrmovf(const Bsr& b, const Zmm& x1, const Operand& op) { opVex(b, &x1, op, T_MAP6 | T_EW1 | T_MUST_EVEX, 0x95); }
+void bsrmovh(const Bsr& b, const Operand& op) { opVex(b, 0, op, T_F2 | T_MAP6 | T_EW1 | T_MUST_EVEX, 0x95); }
+void bsrmovh_store(const Operand& op, const Bsr& b) { opVex(b, 0, op, T_F2 | T_MAP6 | T_W0 | T_MUST_EVEX, 0x95); }
+void bsrmovl(const Bsr& b, const Operand& op) { opVex(b, 0, op, T_F3 | T_MAP6 | T_EW1 | T_MUST_EVEX, 0x95); }
+void bsrmovl_store(const Operand& op, const Bsr& b) { opVex(b, 0, op, T_F3 | T_MAP6 | T_W0 | T_MUST_EVEX, 0x95); }
 // ACE v1 MX FP8 rank-4 outer products.
 void top4mxbf8ps(const Tmm& x1, const Zmm& x2, const Zmm& x3, uint8_t imm) { opVex(x1, &x3, x2, T_0F3A | T_W0 | T_EVEX, 0x8d, imm); }
 void top4mxhf8ps(const Tmm& x1, const Zmm& x2, const Zmm& x3, uint8_t imm) { opVex(x1, &x3, x2, T_66 | T_0F3A | T_W0 | T_EVEX, 0x8d, imm); }

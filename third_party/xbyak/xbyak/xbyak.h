@@ -630,7 +630,7 @@ static const int T_cf = 1;
 class Operand {
 	static const uint8_t EXT8BIT = 0x20;
 	unsigned int idx_:6; // 0..31 + EXT8BIT = 1 if spl/bpl/sil/dil
-	unsigned int kind_:10;
+	unsigned int kind_:11;
 	unsigned int bit_:14;
 protected:
 	unsigned int zero_:1;
@@ -651,7 +651,8 @@ public:
 		ZMM = 1 << 6,
 		OPMASK = 1 << 7,
 		BNDREG = 1 << 8,
-		TMM = 1 << 9
+		TMM = 1 << 9,
+		BSR = 1 << 10
 	};
 	enum Code {
 #ifdef XBYAK64
@@ -688,6 +689,7 @@ public:
 	XBYAK_CONSTEXPR bool isZMM() const { return is(ZMM); }
 	XBYAK_CONSTEXPR bool isSIMD() const { return is(XMM|YMM|ZMM); }
 	XBYAK_CONSTEXPR bool isTMM() const { return is(TMM); }
+	XBYAK_CONSTEXPR bool isBSR() const { return is(BSR); }
 	XBYAK_CONSTEXPR bool isXMEM() const { return is(XMM | MEM); }
 	XBYAK_CONSTEXPR bool isYMEM() const { return is(YMM | MEM); }
 	XBYAK_CONSTEXPR bool isZMEM() const { return is(ZMM | MEM); }
@@ -709,9 +711,9 @@ public:
 	XBYAK_CONSTEXPR int getRounding() const { return rounding_; }
 	void setKind(Kind kind)
 	{
-		if ((kind & (XMM|YMM|ZMM|TMM)) == 0) return;
+		if ((kind & (XMM|YMM|ZMM|TMM|BSR)) == 0) return;
 		kind_ = kind;
-		bit_ = kind == XMM ? 128 : kind == YMM ? 256 : kind == ZMM ? 512 : 8192;
+		bit_ = kind == XMM ? 128 : kind == YMM ? 256 : kind == ZMM ? 512 : kind == TMM ? 8192 : 1024;
 	}
 	// err if MMX/FPU/OPMASK/BNDREG
 	void setBit(int bit);
@@ -776,6 +778,11 @@ public:
 				"tmm0", "tmm1", "tmm2", "tmm3", "tmm4", "tmm5", "tmm6", "tmm7"
 			};
 			return tbl[idx];
+		} else if (isBSR()) {
+			static const char *tbl[1] = {
+				"bsr0"
+			};
+			return tbl[idx];
 		} else if (isZMM()) {
 			static const char *tbl[32] = {
 				"zmm0", "zmm1", "zmm2", "zmm3", "zmm4", "zmm5", "zmm6", "zmm7", "zmm8", "zmm9", "zmm10", "zmm11", "zmm12", "zmm13", "zmm14", "zmm15",
@@ -816,13 +823,13 @@ public:
 
 inline void Operand::setBit(int bit)
 {
-	if (bit != 8 && bit != 16 && bit != 32 && bit != 64 && bit != 128 && bit != 256 && bit != 512 && bit != 8192) goto ERR;
+	if (bit != 8 && bit != 16 && bit != 32 && bit != 64 && bit != 128 && bit != 256 && bit != 512 && bit != 1024 && bit != 8192) goto ERR;
 	if (isBit(bit)) return;
 	if (is(MEM | OPMASK)) {
 		bit_ = bit;
 		return;
 	}
-	if (is(REG | XMM | YMM | ZMM | TMM)) {
+	if (is(REG | XMM | YMM | ZMM | TMM | BSR)) {
 		int idx = getIdx();
 		// err if converting ah, bh, ch, dh
 		if (isREG(8) && (4 <= idx && idx < 8) && !isExt8bit()) goto ERR;
@@ -848,6 +855,7 @@ inline void Operand::setBit(int bit)
 		case 128: kind = XMM; break;
 		case 256: kind = YMM; break;
 		case 512: kind = ZMM; break;
+		case 1024: kind = BSR; break;
 		case 8192: kind = TMM; break;
 		}
 		idx_ = idx;
@@ -944,6 +952,10 @@ struct Zmm : public Ymm {
 #ifdef XBYAK64
 struct Tmm : public Reg {
 	explicit XBYAK_CONSTEXPR Tmm(int idx = 0, Kind kind = Operand::TMM, int bit = 8192) : Reg(idx, kind, bit) { }
+};
+
+struct Bsr : public Reg {
+	explicit XBYAK_CONSTEXPR Bsr(int idx = 0, Kind kind = Operand::BSR, int bit = 1024) : Reg(idx, kind, bit) { }
 };
 #endif
 
@@ -1061,7 +1073,7 @@ public:
 		, rip_(false)
 		, asPtr_(false)
 	{
-		if (!r.isREG(i32e) && !r.is(Reg::XMM|Reg::YMM|Reg::ZMM|Reg::TMM)) XBYAK_THROW(ERR_BAD_SIZE_OF_REGISTER)
+		if (!r.isREG(i32e) && !r.is(Reg::XMM|Reg::YMM|Reg::ZMM|Reg::TMM|Reg::BSR)) XBYAK_THROW(ERR_BAD_SIZE_OF_REGISTER)
 		if (scale == 0) return;
 		if (scale != 1 && scale != 2 && scale != 4 && scale != 8) XBYAK_THROW(ERR_BAD_SCALE)
 		if (r.getBit() >= 128 || scale != 1) { // xmm/ymm is always index
@@ -2105,7 +2117,7 @@ private:
 				int low = type & T_NX_MASK;
 				if (low > 0) {
 					disp8N = 1 << (low - 1);
-					if (type & T_N_VL) disp8N *= (VL == 512 ? 4 : VL == 256 ? 2 : 1);
+					if (type & T_N_VL) disp8N *= (VL >= 512 ? 4 : VL == 256 ? 2 : 1);
 				}
 			}
 		}
@@ -3062,6 +3074,7 @@ public:
 	const Zmm zmm16, zmm17, zmm18, zmm19, zmm20, zmm21, zmm22, zmm23;
 	const Zmm zmm24, zmm25, zmm26, zmm27, zmm28, zmm29, zmm30, zmm31;
 	const Tmm tmm0, tmm1, tmm2, tmm3, tmm4, tmm5, tmm6, tmm7;
+	const Bsr bsr0;
 	const Xmm &xm8, &xm9, &xm10, &xm11, &xm12, &xm13, &xm14, &xm15; // for my convenience
 	const Xmm &xm16, &xm17, &xm18, &xm19, &xm20, &xm21, &xm22, &xm23;
 	const Xmm &xm24, &xm25, &xm26, &xm27, &xm28, &xm29, &xm30, &xm31;
@@ -3356,6 +3369,7 @@ public:
 		, zmm16(16), zmm17(17), zmm18(18), zmm19(19), zmm20(20), zmm21(21), zmm22(22), zmm23(23)
 		, zmm24(24), zmm25(25), zmm26(26), zmm27(27), zmm28(28), zmm29(29), zmm30(30), zmm31(31)
 		, tmm0(0), tmm1(1), tmm2(2), tmm3(3), tmm4(4), tmm5(5), tmm6(6), tmm7(7)
+		, bsr0(0)
 		// for my convenience
 		, xm8(xmm8), xm9(xmm9), xm10(xmm10), xm11(xmm11), xm12(xmm12), xm13(xmm13), xm14(xmm14), xm15(xmm15)
 		, xm16(xmm16), xm17(xmm17), xm18(xmm18), xm19(xmm19), xm20(xmm20), xm21(xmm21), xm22(xmm22), xm23(xmm23)
@@ -3561,6 +3575,7 @@ static const XBYAK_CONSTEXPR Zmm zmm8(8), zmm9(9), zmm10(10), zmm11(11), zmm12(1
 static const XBYAK_CONSTEXPR Zmm zmm16(16), zmm17(17), zmm18(18), zmm19(19), zmm20(20), zmm21(21), zmm22(22), zmm23(23);
 static const XBYAK_CONSTEXPR Zmm zmm24(24), zmm25(25), zmm26(26), zmm27(27), zmm28(28), zmm29(29), zmm30(30), zmm31(31);
 static const XBYAK_CONSTEXPR Zmm tmm0(0), tmm1(1), tmm2(2), tmm3(3), tmm4(4), tmm5(5), tmm6(6), tmm7(7);
+static const XBYAK_CONSTEXPR Bsr bsr0(0);
 static const XBYAK_CONSTEXPR RegRip rip;
 static const XBYAK_CONSTEXPR ApxFlagNF T_nf;
 static const XBYAK_CONSTEXPR ApxFlagZU T_zu;
