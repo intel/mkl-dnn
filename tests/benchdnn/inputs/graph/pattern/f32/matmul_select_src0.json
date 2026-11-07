@@ -1,0 +1,221 @@
+{
+  "version": "3.15.0",
+  "engine_kind": "cpu",
+  "fpmath_mode": "strict",
+  "fpmath_mode_apply_to_int": "false",
+  "input_ports": [
+    0,
+    1,
+    3,
+    5,
+    6
+  ],
+  "output_ports": [
+    7
+  ],
+  "graph": [
+    {
+      "id": 0,
+      "name": "MatMul",
+      "kind": "MatMul",
+      "attrs": {
+        "accumulation_mode": {
+          "type": "string",
+          "value": "strict"
+        },
+        "transpose_a": {
+          "type": "bool",
+          "value": 0
+        },
+        "transpose_b": {
+          "type": "bool",
+          "value": 0
+        }
+      },
+      "inputs": [
+        {
+          "id": 0,
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            8
+          ],
+          "stride": [
+            32,
+            8,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        },
+        {
+          "id": 1,
+          "dtype": "f32",
+          "shape": [
+            8,
+            16
+          ],
+          "stride": [
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 2,
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            16
+          ],
+          "stride": [
+            64,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Multiply",
+      "kind": "Multiply",
+      "attrs": {
+        "auto_broadcast": {
+          "type": "string",
+          "value": "numpy"
+        }
+      },
+      "inputs": [
+        {
+          "id": 2,
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            16
+          ],
+          "stride": [
+            64,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        },
+        {
+          "id": 3,
+          "dtype": "f32",
+          "shape": [
+            1
+          ],
+          "stride": [
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 4,
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            16
+          ],
+          "stride": [
+            64,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Select",
+      "kind": "Select",
+      "attrs": {
+        "auto_broadcast": {
+          "type": "string",
+          "value": "numpy"
+        }
+      },
+      "inputs": [
+        {
+          "id": 5,
+          "dtype": "boolean",
+          "shape": [
+            2,
+            4,
+            16
+          ],
+          "stride": [
+            64,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        },
+        {
+          "id": 4,
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            16
+          ],
+          "stride": [
+            64,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        },
+        {
+          "id": 6,
+          "dtype": "f32",
+          "shape": [
+            1
+          ],
+          "stride": [
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 7,
+          "dtype": "f32",
+          "shape": [
+            2,
+            4,
+            16
+          ],
+          "stride": [
+            64,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ]
+    }
+  ]
+}

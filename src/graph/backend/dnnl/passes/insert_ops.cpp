@@ -542,6 +542,36 @@ status_t insert_reshape_for_ndx2d_matmul(std::shared_ptr<subgraph_t> &sg) {
 
         auto src_dims = ltw(cur_op->get_input_logical_tensor(0)).vdims();
         auto wei_dims = ltw(cur_op->get_input_logical_tensor(1)).vdims();
+        fusion_info_t fusion_info;
+        if (cur_op->has_attr(op_attr::fusion_info)) {
+            fusion_info = cur_op->get_attr<fusion_info_t>(op_attr::fusion_info);
+        }
+        bool can_flatten = true;
+        for (const auto &pop : fusion_info.get_post_ops()) {
+            if (!pop->is_post_binary() && !pop->is_post_sum()) continue;
+            for (const size_t offset : pop->get_unfused_input_indices()) {
+                auto post_src_dims
+                        = ltw(cur_op->get_input_logical_tensor(offset)).vdims();
+                if (post_src_dims.size() > src_dims.size()) {
+                    can_flatten = false;
+                    break;
+                }
+                post_src_dims.insert(post_src_dims.begin(),
+                        src_dims.size() - post_src_dims.size(), 1);
+                // Partially broadcast dimensions cannot be collapsed into M.
+                if (!std::equal(post_src_dims.begin(), post_src_dims.end() - 1,
+                            src_dims.begin())
+                        && !std::all_of(post_src_dims.begin(),
+                                post_src_dims.end() - 1,
+                                [](dim_t d) { return d == 1; })) {
+                    can_flatten = false;
+                    break;
+                }
+            }
+            if (!can_flatten) break;
+        }
+        if (!can_flatten) continue;
+
         dims expected_dims {-1, src_dims.back()};
         auto reshape_op = std::make_shared<op_t>(op_kind::_reshape);
         reshape_op->set_attr<bool>(op_attr::special_zero, false);
@@ -559,21 +589,23 @@ status_t insert_reshape_for_ndx2d_matmul(std::shared_ptr<subgraph_t> &sg) {
         rewriter.insert_op_after(reshape_op2, cur_op, 0);
 
         if (cur_op->has_attr(op_attr::fusion_info)) {
-            fusion_info_t fusion_info
-                    = cur_op->get_attr<fusion_info_t>(op_attr::fusion_info);
             const auto &pops = fusion_info.get_post_ops();
             for (size_t i = 0; i < pops.size(); i++) {
                 if (!pops[i]->is_post_binary() && !pops[i]->is_post_sum())
                     continue;
-                const size_t offset = pops[i]->get_unfused_input_indices()[0];
-                auto post_src_dims
-                        = ltw(cur_op->get_input_logical_tensor(offset)).vdims();
-                dims expected_dims3 {-1, post_src_dims.back()};
-                auto reshape_op3 = std::make_shared<op_t>(op_kind::_reshape);
-                reshape_op3->set_attr<bool>(op_attr::special_zero, false);
-                reshape_op3->set_attr<std::vector<int64_t>>(
-                        op_attr::shape, expected_dims3);
-                rewriter.insert_op_before(reshape_op3, cur_op, offset);
+                for (const size_t offset :
+                        pops[i]->get_unfused_input_indices()) {
+                    auto post_src_dims
+                            = ltw(cur_op->get_input_logical_tensor(offset))
+                                      .vdims();
+                    dims expected_dims3 {-1, post_src_dims.back()};
+                    auto reshape_op3
+                            = std::make_shared<op_t>(op_kind::_reshape);
+                    reshape_op3->set_attr<bool>(op_attr::special_zero, false);
+                    reshape_op3->set_attr<std::vector<int64_t>>(
+                            op_attr::shape, expected_dims3);
+                    rewriter.insert_op_before(reshape_op3, cur_op, offset);
+                }
             }
             // update weight mask
             op_t *scales_op = fusion_info.get_mutable_scales(true, 1);

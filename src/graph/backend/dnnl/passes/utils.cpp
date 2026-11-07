@@ -385,9 +385,23 @@ bool post_binary_fusible(
     auto fused_out = base_op->get_output_values()[0];
     auto consumers = fused_out->get_consumers();
     if (consumers.size() != 1) return false;
-    if (consumers[0].get_op().num_inputs() != 2) return false;
-
     size_t fused_in_off = consumers[0].get_offset();
+    const auto alg = static_cast<dnnl::algorithm>(
+            bin_op->get_attr<int64_t>(op_attr::alg_kind));
+    if (alg == dnnl::algorithm::binary_select) {
+        VCHECK_UTILS(base_op->get_kind() == op_kind::_matmul, false,
+                "select post-op fusion requires matmul as the base op");
+        VCHECK_UTILS(ekind == dnnl_cpu, false,
+                "select post-op fusion is only supported on cpu");
+        VCHECK_UTILS(fused_in_off == 0, false,
+                "select post-op fusion requires the base op output at src_0");
+        VCHECK_UTILS(bin_op->num_inputs() == 3, false,
+                "select post-op must have 3 inputs");
+    } else if (bin_op->num_inputs() != 2) {
+        // other binary post-ops must have exactly two inputs.
+        return false;
+    }
+
     auto fused_in = bin_op->get_input_logical_tensor(fused_in_off);
     auto other_in = bin_op->get_input_logical_tensor(1 - fused_in_off);
 

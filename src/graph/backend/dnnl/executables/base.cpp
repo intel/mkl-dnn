@@ -35,6 +35,13 @@ void get_arg_indices_for_post_ops(
             indices.insert(
                     {DNNL_ARG_ATTR_MULTIPLE_POST_OP((int)i) | DNNL_ARG_SRC_1,
                             {indices_t::type_t::input, base_index++}});
+            if (static_cast<dnnl::algorithm>(
+                        pops[i]->get_op()->get_attr<int64_t>(op_attr::alg_kind))
+                    == dnnl::algorithm::binary_select) {
+                indices.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP((int)i)
+                                | DNNL_ARG_SRC_2,
+                        {indices_t::type_t::input, base_index++}});
+            }
         } else if (pops[i]->get_op()->get_kind() == op_kind::_convolution) {
             indices.insert({DNNL_ARG_ATTR_POST_OP_DW | DNNL_ARG_WEIGHTS,
                     {indices_t::type_t::input, base_index++}});

@@ -1043,6 +1043,13 @@ status_t fuse_post_ops(std::shared_ptr<subgraph_t> &sg) {
             } else if (post_op->get_kind() == op_kind::_binary
                     && static_cast<dnnl::algorithm>(
                                post_op->get_attr<int64_t>(op_attr::alg_kind))
+                            == dnnl::algorithm::binary_select) {
+                fusion_info.append_post_binary(post_op->shared_from_this(),
+                        std::vector<size_t> {base_op->num_inputs(),
+                                base_op->num_inputs() + 1});
+            } else if (post_op->get_kind() == op_kind::_binary
+                    && static_cast<dnnl::algorithm>(
+                               post_op->get_attr<int64_t>(op_attr::alg_kind))
                             != dnnl::algorithm::binary_add) {
                 fusion_info.append_post_binary(post_op->shared_from_this(),
                         std::vector<size_t> {base_op->num_inputs()});

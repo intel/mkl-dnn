@@ -134,6 +134,12 @@
 --reset --in-shapes=0:384x4096+1:4096x1024+2:384x1 --case=pattern/f32/matmul_post_ops_swish_fusion.json
 --reset --in-shapes=0:384x4096+1:4096x1024+2:1024 --case=pattern/f32/matmul_post_ops_swish_fusion.json
 --reset --case=pattern/f32/matmul_select.json
+--reset --case=pattern/f32/matmul_select_src0.json
+--reset --op-kind=1:undef --case=pattern/f32/matmul_select_src0.json
+--reset --in-shapes=6:2x4x16 --case=pattern/f32/matmul_select_src0.json
+--reset --in-shapes=0:2x2x4x8+1:2x2x8x16+5:2x2x4x16+6:16 --case=pattern/f32/matmul_select_src0.json
+--reset --in-shapes=0:2x2x2x1x8+1:2x2x1x8x16+5:2x2x2x1x16 --case=pattern/f32/matmul_select_src0.json
+--reset --in-shapes=5:16,5:1,5:1x1x16,5:1x4x16,5:1x1x1 --case=pattern/f32/matmul_select_src0.json
 --reset --case=pattern/f32/matmul_dropout.json
 # 1D x nD matmul with post mul fusion broadcasting rule tests
 # 1D x 1D matmul, mul with scalar [1]

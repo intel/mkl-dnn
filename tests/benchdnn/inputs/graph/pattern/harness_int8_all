@@ -7,6 +7,9 @@
 --reset --case=pattern/int8/int8_conv_post_ops_int8_add_fusion.json
 --reset --case=pattern/int8/int8_convtranspose_post_ops_fusion.json
 --reset --case=pattern/int8/int8_matmul_post_ops_fusion.json
+--reset --case=pattern/int8/int8_matmul_select_src0.json
+--reset --in-shapes=6:2x4x16 --case=pattern/int8/int8_matmul_select_src0.json
+--reset --in-shapes=5:16,5:1x4x16,5:1x1x16 --case=pattern/int8/int8_matmul_select_src0.json
 --reset --case=pattern/int8/int8_depthwise_conv_fusion.json
 --reset --case=pattern/int8/int8_matmul_add_mul_relu.json
 --reset --case=pattern/int8/int8_matmul_sum_add_mul_relu.json
