@@ -599,17 +599,16 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
         }
 
         if (!eltwise_injectors_.empty()) {
+            injector_utils::vmm_index_set_t accumulator_idxs;
             for (int a = 0; a < bdb; a++) {
                 for (int b = 0; b < ldb; b += 2) {
-                    // apply element-wise op to every vector register
-                    // whose index is in [start, end)
-                    int start_idx = acc(a, b).getIdx();
-                    int end_idx = acc(a, b + 1).getIdx() + 1;
-                    for (int i = 0; i < (int)eltwise_injectors_.size(); i++) {
-                        eltwise_injectors_[i]->compute_vector_range(
-                                start_idx, end_idx);
-                    }
+                    accumulator_idxs.insert(acc(a, b).getIdx());
+                    accumulator_idxs.insert(acc(a, b + 1).getIdx());
                 }
+            }
+            for (const auto &injector : eltwise_injectors_) {
+                injector->load_table_addr();
+                injector->compute_vector_range(accumulator_idxs);
             }
         }
 
@@ -1150,6 +1149,25 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
     }
 
     void generate() override {
+        auto live_gprs = claim_regs<XReg>({reg_aux_src_scales, reg_zp_val_c,
+                reg_a, reg_b, reg_c, reg_aux_a, reg_aux_b, reg_aux_c,
+                reg_aux_a1, reg_zp_aux_b_buf, reg_aux_c1, reg_ld_loop,
+                reg_rd_loop, reg_bd_loop, reg_tmp, reg_wei_scales,
+                reg_src_scales, reg_aux_scales, reg_na, reg_bias, reg_zp_a,
+                reg_zp_b, reg_zp_aux_b});
+        auto live_preds
+                = claim_regs<PReg>({prd_ld, prd_st, prd_b, prd_8, prd_zp_b_tl});
+        auto live_accumulators = claim_reg_range<ZReg>(
+                brg_.ld_block + 1, (brg_.bd_block / 2) * brg_.ld_block);
+        auto eltwise_table = alloc_reg<XReg>();
+        auto eltwise_mask = alloc_reg<PReg>();
+        for (auto &e : eltwise_.entry_) {
+            eltwise_injectors_.emplace_back(utils::make_unique<
+                    jit_uni_eltwise_injector_t<to_vla_sve(isa)>>(this,
+                    reg_pool(), e.eltwise, eltwise_table.get(),
+                    eltwise_mask.get()));
+        }
+
         preamble();
         config();
 
@@ -1181,18 +1199,12 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
 
     jit_int8_matmul_kernel_t(
             const brg_int8_t &k, const dnnl::impl::post_ops_t &eltwise = {})
-        : brg_(k) {
-        for (auto &e : eltwise.entry_) {
-            // Keep p1-p5 intact: this kernel reuses them for tail loads/stores.
-            eltwise_injectors_.emplace_back(utils::make_unique<
-                    jit_uni_eltwise_injector_t<to_vla_sve(isa)>>(
-                    this, e.eltwise, true, XReg(0), p6, p7));
-        }
-    }
+        : brg_(k), eltwise_(eltwise) {}
     ~jit_int8_matmul_kernel_t() override = default;
 
 private:
     brg_int8_t brg_;
+    const dnnl::impl::post_ops_t eltwise_;
     int ldb;
     int bdb;
     int rdb;

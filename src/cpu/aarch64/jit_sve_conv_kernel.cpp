@@ -230,6 +230,13 @@ void jit_sve_conv_fwd_kernel_t<isa>::store_output(int ur_w) {
         tst(reg_channel, FLAG_IC_LAST);
         b(EQ, store_label);
 
+        injector_utils::vmm_index_set_t accumulator_idxs;
+        for_(int k = 0; k < jcp.nb_oc_blocking; ++k)
+        for (int j = 0; j < ur_w; ++j)
+            accumulator_idxs.insert(k * jcp.ur_w + j);
+        auto live_accumulators = claim_reg_idxs<ZReg>(accumulator_idxs);
+        eltwise_injector_->load_table_addr();
+
         if (ur_w == jcp.ur_w) {
             eltwise_injector_->compute_vector_range(
                     0, jcp.nb_oc_blocking * jcp.ur_w);
@@ -599,6 +606,19 @@ void jit_sve_conv_fwd_kernel_t<isa>::compute_loop(
 
 template <cpu_isa_t isa>
 void jit_sve_conv_fwd_kernel_t<isa>::generate() {
+    auto live_gprs = claim_regs<XReg>({param, reg_inp, reg_ker, aux_reg_ker_d,
+            reg_out, reg_ki, reg_owb, reg_out_prf, aux_reg_inp, aux_reg_inp2,
+            aux_reg_inp3, reg_out_ofs, aux_reg_ker, reg_channel, reg_bias,
+            aux_reg_inp_d, reg_oi, reg_kh, reg_kj, reg_tmp_addr,
+            reg_prev_bcast_addr, reg_prev_wei_addr, reg_tmp_imm, reg_out_org,
+            reg_oi_org, aux_reg_ker_d_org, reg_ker_org, reg_inp_org});
+    auto eltwise_table = alloc_reg<XReg>();
+    auto eltwise_mask = alloc_reg<PReg>();
+    if (jcp.with_eltwise)
+        eltwise_injector_ = utils::make_unique<
+                jit_uni_eltwise_injector_t<to_vla_sve(isa)>>(this, reg_pool(),
+                jcp.eltwise, eltwise_table.get(), eltwise_mask.get());
+
     int iw = jcp.iw;
     int ow = jcp.ow;
     int ow_block = jcp.ow_block;

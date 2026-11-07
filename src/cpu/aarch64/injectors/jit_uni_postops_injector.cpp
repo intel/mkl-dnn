@@ -26,16 +26,18 @@ namespace injector {
 
 template <cpu_isa_t isa>
 jit_uni_postops_injector_t<isa>::jit_uni_postops_injector_t(
-        jit_generator_t *host, const post_ops_t &post_ops,
+        jit_generator_t *host, Xbyak_aarch64::RegPoolManager &reg_pool,
+        const post_ops_t &post_ops,
         const binary_injector::static_params_t &binary_static_params,
-        const eltwise_injector::static_params_t &eltwise_static_params,
-        const lambda_jit_injectors_t &lambda_jit_injectors)
+        const Xbyak_aarch64::XReg &eltwise_table,
+        const Xbyak_aarch64::PReg &eltwise_mask, bool is_fwd, bool use_dst,
+        data_type_t d_type, const lambda_jit_injectors_t &lambda_jit_injectors)
     : post_ops_(post_ops)
     , host_(host)
+    , reg_pool_(reg_pool)
     , binary_injector_(nullptr)
     , lambda_jit_injectors_(lambda_jit_injectors) {
 
-    const auto &esp = eltwise_static_params;
     bool is_binary = false;
     bool is_eltwise = false;
 
@@ -44,9 +46,9 @@ jit_uni_postops_injector_t<isa>::jit_uni_postops_injector_t(
         if (post_op.is_eltwise()) {
             is_eltwise = true;
             alg_to_eltwise_injector_.emplace(i,
-                    jit_uni_eltwise_injector_t<to_vla_sve(isa)>(host_,
-                            post_op.eltwise, esp.save_state, esp.x_table,
-                            esp.p_mask, esp.p_tmp0, esp.is_fwd, esp.use_dst));
+                    jit_uni_eltwise_injector_t<to_vla_sve(isa)>(host_, reg_pool,
+                            post_op.eltwise, eltwise_table, eltwise_mask,
+                            is_fwd, use_dst, d_type));
         } else if (post_op.is_binary()) {
             is_binary = true;
         }
@@ -54,40 +56,28 @@ jit_uni_postops_injector_t<isa>::jit_uni_postops_injector_t(
 
     if (is_superset(isa, sve_128) && is_eltwise && is_binary
             && binary_static_params.rhs_arg_static_params.tail_size)
-        assert(eltwise_static_params.p_mask.getIdx()
-                != binary_static_params.rhs_arg_static_params.tail_opmask.getIdx() &&
-                "Binary tail opmask should be different than eltwise injector \
-                opmask. Otherwise eltwise injector will overwrite binary tail \
-                opmask.");
+        assert(eltwise_mask.getIdx()
+                        != binary_static_params.rhs_arg_static_params
+                                   .tail_opmask.getIdx()
+                && "Binary tail opmask should differ from the eltwise mask");
 
     if (is_binary)
         binary_injector_ = utils::make_unique<
                 binary_injector::jit_uni_binary_injector_t<isa>>(
-                host, binary_static_params);
+                host, reg_pool, binary_static_params);
 }
 
 template <cpu_isa_t isa>
 jit_uni_postops_injector_t<isa>::jit_uni_postops_injector_t(
-        jit_generator_t *host, const post_ops_t &post_ops,
-        const binary_injector::static_params_t &binary_static_params)
-    : jit_uni_postops_injector_t(host, post_ops, binary_static_params,
-              eltwise_injector::static_params_t(), lambda_jit_injectors_t()) {}
-
-template <cpu_isa_t isa>
-jit_uni_postops_injector_t<isa>::jit_uni_postops_injector_t(
-        jit_generator_t *host, const post_ops_t &post_ops,
+        jit_generator_t *host, Xbyak_aarch64::RegPoolManager &reg_pool,
+        const post_ops_t &post_ops,
         const binary_injector::static_params_t &binary_static_params,
-        const lambda_jit_injectors_t &lambda_jit_injectors)
-    : jit_uni_postops_injector_t(host, post_ops, binary_static_params,
-              eltwise_injector::static_params_t(), lambda_jit_injectors) {}
-
-template <cpu_isa_t isa>
-jit_uni_postops_injector_t<isa>::jit_uni_postops_injector_t(
-        jit_generator_t *host, const post_ops_t &post_ops,
-        const binary_injector::static_params_t &binary_static_params,
-        const eltwise_injector::static_params_t &eltwise_static_params)
-    : jit_uni_postops_injector_t(host, post_ops, binary_static_params,
-              eltwise_static_params, lambda_jit_injectors_t()) {}
+        const Xbyak_aarch64::XReg &eltwise_table,
+        const Xbyak_aarch64::PReg &eltwise_mask, bool is_fwd, bool use_dst,
+        data_type_t d_type)
+    : jit_uni_postops_injector_t(host, reg_pool, post_ops, binary_static_params,
+              eltwise_table, eltwise_mask, is_fwd, use_dst, d_type,
+              lambda_jit_injectors_t()) {}
 
 template <cpu_isa_t isa>
 void jit_uni_postops_injector_t<isa>::compute_vector_range(size_t start_idx,
@@ -111,11 +101,23 @@ template <cpu_isa_t isa>
 void jit_uni_postops_injector_t<isa>::compute_vector_range(
         const injector_utils::vmm_index_set_t &vmm_idxs,
         const binary_injector::rhs_arg_dynamic_params_t &rhs_arg_params) {
+    injector_utils::compute_vector_range_with_spill<isa>(host_, reg_pool_,
+            vmm_idxs, scratch_vmm_count(),
+            [&](const injector_utils::vmm_index_set_t &idxs) {
+        compute_vector_range_no_spill(idxs, rhs_arg_params);
+    });
+}
+
+template <cpu_isa_t isa>
+void jit_uni_postops_injector_t<isa>::compute_vector_range_no_spill(
+        const injector_utils::vmm_index_set_t &vmm_idxs,
+        const binary_injector::rhs_arg_dynamic_params_t &rhs_arg_params) {
 
     std::size_t rhs_arg_idx = 0;
     for (int i = 0; i < post_ops_.len(); i++) {
         const auto &post_op = post_ops_.entry_[i];
         if (post_op.is_eltwise()) {
+            alg_to_eltwise_injector_.at(i).load_table_addr();
             alg_to_eltwise_injector_.at(i).compute_vector_range(vmm_idxs);
         } else if (post_op.is_binary()) {
             binary_injector_->compute_vector_range(
@@ -123,10 +125,11 @@ void jit_uni_postops_injector_t<isa>::compute_vector_range(
             ++rhs_arg_idx;
         } else {
             const auto lam = lambda_jit_injectors_.find(post_op.kind);
-            if (lam != lambda_jit_injectors_.end()) lam->second();
+            if (lam != lambda_jit_injectors_.end()) lam->second(vmm_idxs);
         }
     }
 }
+
 template <cpu_isa_t isa>
 void jit_uni_postops_injector_t<isa>::compute_vector_range(
         const injector_utils::vmm_index_set_t &vmm_idxs) {
@@ -137,6 +140,20 @@ template <cpu_isa_t isa>
 void jit_uni_postops_injector_t<isa>::prepare_table(bool gen_table) {
     for (auto &alg_elt_inject : alg_to_eltwise_injector_)
         alg_elt_inject.second.prepare_table(gen_table);
+}
+
+template <cpu_isa_t isa>
+size_t jit_uni_postops_injector_t<isa>::scratch_vmm_count() const {
+    size_t count = 0;
+    for (int i = 0; i < post_ops_.len(); ++i) {
+        const auto &entry = post_ops_.entry_[i];
+        if (entry.is_binary())
+            count = nstl::max<size_t>(count, 1);
+        else if (entry.is_eltwise())
+            count = nstl::max(
+                    count, alg_to_eltwise_injector_.at(i).scratch_vmm_count());
+    }
+    return count;
 }
 
 template <cpu_isa_t isa>
@@ -152,7 +169,8 @@ void jit_uni_postops_injector_t<isa>::compute_vector(size_t idx) {
 
 template <cpu_isa_t isa>
 void jit_uni_postops_injector_t<isa>::set_lambda_injector(
-        dnnl_primitive_kind_t kind, const std::function<void()> &jit_injector) {
+        lambda_jit_injectors_t::key_type kind,
+        const lambda_jit_injectors_t::mapped_type &jit_injector) {
     lambda_jit_injectors_[kind] = jit_injector;
 }
 

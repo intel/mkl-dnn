@@ -61,14 +61,10 @@ jit_uni_pool_kernel_t<isa>::jit_uni_pool_kernel_t(
             new io::jit_io_helper_t<isa>(this, sat_conf, tail_conf, X_TMP_2));
 
     if (jpp.with_postops) {
-        static constexpr bool preserve_gpr = true;
-        static constexpr bool preserve_vmm = true;
         static constexpr bool use_exact_tail_scalar_bcast = false;
         size_t postop_tail = static_cast<size_t>(jpp.c_tail);
 
         const binary_injector::rhs_arg_static_params_t rhs_sp {
-                static_cast<std::size_t>(this->v4.getIdx()), this->x14,
-                this->x15, this->x13, preserve_gpr, preserve_vmm,
                 GET_OFF(post_ops_binary_rhs_arg_vec), GET_OFF(dst_orig),
                 memory_desc_wrapper(jpp.tag_kind == jit_memory_tag_kind_t::ncsp
                                 ? jpp.tmp_md
@@ -80,7 +76,7 @@ jit_uni_pool_kernel_t<isa>::jit_uni_pool_kernel_t(
 
         postops_injector_ = utils::make_unique<
                 injector::jit_uni_postops_injector_t<to_vla_sve(isa)>>(
-                this, jpp.post_ops, bsp);
+                this, reg_pool(), jpp.post_ops, bsp, X_TMP_0, PReg(1));
     }
 }
 
@@ -529,6 +525,22 @@ void jit_uni_pool_kernel_t<isa>::apply_postops(int ur_bc, int ur_w, int c_block,
             }
         }
     }
+    auto live_results = claim_reg_range<TReg>(start_idx, end_idx - start_idx);
+    std::vector<int> index_idxs;
+    if (jpp.alg == alg_kind::pooling_max && jpp.is_training) {
+        index_idxs.reserve(ur_bc * ur_w);
+        for_(int jj = 0; jj < ur_w; jj++)
+        for (int bci = 0; bci < ur_bc; bci++)
+            index_idxs.push_back(
+                    treg(reg_ind(2, bci, jj, ur_bc, ur_w)).getIdx());
+    }
+    auto live_indices = claim_reg_idxs<TReg>(index_idxs);
+    auto live_gprs = claim_regs<XReg>({reg_param, reg_input, aux_reg_input,
+            reg_index, reg_output, reg_kd_pad_shift, kj, oi_iter, reg_kh,
+            XReg(reg_k_shift.getIdx()), tmp_gpr, reg_ker_area_h, reg_nbc,
+            X_TMP_0, X_TMP_1, X_TMP_2});
+    auto live_preds = claim_regs<PReg>(
+            {PReg(1), k_c_tail_mask_s, k_c_tail_mask_s_not, k_c_tail_mask_b});
     postops_injector_->compute_vector_range(start_idx, end_idx, rhs_arg_params);
 }
 

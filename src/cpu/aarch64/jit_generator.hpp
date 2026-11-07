@@ -19,11 +19,16 @@
 #ifndef CPU_AARCH64_JIT_GENERATOR_HPP
 #define CPU_AARCH64_JIT_GENERATOR_HPP
 
+#include <algorithm>
 #include <array>
 #include <climits>
 #include <cstdint>
+#include <memory>
+#include <set>
 #include <vector>
+#include <initializer_list>
 
+#include "common/nstl.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
 
@@ -432,6 +437,12 @@ public:
     void uni_ldr(
             const Xbyak_aarch64::ZReg &dst, const Xbyak_aarch64::XReg &addr);
 
+    void uni_load_vmm_stack(const Xbyak_aarch64::VReg &dst,
+            const Xbyak_aarch64::XReg &base, size_t vmm_slot);
+
+    void uni_load_vmm_stack(const Xbyak_aarch64::ZReg &dst,
+            const Xbyak_aarch64::XReg &base, size_t vmm_slot);
+
     template <typename T>
     void uni_ldr(const Xbyak_aarch64::ZReg &r, const Xbyak_aarch64::XReg &base,
             const T off) {
@@ -487,6 +498,22 @@ public:
 
     void uni_str(
             const Xbyak_aarch64::ZReg &src, const Xbyak_aarch64::XReg &addr);
+
+    void uni_store_vmm_stack(const Xbyak_aarch64::VReg &src,
+            const Xbyak_aarch64::XReg &base, size_t vmm_slot);
+
+    void uni_store_vmm_stack(const Xbyak_aarch64::ZReg &src,
+            const Xbyak_aarch64::XReg &base, size_t vmm_slot);
+
+    template <typename Vmm>
+    void uni_reserve_vmm_stack(size_t count) {
+        uni_reserve_vmm_stack(count, Vmm(0));
+    }
+
+    template <typename Vmm>
+    void uni_release_vmm_stack(size_t count) {
+        uni_release_vmm_stack(count, Vmm(0));
+    }
 
     template <typename T>
     void uni_sub(const T &x1, const T &x2, const T &op) {
@@ -741,7 +768,55 @@ public:
     }
 
 private:
+    void uni_reserve_vmm_stack(size_t count, const Xbyak_aarch64::VReg &);
+    void uni_reserve_vmm_stack(size_t count, const Xbyak_aarch64::ZReg &);
+    void uni_release_vmm_stack(size_t count, const Xbyak_aarch64::VReg &);
+    void uni_release_vmm_stack(size_t count, const Xbyak_aarch64::ZReg &);
+
+    template <typename RegT>
+    using scoped_reg_t = Xbyak_aarch64::RegPoolManager::Scoped<RegT>;
+
+    template <typename RegT, size_t... Is>
+    std::array<scoped_reg_t<RegT>, sizeof...(Is)> alloc_regs_impl(
+            nstl::index_sequence<Is...>) {
+        return {{(static_cast<void>(Is), alloc_reg<RegT>())...}};
+    }
+
+    void init_reg_pool() {
+        assert(!reg_pool_);
+        reg_pool_.reset(new Xbyak_aarch64::RegPoolManager());
+
+        // Reserve the ABI parameter and precomputed predicate constants. Note
+        // that we do not reserve any of the other jit_generator temporaries, if
+        // you are actively using the reg pool, you must use it for all
+        // temporaries.
+        reg_pool_->reserve_gp(abi_param1.getIdx());
+        for (const auto &reg : {P_ALL_ONE, P_ALL_ZERO, P_NOT_256, P_NOT_128})
+            reg_pool_->reserve_pred(reg.getIdx());
+    }
+
+    template <typename RegT>
+    bool reg_is_trackable(const RegT &reg) {
+        const auto contains_idx = [&](const std::vector<int> &idxs) {
+            return std::find(idxs.begin(), idxs.end(), reg.getIdx())
+                    != idxs.end();
+        };
+        switch (Xbyak_aarch64::reg_family<RegT>::value) {
+            case Xbyak_aarch64::RegFamily::gp:
+                return contains_idx(reg_pool().get_all_free_gp())
+                        || contains_idx(reg_pool().get_all_preserved_gp());
+            case Xbyak_aarch64::RegFamily::vec:
+                return contains_idx(reg_pool().get_all_free_vec())
+                        || contains_idx(reg_pool().get_all_preserved_vec());
+            case Xbyak_aarch64::RegFamily::pred:
+                return contains_idx(reg_pool().get_all_free_pred())
+                        || contains_idx(reg_pool().get_all_preserved_pred());
+            default: return false;
+        }
+    }
+
     const cpu_isa_t max_cpu_isa_;
+    std::unique_ptr<Xbyak_aarch64::RegPoolManager> reg_pool_;
     const uint8_t *getCode() {
         ready();
         if (!is_initialized()) return nullptr;
@@ -764,6 +839,64 @@ private:
     }
 
 protected:
+    Xbyak_aarch64::RegPoolManager &reg_pool() {
+        if (!reg_pool_) init_reg_pool();
+        return *reg_pool_;
+    }
+
+    // Allocate pool-selected scratch for this lexical scope.
+    template <typename RegT>
+    scoped_reg_t<RegT> alloc_reg() {
+        return reg_pool().allocScoped<RegT>();
+    }
+
+    template <typename RegT, size_t N>
+    std::array<scoped_reg_t<RegT>, N> alloc_regs() {
+        return alloc_regs_impl<RegT>(nstl::make_index_sequence<N> {});
+    }
+
+    // Claim caller-selected live state so it cannot be chosen as scratch.
+    template <typename RegT>
+    scoped_reg_t<RegT> claim_reg(const RegT &reg) {
+        return reg_pool().allocScoped(reg);
+    }
+
+    template <typename RegT>
+    std::vector<scoped_reg_t<RegT>> claim_regs(
+            std::initializer_list<RegT> regs) {
+        std::vector<scoped_reg_t<RegT>> claimed_regs;
+        std::set<int> claimed_idxs;
+        claimed_regs.reserve(regs.size());
+        for (const auto &reg : regs) {
+            if (!claimed_idxs.insert(reg.getIdx()).second) continue;
+            if (reg_pool().reg_in_use(reg)) continue;
+            if (reg_is_trackable(reg))
+                claimed_regs.emplace_back(reg_pool().allocScoped(reg));
+        }
+        return claimed_regs;
+    }
+
+    template <typename RegT>
+    std::vector<scoped_reg_t<RegT>> claim_reg_range(
+            int first_idx, size_t count) {
+        std::vector<scoped_reg_t<RegT>> claimed_regs;
+        claimed_regs.reserve(count);
+        for (size_t i = 0; i < count; ++i)
+            claimed_regs.emplace_back(
+                    reg_pool().allocScoped<RegT>(first_idx + i));
+        return claimed_regs;
+    }
+
+    template <typename RegT, typename IndexContainer>
+    std::vector<scoped_reg_t<RegT>> claim_reg_idxs(const IndexContainer &idxs) {
+        std::vector<scoped_reg_t<RegT>> claimed_regs;
+        claimed_regs.reserve(idxs.size());
+        for (const auto idx : idxs)
+            claimed_regs.emplace_back(
+                    reg_pool().allocScoped<RegT>(static_cast<int>(idx)));
+        return claimed_regs;
+    }
+
     virtual void generate() = 0;
     const uint8_t *jit_ker_ = nullptr;
 };
