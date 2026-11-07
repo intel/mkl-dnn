@@ -372,6 +372,7 @@ status_t brgemm_convolution_bwd_strided_t<isa>::pd_t::add_brg_descriptor(
     }
     brgattr.generate_skip_accumulation = true;
     brgattr.use_ace = jcp_.is_ace;
+    brgattr.enable_size_driven_roll = true;
     CHECK(brgemm_desc_set_attr(&brg, brgattr));
 
     auto LDD = jcp_.stride_w * jcp_.ic_without_padding;

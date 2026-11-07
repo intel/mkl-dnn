@@ -283,7 +283,6 @@ status_t brgemm_convolution_fwd_t<isa>::pd_t::add_brg_descriptor(dim_t vM,
     brgattr.use_interleave_stores = jcp_.use_interleave_stores;
     brgattr.hint_prefetching = jcp_.hint_prefetching;
     brgattr.max_bs = bs;
-    brgattr.hint_ununroll_bd_loop = jcp_.ununroll_bd_loop;
     brgattr.hint_innermost_loop = jcp_.brgemm_bd_loop_innermost
             ? brgemm_bd_loop_innermost
             : brgemm_innermost_undef;
@@ -318,6 +317,7 @@ status_t brgemm_convolution_fwd_t<isa>::pd_t::add_brg_descriptor(dim_t vM,
     brgattr.fpmath_mode = attr()->fpmath_.mode_;
     brgattr.K_koef = (float)bs / static_cast<float>(KW);
     brgattr.use_ace = jcp_.is_ace;
+    brgattr.enable_size_driven_roll = true;
 
     CHECK(brgemm_desc_set_attr(&brg, brgattr));
 

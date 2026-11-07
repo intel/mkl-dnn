@@ -2553,11 +2553,6 @@ status_t init_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
                     jcp.t_pad > 0 || jcp.b_pad > 0 || jcp.f_pad > 0
                             || jcp.back_pad > 0);
 
-    // enable ununroll_bd_loop for big shapes to reduce kernel sizes
-    jcp.ununroll_bd_loop
-            = static_cast<dim_t>(jcp.M) * jcp.N * (jcp.is_bf32 ? 1 : 2)
-            > 8 * 1024;
-
     jcp.fp8_convert_wsp_size = static_cast<dim_t>(sizeof(float16_t))
             * isa_max_vlen(jcp.isa)
             * nstl::max(
@@ -2624,7 +2619,8 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
         // The blocking search below dispatches on both flags, so for ACE they
         // have to be set before the search rather than after it.
         if (jcp.is_ace) {
-            jcp.use_uker = brgemm_utils::ace_prefer_uker();
+            // ACE defaults to the unrolled kernel; finalize() may drop it.
+            jcp.use_uker = true;
             // The unrolled kernel already disables interleaved stores on ACE,
             // setting it here keeps the blocking search on the same value.
             jcp.use_interleave_stores = false;
@@ -2795,11 +2791,6 @@ status_t init_1x1_conf(jit_brgemm_conv_conf_t &jcp, cpu_isa_t isa,
             || jcp.scale_adjust_factor != 1.0f;
     jcp.is_oc_scale = wei_scales.get_mask() > 0;
     jcp.with_dst_scales = !dst_scales.has_default_values();
-
-    // enable ununroll_bd_loop for big shapes to reduce kernel sizes
-    jcp.ununroll_bd_loop
-            = static_cast<dim_t>(jcp.M) * jcp.N * (jcp.is_bf32 ? 1 : 2)
-            > 8 * 1024;
 
     jcp.fp8_convert_wsp_size = static_cast<dim_t>(sizeof(float16_t))
             * isa_max_vlen(jcp.isa)

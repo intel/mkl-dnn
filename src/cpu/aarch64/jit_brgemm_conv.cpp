@@ -265,7 +265,7 @@ status_t brgemm_convolution_fwd_t<isa>::pd_t::add_brg_descriptor(int vM,
     if (jcp_.use_mmla) brgemm_utils::set_mmla_attr(brgattr, vbrgM);
     brgattr.hint_prefetching = jcp_.hint_prefetching;
     brgattr.max_bs = bs;
-    brgattr.hint_ununroll_bd_loop = jcp_.ununroll_bd_loop;
+    brgattr.hint_roll_bd_loop = jcp_.roll_bd_loop;
     brgattr.hint_innermost_loop = jcp_.brgemm_bd_loop_innermost
             ? brgemm_bd_loop_innermost
             : brgemm_innermost_undef;

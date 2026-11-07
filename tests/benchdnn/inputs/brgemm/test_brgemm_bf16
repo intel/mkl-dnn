@@ -7,6 +7,94 @@
 --brgemm-attr=,use_uker:1
 --batch=option_set_bf16
 
+# Roll loop hints
+# Both batch kinds cover the run-time bs walk; interleaved tile stores keep
+# the bs loop unrolled, hence use_interleave_stores:0 for its hint.
+--reset
+--dt=bf16,bf16:bf16:f32
+--bia_dt=undef,f32
+--beta=0,1
+--bs=1,3
+--batch-kind=addr,offs
+--brgemm-attr=use_uker:1+hint_roll_bd_loop:1,use_uker:1+hint_roll_ld_loop:1,use_uker:1+use_interleave_stores:0+hint_roll_bs_loop:1,use_uker:1+hint_roll_rd_loop:1
+1x32:32x1 1x32:32x16 1x64:64x1 1x64:64x16 16x32:32x1 16x32:32x16 16x64:64x1 64x64:64x48
+--bs=1
+1x2:2x1 1x2:2x16 16x2:2x1 16x2:2x16 64x2:2x48
+
+# Roll the bd and bs loops together
+# A rolled bd loop keeps its A displacement across the A reloads of a batch;
+# shapes have more than one bd block, otherwise the bd loop does not roll.
+--reset
+--dt=bf16,bf16:bf16:f32
+--bia_dt=undef,f32
+--beta=0,1
+--bs=1,3
+--batch-kind=addr,offs
+--brgemm-attr=use_uker:1+use_interleave_stores:0+hint_roll_bd_loop:1+hint_roll_bs_loop:1,use_uker:1+use_interleave_stores:0+hint_roll_bd_loop:1+hint_roll_bs_loop:1+hint_roll_rd_loop:1
+64x32:32x32 64x32:32x48 64x64:64x32 64x64:64x64 64x96:96x48 64x256:256x64 128x64:64x32 128x256:256x64
+--bs=1
+64x16:16x32
+
+# Roll the ld loop over a multi element batch
+# The ld loop sits outside the bs loop and keeps its B displacement
+# aside, because every batch element reloads B.
+--reset
+--dt=bf16,bf16:bf16:f32
+--bia_dt=undef,f32
+--beta=0,1
+--bs=1,3
+--batch-kind=addr,offs
+--brgemm-attr=use_uker:1+use_interleave_stores:0+hint_roll_ld_loop:1,use_uker:1+use_interleave_stores:0+hint_roll_ld_loop:1+hint_roll_bs_loop:1
+1x32:32x1 1x32:32x16 16x32:32x1 16x32:32x16 64x32:32x48
+--bs=1
+1x2:2x1 1x2:2x16 16x2:2x1 16x2:2x16 64x2:2x48
+
+# Roll the bd loop with a runtime batch size
+# The var_bs loop keeps its counter aside so that the address of the next
+# bd iteration survives the shared body.
+--reset
+--dt=bf16,bf16:bf16:f32
+--bia_dt=undef,f32
+--beta=0,1
+--bs=1,3
+--batch-kind=addr,offs
+--brgemm-attr=use_uker:1+use_interleave_stores:0+var_bs:1+hint_roll_bd_loop:1,use_uker:1+use_interleave_stores:0+var_bs:1+hint_roll_bd_loop:1+hint_roll_rd_loop:1
+64x32:32x32 64x32:32x48 64x64:64x32 64x64:64x64 64x96:96x48 64x256:256x64 128x64:64x32 128x256:256x64
+--bs=1
+64x16:16x32
+
+# Roll loop hints on the bf32 down-conversion path
+# The down-conversion caches its tiles by JIT-time position, so only the bd
+# hint may roll a loop here; this catches a regression in that gating.
+--reset
+--dt=f32
+--attr-fpmath=bf16
+--bia_dt=undef,f32
+--beta=0,1
+--bs=1,3
+--batch-kind=addr,offs
+--brgemm-attr=use_uker:1+hint_roll_bd_loop:1,use_uker:1+hint_roll_ld_loop:1,use_uker:1+use_interleave_stores:0+hint_roll_bs_loop:1,use_uker:1+hint_roll_rd_loop:1
+1x32:32x1 1x32:32x16 1x64:64x1 1x64:64x16 16x32:32x1 16x32:32x16 16x64:64x1 64x64:64x48
+--bs=1
+1x1:1x1 1x1:1x16 1x2:2x1 1x2:2x16 16x1:1x1 16x1:1x16 16x2:2x1 16x2:2x16 64x1:1x32 64x2:2x48 64x256:256x48
+
+# Size-driven roll
+# The plain AMX uker rolls only the bd loop, and only for a large kernel.
+--reset
+--dt=bf16
+--bs=1,3
+--brgemm-attr=use_uker:1+enable_size_driven_roll:1
+512x512:512x512
+
+# Size-driven roll on ACE
+# Any loop may roll here, until the kernel is small enough.
+--reset
+--dt=bf16
+--bs=1,3
+--batch-kind=addr,offs
+--brgemm-attr=use_ace:1+use_uker:1+enable_size_driven_roll:1
+256x256:256x256
+
 # Separate cases for non-default alpha
 --reset
 --dt=bf16

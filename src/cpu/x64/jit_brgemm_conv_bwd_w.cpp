@@ -132,6 +132,7 @@ status_t brgemm_convolution_bwd_weights_t::pd_t::init(const engine_t *engine) {
                         ? brgemm_bd_loop_innermost
                         : brgemm_innermost_undef;
                 brgattr.use_ace = jcp_.is_ace;
+                brgattr.enable_size_driven_roll = true;
 
                 brgattr.hint_expected_A_size = 0;
                 brgattr.hint_expected_B_size = 0;

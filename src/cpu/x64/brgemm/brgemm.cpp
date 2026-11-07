@@ -659,6 +659,55 @@ status_t brgemm_desc_finalize(brgemm_desc_t *brg) {
     else
         CHECK(brgemm_blocking(brg));
 
+    // Required for EVEX encoding for offsets
+    // The kernel jit_brgemm_amx_uker_t has support of large offsets in
+    // post-ops
+    const auto base_ker_d_stride_ok = [&]() {
+        const dim_t max_d_stride
+                = brg->LDD * types::data_type_size(brg->dt_d) * brg->bcast_dim;
+        return max_d_stride <= std::numeric_limits<int32_t>::max();
+    };
+
+    // With enable_size_driven_roll, fall back to the base kernel if even the
+    // rolled ACE uker is too large. The base kernel does not support the
+    // features below and addresses C linearly, which ignores LDC2_N. It also
+    // runs one batch element for a zero var_bs batch, which the uker skips.
+    // Virtual padding stays on the uker: the new blocking may give a bd_block
+    // below max_vpad, which the check below rejects.
+    if (brg->is_ace() && !brg->is_dgmm && brg->brgattr.use_uker
+            && brg->brgattr.enable_size_driven_roll
+            && brg->type != brgemm_static_offs && !brg->brgattr.var_bs
+            && utils::one_of(brg->dt_c, data_type::f32, data_type::s32)
+            && brg->brgattr.bd_mask_level == 0 && !brg->fused_copy_a
+            && !brg->has_per_k_scales() && !brg->with_per_mn_compensation
+            && brg->LDA2 == brg->LDA && brg->LDC2_M == brg->LDC
+            && IMPLICATION(brg->load_dim > brg->LDC, brg->LDC2_N == brg->LDC)
+            && max_vpad == 0 && base_ker_d_stride_ok()
+            && !ace_uker_small_enough(*brg)) {
+        const bool uker_ils = brg->brgattr.use_interleave_stores;
+        brg->brgattr.use_uker = false;
+        brg->brgattr.use_interleave_stores = false;
+        // The blocking depends on the kernel, see recalc_blocking().
+        CHECK(brgemm_blocking(brg));
+        // The base kernel shifts packed B only by whole N panels or by a
+        // divisor of a panel, see jit_brgemm_kernel_t::ldb_regs_shift().
+        // Keep the uker otherwise.
+        const auto ld_shift_ok = [&](dim_t ld_block2) {
+            const dim_t cols = ld_block2 * brg->ld_block;
+            return cols % brg->LDB == 0 || brg->LDB % cols == 0;
+        };
+        const bool b_panels
+                = brg->brgattr.LDB2 != 0 && brg->load_dim > brg->LDB;
+        if (b_panels
+                && !(IMPLICATION(brg->ldb2 > 0, ld_shift_ok(brg->ld_block2))
+                        && IMPLICATION(brg->ldb2_tail > 0,
+                                ld_shift_ok(brg->ldb2_tail)))) {
+            brg->brgattr.use_uker = true;
+            brg->brgattr.use_interleave_stores = uker_ils;
+            CHECK(brgemm_blocking(brg));
+        }
+    }
+
     if (!brg->is_dgmm) {
         // virtual padding is restricted by bd_block size due to
         // brgemm_kernel implementation. TODO: remove this restriction
@@ -679,15 +728,8 @@ status_t brgemm_desc_finalize(brgemm_desc_t *brg) {
             && (brg->has_per_k_scales() || brg->with_per_mn_compensation))
         return status::unimplemented;
 
-    // Required for EVEX encoding for offsets
-    // The kernel jit_brgemm_amx_uker_t has support of large offsets in
-    // post-ops
-    if (!brg->can_dispatch_uker()) {
-        const dim_t max_d_stride
-                = brg->LDD * types::data_type_size(brg->dt_d) * brg->bcast_dim;
-        if (max_d_stride > std::numeric_limits<int32_t>::max())
-            return status::unimplemented;
-    }
+    if (!brg->can_dispatch_uker() && !base_ker_d_stride_ok())
+        return status::unimplemented;
 
     return status::success;
 }
@@ -930,7 +972,11 @@ int brgemm_cmp(const brgemm_desc_t &lhs, const brgemm_desc_t &rhs) {
     CMP_BRGEMM_FIELD(brgattr.hint_ld_block);
     CMP_BRGEMM_FIELD(brgattr.hint_bd_block2);
     CMP_BRGEMM_FIELD(brgattr.hint_ld_block2);
-    CMP_BRGEMM_FIELD(brgattr.hint_ununroll_bd_loop);
+    CMP_BRGEMM_FIELD(brgattr.hint_roll_bd_loop);
+    CMP_BRGEMM_FIELD(brgattr.hint_roll_ld_loop);
+    CMP_BRGEMM_FIELD(brgattr.hint_roll_bs_loop);
+    CMP_BRGEMM_FIELD(brgattr.hint_roll_rd_loop);
+    CMP_BRGEMM_FIELD(brgattr.enable_size_driven_roll);
 
     CMP_BRGEMM_FIELD(brgattr.hint_load_nt_A);
     CMP_BRGEMM_FIELD(brgattr.hint_load_nt_B);

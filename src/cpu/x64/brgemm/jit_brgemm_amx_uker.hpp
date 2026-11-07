@@ -30,6 +30,10 @@ namespace x64 {
 // `brgemm_desc_t::can_dispatch_uker()` first.
 brgemm_kernel_t *create_brgemm_amx_uker_kernel(const brgemm_desc_t &brg);
 
+// Returns true if the ACE uker for `brg` fits the size threshold once all
+// the loops it may roll are rolled.
+bool ace_uker_small_enough(const brgemm_desc_t &brg);
+
 } // namespace x64
 } // namespace cpu
 } // namespace impl
