@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,8 +20,6 @@
 
 #include "common/dnnl_thread.hpp"
 #include "common/utils.hpp"
-
-#include "cpu/aarch64/rnn/brgemm_cell_common_reorders.hpp"
 
 namespace dnnl {
 namespace impl {

@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,7 +36,6 @@
 #elif DNNL_AARCH64
 #include "cpu/aarch64/rnn/brgemm_cell_common_bwd.hpp"
 #include "cpu/aarch64/rnn/brgemm_cell_common_fwd.hpp"
-#include "cpu/aarch64/rnn/brgemm_cell_common_reorders.hpp"
 #endif
 
 namespace dnnl {

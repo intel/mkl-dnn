@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -20,7 +21,6 @@
 
 #include <functional>
 
-#include "common/bfloat16.hpp"
 #include "cpu/aarch64/rnn/rnn_brgemm_utils.hpp"
 #include "cpu/rnn/rnn_utils.hpp"
 

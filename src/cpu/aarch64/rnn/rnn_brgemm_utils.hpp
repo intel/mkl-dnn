@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,8 +23,6 @@
 
 #include "common/c_types_map.hpp"
 #include "common/memory_tracking.hpp"
-#include "cpu/aarch64/brgemm/brgemm.hpp"
-#include "cpu/aarch64/jit_brgemm_transpose_utils.hpp"
 #include "cpu/aarch64/matmul/brgemm_matmul_copy_utils.hpp"
 
 namespace dnnl {
@@ -35,9 +34,6 @@ struct rnn_conf_t;
 } // namespace rnn_utils
 
 namespace aarch64 {
-
-struct jit_brgemm_trans_src_t;
-
 namespace matmul {
 struct jit_brgemm_matmul_copy_b_t;
 } // namespace matmul
