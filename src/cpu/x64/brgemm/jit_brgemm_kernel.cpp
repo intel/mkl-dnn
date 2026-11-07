@@ -3200,21 +3200,26 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel_ace(int bd_block2,
                         is_rd_tail);
             }
 
-            // Load B one rds at a time, compute with all bdb
-            for (int ldb = 0; ldb < ld_block2; ldb++) {
-                // The offset is relative to reg_aux_B, which has already
-                // been advanced for the tail.
-                const auto rd_pos = rdb;
-                const auto ldb_offs = ldb * brg.ld_block;
-                auto b_offset_base
-                        = rd_pos * brg.rd_block * brg.LDB * brg.typesize_B
-                        + brg.typesize_B
-                                * ((ldb_offs / brg.LDB) * brg.brgattr.LDB2
-                                        + (ldb_offs % brg.LDB) * brg.rd_step);
+            // Load B one rds at a time, compute with all bdb.
+            // The ld loop is inside the rd loop so that consecutive outer
+            // products target distinct accumulator tiles instead of chaining
+            // on one of them. Mirrors gemm_microkernel_ace() in
+            // jit_brgemm_amx_uker.cpp; the two generators must schedule the
+            // same way.
+            const auto rd_block_cur = is_rd_tail ? brg.rdb_tail : brg.rd_block;
+            for (int rds = 0; rds < ace_rd_steps(rd_block_cur); rds++) {
+                for (int ldb = 0; ldb < ld_block2; ldb++) {
+                    // The offset is relative to reg_aux_B, which has already
+                    // been advanced for the tail.
+                    const auto rd_pos = rdb;
+                    const auto ldb_offs = ldb * brg.ld_block;
+                    const auto b_offset_base
+                            = rd_pos * brg.rd_block * brg.LDB * brg.typesize_B
+                            + brg.typesize_B
+                                    * ((ldb_offs / brg.LDB) * brg.brgattr.LDB2
+                                            + (ldb_offs % brg.LDB)
+                                                    * brg.rd_step);
 
-                const auto rd_block_cur
-                        = is_rd_tail ? brg.rdb_tail : brg.rd_block;
-                for (int rds = 0; rds < ace_rd_steps(rd_block_cur); rds++) {
                     // Load one rds line from B into ace_zmm_B(bd_block2, ldb,
                     // rds); ace_load_B adds rds * rds_stride internally.
                     ace_load_B(ldb, b_offset_base, rds, is_ld_tail,
@@ -3257,16 +3262,26 @@ void jit_brgemm_kernel_t<Wmm>::gemm_microkernel_ace(int bd_block2,
                 // The tail uses rdb=0, and reg_aux_A has already
                 // advanced past the full blocks.
                 const auto rd_offset = rdb * rdb_A_offset();
+                // Load the A registers for this bd block. A is deliberately
+                // loaded here and not inside the rd loop below: ace_load_A()
+                // fills all ace_zmms_per_bd_block registers at once, so
+                // calling it per rd step would redo the whole masked load +
+                // transpose. Hoisting it further out is not possible either:
+                // without n_bcast_1_load the A registers are shared by all
+                // bdb (ace_zmm_A has base_idx == 0).
                 ace_load_A(bdb, rd_offset + A_offset(bdb, 0, true),
                         is_bdb_tail && bdb == bd_block2 - 1, bd_block,
                         is_rd_tail);
-                for (int ldb = 0; ldb < ld_block2; ldb++) {
-                    const int idx = (is_ld_tail) ? brg.ld_block2 : ldb;
-                    const auto &accm = Tmm(brg.get_C_tensor(
-                            bdb, idx, is_bdb_tail, is_ld_tail));
-                    const auto rd_block_cur
-                            = is_rd_tail ? brg.rdb_tail : brg.rd_block;
-                    for (int rds = 0; rds < ace_rd_steps(rd_block_cur); rds++) {
+                const auto rd_block_cur
+                        = is_rd_tail ? brg.rdb_tail : brg.rd_block;
+                // rd outside, ld inside: consecutive outer products write
+                // different accumulator tiles, so the TMUL latency is hidden
+                // instead of serializing on a single Tmm.
+                for (int rds = 0; rds < ace_rd_steps(rd_block_cur); rds++) {
+                    for (int ldb = 0; ldb < ld_block2; ldb++) {
+                        const int idx = (is_ld_tail) ? brg.ld_block2 : ldb;
+                        const auto &accm = Tmm(brg.get_C_tensor(
+                                bdb, idx, is_bdb_tail, is_ld_tail));
                         outer_product(ace_zmm_A(bdb, rds),
                                 ace_zmm_B(bd_block2, ldb, rds), accm);
                     }

@@ -2827,8 +2827,11 @@ void jit_brgemm_amx_uker_t::gemm_microkernel_ace(brgemm_iteration_t &bi) {
             ace_load_A(bi, bdb, A_offset(bi, bdb));
         }
 
-        for (int ldb = 0; ldb < bi.ldi->block2(); ldb++) {
-            for (int rds = 0; rds < ace_rd_steps(bi.rdi->block(0)); rds++) {
+        // The ld loop is inside the rd loop so that consecutive outer
+        // products target distinct accumulator tiles instead of chaining on
+        // one of them.
+        for (int rds = 0; rds < ace_rd_steps(bi.rdi->block(0)); rds++) {
+            for (int ldb = 0; ldb < bi.ldi->block2(); ldb++) {
                 // Load one line from B for the current ldb and rds into
                 // ace_zmm_B(ldb, 0).
                 ace_load_B(bi, ldb, B_offset(bi, ldb), rds);
@@ -2845,12 +2848,21 @@ void jit_brgemm_amx_uker_t::gemm_microkernel_ace(brgemm_iteration_t &bi) {
         }
 
         for (int bdb = 0; bdb < bi.bdi->block2(); bdb++) {
+            // Load the A registers for this bd block. A is deliberately
+            // loaded here and not inside the rd loop below: ace_load_A()
+            // fills all ace_zmms_per_bd_block registers at once, so calling
+            // it per rd step would redo the whole masked load + transpose
+            // (and, with save_transform_A(), the transform stores as well).
             ace_load_A(bi, bdb, A_offset(bi, bdb));
-            for (int ldb = 0; ldb < bi.ldi->block2(); ldb++) {
-                const auto &accm = Tmm(get_C_tensor(bi, bdb, ldb));
-                for (int rds = 0; rds < ace_rd_steps(bi.rdi->block(0)); rds++)
+            // rd outside, ld inside: consecutive outer products write
+            // different accumulator tiles, so the TMUL latency is hidden
+            // instead of serializing on a single Tmm.
+            for (int rds = 0; rds < ace_rd_steps(bi.rdi->block(0)); rds++) {
+                for (int ldb = 0; ldb < bi.ldi->block2(); ldb++) {
+                    const auto &accm = Tmm(get_C_tensor(bi, bdb, ldb));
                     outer_product(
                             ace_zmm_A(bdb, rds), ace_zmm_B(ldb, rds), accm);
+                }
             }
         }
     }
