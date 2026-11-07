@@ -154,11 +154,103 @@ float8_e5m2_t &float8_e5m2_t::operator=(bfloat16_t f) {
     return *this;
 }
 
-float8_e5m2_t &float8_e5m2_t::operator=(float f) {
-    float16_t f16 = f;
-    float8_e5m2_t f8 = f16;
-    raw_bits_ = f8.raw_bits_;
+float8_e5m2_t &float8_e5m2_t::convert_fp32_to_fp8e5m2_RNE(
+        float f, bool is_saturating) {
+    // Convert f32 -> f8_e5m2 directly with a single rounding step.
+    // RNE, DAZ=1, FTZ=0
+    using namespace utils;
+    uint32_t fraw = bit_cast<uint32_t>(f);
+    const uint32_t fp32_bias = 127;
+    const uint32_t bf8_bias = 15;
+
+    // extract sign, exponent and mantissa
+    uint32_t s_32 = fraw >> 31;
+    uint32_t exp_32 = (fraw >> 23) & 0xff;
+    uint32_t mant_32 = fraw & 0x7fffff;
+
+    raw_bits_ = 0;
+
+    // Check for Zero or Denormals
+    if (exp_32 == 0) {
+        raw_bits_ = s_32 << 7; // return signed zero
+        return *this;
+    }
+
+    // Check for NaN
+    if (exp_32 == 0xff && mant_32 != 0) {
+        raw_bits_ = ((s_32 << 7) | 0x7c); //same sign, exponent all ones
+        mant_32 |= 0x00400000;
+        uint8_t mant_8 = (mant_32 >> 21) & 0x03;
+        raw_bits_ |= mant_8; // set mantissa bits
+        return *this;
+    }
+
+    // Check for Infinity
+    if ((exp_32 == 0xff) && (mant_32 == 0)) {
+        if (is_saturating) {
+            raw_bits_ = (s_32 << 7) | 0x7b; // MAX BF8
+        } else {
+            raw_bits_ = (s_32 << 7) | 0x7c; // Infinity
+        }
+        return *this;
+    }
+
+    // Overflow --> make it INF or MAX BF8
+    if ((exp_32 >= (fp32_bias - bf8_bias + 31))
+            || ((exp_32 == (fp32_bias - bf8_bias + 30))
+                    && (mant_32 >= 0x00700000))) {
+        if (is_saturating) {
+            raw_bits_ = (s_32 << 7) | 0x7b; // MAX BF8
+        } else {
+            raw_bits_ = (s_32 << 7) | 0x7c; // Infinity
+        }
+        return *this;
+    }
+
+    // Underflow
+    if (exp_32 <= (fp32_bias - bf8_bias)) {
+        // denormalized mantissa
+        uint32_t mant = mant_32 | 0x00800000; // add implicit leading 1
+
+        // subnormal shift (clamped: shifts >= 32 are UB in C++)
+        const uint32_t shift = (fp32_bias - bf8_bias) - exp_32 + 1;
+        mant = shift >= 32 ? 0 : (mant >> shift);
+
+        // preserve sticky bit (some sticky bits are lost when denormalizing)
+        uint32_t shift_out_sticky
+                = (((mant_32 & 0x001fffff) + 0x001fffff) >> 21);
+        mant |= shift_out_sticky;
+
+        // RNE rounding
+        uint32_t l_bit = (mant >> 21) & 0x1;
+        mant += 0x000fffff + l_bit;
+
+        if (((mant >> 23) & 0x1) == 1) {
+            // rounding overflowed into the normal range: min normal
+            raw_bits_ = (s_32 << 7) | 0x4; // exp = 1, mant = 0
+        } else {
+            mant = (mant >> 21) & 0x3;
+            raw_bits_ = (s_32 << 7) | mant;
+        }
+        return *this;
+    }
+
+    uint32_t l_bit = (mant_32 >> 21) & 0x1;
+    uint32_t r_nex = fraw + 0x000fffff + l_bit;
+    uint32_t exp_8 = ((r_nex & 0x7f800000) >> 23);
+    uint32_t mant = (r_nex & 0x00600000);
+    exp_8 -= (fp32_bias - bf8_bias);
+    mant >>= 21;
+
+    raw_bits_ |= exp_8 << 2;
+    raw_bits_ |= mant;
+    raw_bits_ |= s_32 << 7;
+
     return *this;
+}
+
+float8_e5m2_t &float8_e5m2_t::operator=(float f) {
+    return this->convert_fp32_to_fp8e5m2_RNE(f, false);
 }
 
 float8_e5m2_t::operator float() const {
@@ -266,11 +358,100 @@ float8_e4m3_t &float8_e4m3_t::operator=(float16_t f) {
     return *this;
 }
 
-float8_e4m3_t &float8_e4m3_t::operator=(float f) {
-    float16_t f16 = f;
-    float8_e4m3_t f8 = f16;
-    raw_bits_ = f8.raw_bits_;
+float8_e4m3_t &float8_e4m3_t::convert_fp32_to_fp8e4m3_RNE(
+        float f, bool is_saturating) {
+    // Convert f32 -> f8_e4m3 directly with a single rounding step.
+    // RNE, DAZ=1, FTZ=0
+    using namespace utils;
+    uint32_t fraw = bit_cast<uint32_t>(f);
+    const uint32_t fp32_bias = 127;
+    const uint32_t hf8_bias = 7;
+
+    // extract sign, exponent and mantissa
+    uint32_t s_32 = fraw >> 31;
+    uint32_t exp_32 = (fraw >> 23) & 0xff;
+    uint32_t mant_32 = fraw & 0x7fffff;
+
+    raw_bits_ = 0;
+
+    // Check for Zero or Denormals
+    if (exp_32 == 0) {
+        raw_bits_ = s_32 << 7; // return signed zero
+        return *this;
+    }
+
+    // Check for NaN
+    if (exp_32 == 0xff && mant_32 != 0) {
+        raw_bits_ = ((s_32 << 7) | 0x7f); //same sign, exponent all ones
+        return *this;
+    }
+
+    // Check for Infinity
+    if ((exp_32 == 0xff) && (mant_32 == 0)) {
+        if (is_saturating) {
+            raw_bits_ = (s_32 << 7) | 0x7e; // MAX HF8
+        } else {
+            raw_bits_ = (s_32 << 7) | 0x7f; // NAN
+        }
+        return *this;
+    }
+
+    // Overflow --> make it NaN or MAX HF8
+    if ((exp_32 > (fp32_bias - hf8_bias + 15))
+            || ((exp_32 == (fp32_bias - hf8_bias + 15))
+                    && (mant_32 > 0x00680000))) {
+        if (is_saturating) {
+            raw_bits_ = (s_32 << 7) | 0x7e; // MAX HF8
+        } else {
+            raw_bits_ = (s_32 << 7) | 0x7f; // NAN
+        }
+        return *this;
+    }
+
+    // Underflow
+    if (exp_32 <= (fp32_bias - hf8_bias)) {
+        // denormalized mantissa
+        uint32_t mant = mant_32 | 0x00800000; // add implicit leading 1
+
+        // subnormal shift (clamped: shifts >= 32 are UB in C++)
+        const uint32_t shift = (fp32_bias - hf8_bias) - exp_32 + 1;
+        mant = shift >= 32 ? 0 : (mant >> shift);
+
+        // preserve sticky bit (some sticky bits are lost when denormalizing)
+        uint32_t shift_out_sticky
+                = (((mant_32 & 0x000fffff) + 0x000fffff) >> 20);
+        mant |= shift_out_sticky;
+
+        // RNE rounding
+        uint32_t l_bit = (mant >> 20) & 0x1;
+        mant += 0x0007ffff + l_bit;
+
+        if (((mant >> 23) & 0x1) == 1) {
+            // rounding overflowed into the normal range: min normal
+            raw_bits_ = (s_32 << 7) | 0x8; // exp = 1, mant = 0
+        } else {
+            mant = (mant >> 20) & 0x7;
+            raw_bits_ = (s_32 << 7) | mant;
+        }
+        return *this;
+    }
+
+    uint32_t l_bit = (mant_32 >> 20) & 0x1;
+    uint32_t r_nex = fraw + 0x0007ffff + l_bit;
+    uint32_t exp_8 = ((r_nex & 0x7f800000) >> 23);
+    uint32_t mant = (r_nex & 0x00700000);
+    mant = (mant >> 20) & 0x7;
+    exp_8 -= (fp32_bias - hf8_bias);
+
+    raw_bits_ |= exp_8 << 3;
+    raw_bits_ |= mant;
+    raw_bits_ |= s_32 << 7;
+
     return *this;
+}
+
+float8_e4m3_t &float8_e4m3_t::operator=(float f) {
+    return convert_fp32_to_fp8e4m3_RNE(f, false);
 }
 
 float8_e4m3_t &float8_e4m3_t::operator=(bfloat16_t f) {

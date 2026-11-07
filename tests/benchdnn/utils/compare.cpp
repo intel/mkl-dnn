@@ -32,6 +32,7 @@
 namespace compare {
 
 namespace {
+
 void dump_point_values(
         const std::string &kind_str, const compare_t::dump_point_ctx_t &ctx) {
     stringstream_t ss;
@@ -650,20 +651,26 @@ bool compare_t::is_off_by_one(const driver_check_func_args_t &args) const {
         return false;
     }
 
-    // Low-precision floats (fp8/fp4) use half their epsilon as the window
-    const float half_eps = epsilon_dt(args.dt) / 2.f;
-    const float next
-            = round_to_nearest_representable(args.dt, args.exp_f32 + half_eps);
-    const float prev
-            = round_to_nearest_representable(args.dt, args.exp_f32 - half_eps);
-
-    // Important conditions:
-    // * Expected f32 value shoudn't be equal to expected `float` value.
-    // * Expected and got values should be either `next` or `prev`.
-    // * Got value and expected values are different from one another.
+    // Low-precision floats (fp8/fp4): accept a single-ULP difference where
+    // the ULP is computed for the actual magnitude of the values (including
+    // subnormals), and the exact f32 value lies between `exp` and `got`.
+    // This covers e.g. double rounding (f32->f16->f8) in implementations vs.
+    // direct f32->f8 rounding in the reference.
+    if (!std::isfinite(args.exp_f32) || !std::isfinite(args.exp)
+            || !std::isfinite(args.got))
+        return false;
+    // Expected f32 value shouldn't be equal to expected `float` value.
     if (args.exp_f32 == args.exp) return false;
-    return (args.got == next && args.exp == prev)
-            || (args.got == prev && args.exp == next);
+    if (args.got == args.exp) return false;
+
+    const float lo = std::min(args.exp, args.got);
+    const float hi = std::max(args.exp, args.got);
+    // The exact value must lie strictly between the two neighbors.
+    if (!(args.exp_f32 > lo && args.exp_f32 < hi)) return false;
+
+    const float ulp = ulp_dt(args.dt, std::min(fabsf(lo), fabsf(hi)));
+    if (ulp <= 0.f) return false;
+    return (hi - lo) == ulp;
 }
 
 int compare_t::compare(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,

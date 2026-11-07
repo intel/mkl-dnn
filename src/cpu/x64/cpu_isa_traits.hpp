@@ -89,6 +89,7 @@ enum cpu_isa_bit_t : unsigned {
     amx_fp16_bit = 1u << 17,
     amx_2_bit = 1u << 18,
     ace_bit = 1u << 19,
+    avx10_2_aux_bit = 1u << 20,
 
     // Fill in hints from most significant bit to least significant bit
     prefer_ymm_bit = 1u << (cpu_isa_total_bits - 1),
@@ -147,19 +148,21 @@ enum cpu_isa_t : unsigned {
     avx512_core_amx_fp16 = avx10_1_512_amx_fp16,
     avx10_2 = avx10_2_bit | xmm_bit | ymm_bit | zmm_bit,
     avx10_2_512 = avx10_2,
+    avx10_2_aux = avx10_2 | avx10_2_aux_bit,
     avx10_2_amx_2
     = avx10_2 | amx_tile | amx_int8 | amx_bf16 | amx_fp16 | amx_2_bit,
     avx10_2_512_amx_2 = avx10_2_amx_2,
-    // ACE includes amx_tile because it shares the tile register file and the
-    // tile management instructions with AMX. It is not derived from
-    // avx10_2_amx_2: the TMUL and ACE palettes are independent, so that would
-    // claim TMUL compute support an ACE-only part does not have.
-    avx10_2_ace = avx10_2 | amx_tile | ace_bit,
+    avx10_2_ace = avx10_2_aux | amx_tile | ace_bit,
     // NOTES: 1. isa_all by default has no isa specific hints
     //        2. avx10_2_ace is under preview support and turned off by
     //           default. It is enabled only when the max CPU ISA is explicitly
     //           set to avx10_2_ace.
-    isa_all = ~0u & ~ace_bit & ~cpu_isa_hints_utils::hints_mask,
+    //        3. avx10_2_aux is masked out for the same reason: AVX10.2-aux is
+    //           only enumerated on parts that also expose ACE, so it shares
+    //           the preview gate. It is re-enabled implicitly when the max CPU
+    //           ISA is set to avx10_2_ace, which contains avx10_2_aux_bit.
+    isa_all
+    = ~0u & ~ace_bit & ~avx10_2_aux_bit & ~cpu_isa_hints_utils::hints_mask,
 };
 
 std::string isa2str(cpu_isa_t isa);
@@ -468,6 +471,9 @@ inline bool mayiuse(const cpu_isa_t cpu_isa, bool soft = false) {
                     && cpu().has(Cpu::tAVX512F) && mayiuse(avx2_vnni_2, soft)
                     && cpu().has(Cpu::tAPX_F) && cpu().has(Cpu::tMOVRS)
                     && x64::apx::is_available());
+        case avx10_2_aux:
+            REG_AVX512_ISA(return mayiuse(avx10_2, soft)
+                    && cpu().has(Cpu::tAVX10_V2_AUX));
         case amx_tile:
             REG_AMX_ISA(return cpu().has(Cpu::tAMX_TILE)
                     && x64::amx::is_available());
@@ -500,10 +506,10 @@ inline bool mayiuse(const cpu_isa_t cpu_isa, bool soft = false) {
             //   5. XCR0[20,18:17] = 0b111  (ace::is_available)
             //   6. XCR0[7:5] = 0b111       (implied by the AVX10 checks)
             //   7. CR4.OSXSAVE = 1         (implied by the XCR0 queries)
-            REG_AMX_ISA(return mayiuse(avx10_2, soft) && mayiuse(amx_tile, soft)
-                    && cpu().has(Cpu::tACE) && cpu().getACEversion() >= 1
+            REG_AMX_ISA(return mayiuse(avx10_2_aux, soft)
+                    && mayiuse(amx_tile, soft) && cpu().has(Cpu::tACE)
+                    && cpu().getACEversion() >= 1
                     && cpu().getMaxPalette() >= amx_palette_ace
-                    && cpu().has(Cpu::tAVX10_V2_AUX)
                     && x64::ace::is_available());
         case isa_all: return false;
         case isa_undef: return true;

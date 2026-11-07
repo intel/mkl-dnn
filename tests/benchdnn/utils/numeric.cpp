@@ -14,6 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <algorithm>
+#include <cmath>
+
 #include "src/common/bfloat16.hpp"
 #include "src/common/float16.hpp"
 #include "src/common/float4.hpp"
@@ -163,6 +166,51 @@ float max_dt(dnnl_data_type_t dt) {
 
 #undef CASE
     return 0;
+}
+
+// Smallest positive normal value (std::numeric_limits::min functionality).
+float min_normal_dt(dnnl_data_type_t dt) {
+#define CASE(dt) \
+    case dt: \
+        return (float)dnnl::impl::nstl::numeric_limits< \
+                typename prec_traits<dt>::type>::min();
+
+    CASE_ALL(dt);
+
+#undef CASE
+    return 0;
+}
+
+// Returns the distance between `x` (assumed representable in `dt`) and the
+// next representable value of larger magnitude. Built on
+// `nstl::numeric_limits`: the ULP at magnitude `|x|` is
+// 2^(floor(log2|x|) - (digits - 1)). In the subnormal range the exponent is
+// clamped to the one of the smallest normal value (`min()`), which gives the
+// constant subnormal step. Returns 1 for integral data types and 0 for
+// unsupported data types.
+float ulp_dt(dnnl_data_type_t dt, float x) {
+    // Integral types have a uniform grid with a step of 1.
+    if (is_integral_dt(dt)) return 1.f;
+
+    // Only floating-point types covered by `CASE_ALL` (others would assert).
+    switch (dt) {
+        case dnnl_f4_e2m1:
+        case dnnl_f8_e5m2:
+        case dnnl_f8_e4m3:
+        case dnnl_bf16:
+        case dnnl_f16:
+        case dnnl_f32: break;
+        default: return 0.f;
+    }
+
+    const float min_normal = min_normal_dt(dt);
+    const int mant_bits = digits_dt(dt) - 1;
+    if (min_normal <= 0.f || mant_bits < 0) return 0.f;
+
+    int exp2 = 0;
+    // frexp: |v| = m * 2^exp2, m in [0.5, 1) => floor(log2|v|) = exp2 - 1.
+    std::frexp(std::max(fabsf(x), min_normal), &exp2);
+    return std::ldexp(1.f, (exp2 - 1) - mant_bits);
 }
 
 template <dnnl_data_type_t dt>

@@ -87,8 +87,18 @@ protected:
     const Xbyak::Xmm xmm_aux3_;
     const Xbyak::Reg64 reg64_aux_;
 
-    bool is_fp8_native() {
+    // True if the target ISA can convert f16 -> f8 with a single instruction
+    // (AVX10.2: vcvtph2bf8 / vcvtph2hf8). Also gates the emulation lookup
+    // tables, which are only needed when no native down-convert exists.
+    bool is_fp16fp8_native() {
         return is_superset(host_->max_cpu_isa(), cpu_isa_t::avx10_2);
+    }
+
+    // True if the target ISA can convert f32 -> f8 with a single instruction
+    // (AVX10.2-aux: vcvtps2bf8 / vcvtps2hf8). Without it the conversion goes
+    // through an f16 intermediate, i.e. it rounds twice.
+    bool is_fp32fp8_native() {
+        return is_superset(host_->max_cpu_isa(), cpu_isa_t::avx10_2_aux);
     }
 
     Xbyak::Zmm zmm_mask(

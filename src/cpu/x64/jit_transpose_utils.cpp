@@ -1430,14 +1430,17 @@ void jit_diff_wei_trans_to_vnni_t::generate() {
                             const auto src_off2 = src_off1 + ts_inp * oc_block_;
                             const auto src_off3 = src_off2 + ts_inp * oc_block_;
 
+                            // NOTE: the operands must be explicitly sized -
+                            // vcvt_f32_to_f8() derives the element count from
+                            // the width of the source.
                             f8_cvt->vcvt_f32_to_f8(
-                                    xmm_src_0, ptr[reg_input_kw + src_off0]);
+                                    xmm_src_0, zword[reg_input_kw + src_off0]);
                             f8_cvt->vcvt_f32_to_f8(
-                                    xmm_src_1, ptr[reg_input_kw + src_off1]);
+                                    xmm_src_1, zword[reg_input_kw + src_off1]);
                             f8_cvt->vcvt_f32_to_f8(
-                                    xmm_src_2, ptr[reg_input_kw + src_off2]);
+                                    xmm_src_2, zword[reg_input_kw + src_off2]);
                             f8_cvt->vcvt_f32_to_f8(
-                                    xmm_src_3, ptr[reg_input_kw + src_off3]);
+                                    xmm_src_3, zword[reg_input_kw + src_off3]);
                             vinserti64x2(zmm_out, zmm_out, xmm_src_0, 0);
                             vinserti64x2(zmm_out, zmm_out, xmm_src_1, 1);
                             vinserti64x2(zmm_out, zmm_out, xmm_src_2, 2);

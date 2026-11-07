@@ -32,6 +32,8 @@ int digits_dt(dnnl_data_type_t dt);
 float epsilon_dt(dnnl_data_type_t dt);
 float lowest_dt(dnnl_data_type_t dt);
 float max_dt(dnnl_data_type_t dt);
+float min_normal_dt(dnnl_data_type_t dt);
+float ulp_dt(dnnl_data_type_t dt, float x);
 bool is_integral_dt(dnnl_data_type_t dt);
 float maybe_saturate(dnnl_data_type_t dt, float value);
 float round_to_nearest_representable(dnnl_data_type_t dt, float value);
