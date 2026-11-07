@@ -16,18 +16,16 @@
 * limitations under the License.
 *******************************************************************************/
 
-#include "cpu/aarch64/brgemm/brgemm.hpp"
-#include "cpu/aarch64/brgemm/brgemm_types.hpp"
-#include "cpu/aarch64/brgemm/brgemm_utils.hpp"
-
 #include "common/c_types_map.hpp"
 #include "common/nstl.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
 
-#include "cpu/aarch64/cpu_barrier.hpp"
+#include "cpu/aarch64/brgemm/brgemm.hpp"
+#include "cpu/aarch64/brgemm/brgemm_types.hpp"
+#include "cpu/aarch64/brgemm/brgemm_utils.hpp"
+#include "cpu/aarch64/cpu_isa_traits.hpp"
 #include "cpu/aarch64/injectors/jit_uni_postops_injector.hpp"
-#include "cpu/platform.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -219,18 +217,18 @@ status_t brgemm_desc_set_postops(brgemm_desc_t *brg,
     brg->attr = attr;
     brg->dst_md = dst_md;
 
-    if ((sme == brg->isa_impl)
-            && ((data_type::undef != dt_bias) || attr->post_ops_.len()
-                    || !attr->scales_.get(DNNL_ARG_SRC).has_default_values()
-                    || !attr->scales_.get(DNNL_ARG_WEIGHTS).has_default_values()
-                    || !attr->scales_.get(DNNL_ARG_DST).has_default_values()))
+    const bool has_bias = dt_bias != data_type::undef;
+    const bool has_post_ops = attr->post_ops_.len() > 0;
+    const bool has_scales = utils::one_of(false,
+            attr->scales_.get(DNNL_ARG_SRC).has_default_values(),
+            attr->scales_.get(DNNL_ARG_WEIGHTS).has_default_values(),
+            attr->scales_.get(DNNL_ARG_DST).has_default_values());
+    if ((brg->isa_impl == sme) && (has_bias || has_post_ops || has_scales))
         return status::unimplemented;
 
-    brg->with_bias = (dt_bias == data_type::undef) ? false : true;
+    brg->with_bias = has_bias;
     brg->dt_bias = dt_bias;
-    brg->typesize_bias = (dt_bias == data_type::undef)
-            ? 0
-            : types::data_type_size(brg->dt_bias);
+    brg->typesize_bias = has_bias ? types::data_type_size(brg->dt_bias) : 0;
 
     brg->LDD = LDD;
     const auto dt_d = dst_md->data_type;
@@ -267,21 +265,20 @@ status_t brgemm_desc_set_postops(brgemm_desc_t *brg,
     const auto binary_ind = post_ops.find(primitive_kind::binary);
     const auto prelu_ind = post_ops.find(primitive_kind::prelu);
     brg->with_binary = !everyone_is(-1, binary_ind, prelu_ind);
-    const cpu_isa_t isa = get_max_cpu_isa();
 
-    if ((brg->with_binary && !dst_md)
-            || !injector::post_ops_ok(
-                    post_ops_ok_args_t(isa, {sum, eltwise, binary}, post_ops,
-                            &dst_d, false /*sum_at_pos_0_only*/,
-                            false /*sum_requires_scale_one*/,
-                            false /*sum_requires_zp_zero*/,
-                            true /*sum_requires_same_params*/,
-                            {broadcasting_strategy_t::per_oc,
-                                    broadcasting_strategy_t::scalar,
-                                    broadcasting_strategy_t::per_mb_spatial,
-                                    broadcasting_strategy_t::per_mb_w,
-                                    broadcasting_strategy_t::per_w,
-                                    broadcasting_strategy_t::no_broadcast})))
+    if (brg->with_binary && !dst_md) return status::unimplemented;
+
+    if (!injector::post_ops_ok(post_ops_ok_args_t(brg->isa_impl,
+                {sum, eltwise, binary}, post_ops, &dst_d,
+                false /*sum_at_pos_0_only*/, false /*sum_requires_scale_one*/,
+                false /*sum_requires_zp_zero*/,
+                true /*sum_requires_same_params*/,
+                {broadcasting_strategy_t::per_oc,
+                        broadcasting_strategy_t::scalar,
+                        broadcasting_strategy_t::per_mb_spatial,
+                        broadcasting_strategy_t::per_mb_w,
+                        broadcasting_strategy_t::per_w,
+                        broadcasting_strategy_t::no_broadcast})))
         return status::unimplemented;
 
     const auto sum_idx = post_ops.find(primitive_kind::sum);

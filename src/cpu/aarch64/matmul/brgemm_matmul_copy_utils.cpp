@@ -387,8 +387,6 @@ void jit_brgemm_matmul_copy_b_transposed_t<isa>::generate() {
     postamble();
 }
 
-template struct jit_brgemm_matmul_copy_b_transposed_t<sve>;
-
 status_t create_brgemm_matmul_copy_b(
         std::unique_ptr<jit_brgemm_matmul_copy_b_t> &copy_ker,
         const brgemm_matmul_conf_t *conf) {
@@ -427,6 +425,8 @@ status_t create_brgemm_matmul_copy_a(
     assert(!"unreachable");
     return status::unimplemented;
 }
+
+template struct jit_brgemm_matmul_copy_b_transposed_t<sve>;
 
 } // namespace matmul
 } // namespace aarch64

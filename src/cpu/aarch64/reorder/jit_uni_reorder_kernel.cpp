@@ -1984,16 +1984,13 @@ void jit_uni_reorder_kernel_f32_t::cvt_v_s8_u8(
 #undef UNROLL_INST
 
 jit_uni_reorder_kernel_f32_t::jit_uni_reorder_kernel_f32_t(const desc_t &desc)
-    : kernel_t(desc), isa_(get_max_cpu_isa()) {
-    assert(!utils::one_of(isa_, isa_undef, isa_all));
-    itype_sz_ = data_type_size(prb_.itype);
-    otype_sz_ = data_type_size(prb_.otype);
-    stype_sz_ = sizeof(float);
-}
+    : kernel_t(desc)
+    , itype_sz_(data_type_size(prb_.itype))
+    , otype_sz_(data_type_size(prb_.otype))
+    , stype_sz_(sizeof(float)) {}
 
 void jit_uni_reorder_kernel_f32_t::generate() {
     using namespace Xbyak_aarch64::util;
-    uint64_t sveLen = get_sve_length();
     Label end_of_kernel;
 
     preamble();
@@ -2026,7 +2023,7 @@ void jit_uni_reorder_kernel_f32_t::generate() {
     ldr(reg_ptr_in_, ptr(X_TMP_0));
     ldr(reg_ptr_out_, ptr(X_TMP_1));
 
-    if (sveLen) { /* SVE is available. */
+    if (mayiuse(sve)) { /* SVE is available. */
         ptrue(p_lsb_256.b, VL32);
         ptrue(p_lsb_128.b, VL16);
         ptrue(p_lsb_64.b, VL8);

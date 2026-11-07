@@ -50,7 +50,7 @@ status_t jit_uni_shuffle_t<isa>::pd_t::init(const engine_t *engine) {
 
     conf_.data_type = src_d.data_type();
 
-    const bool ok = is_superset(get_max_cpu_isa(), isa)
+    const bool ok = mayiuse(isa)
             && utils::one_of(conf_.data_type, f32, s32, bf16)
             && src_d.data_type() == dst_d.data_type()
             && platform::has_data_type_support(conf_.data_type)

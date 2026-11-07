@@ -26,6 +26,7 @@
 #include "common/primitive.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
+#include "common/verbose_msg.hpp"
 
 #include "cpu/aarch64/jit_generator.hpp"
 #include "cpu/aarch64/reorder/jit_blk_reorder.hpp"
@@ -65,11 +66,11 @@ status_t jit_blk_reorder_t::pd_t::init(const engine_t *engine,
         VDISPATCH_REORDER(prd <= upper_thres, "perf condition is not met");
     }
 
-    // Very small shapes are faster on jit uni for SVE-128
     auto lower_thres = 128 * 128;
-
-    VDISPATCH_REORDER(!(get_max_cpu_isa() == sve_128 && prd < lower_thres),
-            "perf condition is not met");
+    VDISPATCH_REORDER(
+            IMPLICATION(get_max_cpu_isa() == sve_128, prd >= lower_thres),
+            VERBOSE_IMPL_HEURISTIC_FAIL,
+            "very small shapes are faster on jit uni for SVE-128");
 
     status_t prb_init_status = prb_init(prb, *src_md(), *dst_md(), attr());
     if (prb_init_status != status::success) return prb_init_status;
