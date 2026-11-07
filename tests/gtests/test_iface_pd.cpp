@@ -104,4 +104,36 @@ TEST_F(pd_test_t, TestOptionalQueries) {
     ASSERT_EQ(pd.get_prop_kind(), dnnl::prop_kind::undef);
 }
 
+TEST_F(pd_test_t, TestMultipleSrcQueryIndex) {
+    memory::desc src_md {
+            {2, 3}, memory::data_type::f32, memory::format_tag::ab};
+    std::vector<memory::desc> srcs {src_md, src_md};
+    const int n = static_cast<int>(srcs.size());
+
+    auto sum_pd = sum::primitive_desc(e, {1.f, 1.f}, srcs);
+    auto concat_pd = concat::primitive_desc(e, 0, srcs);
+
+    for (const primitive_desc_base *pd :
+            {static_cast<const primitive_desc_base *>(&sum_pd),
+                    static_cast<const primitive_desc_base *>(&concat_pd)}) {
+        for (int idx = 0; idx < n; ++idx)
+            ASSERT_TRUE(pd->src_desc(idx) == src_md);
+
+        // Out-of-range indices, including negative ones, must map to a zero
+        // memory descriptor instead of indexing outside the sources.
+        for (int idx : {-1, n}) {
+            ASSERT_EQ(pd->src_desc(idx).get_ndims(), 0);
+
+            const_dnnl_memory_desc_t c_md = dnnl_primitive_desc_query_md(
+                    pd->get(), dnnl_query_src_md, idx);
+            ASSERT_NE(c_md, nullptr);
+            int ndims = -1;
+            ASSERT_EQ(
+                    dnnl_memory_desc_query(c_md, dnnl_query_ndims_s32, &ndims),
+                    dnnl_success);
+            ASSERT_EQ(ndims, 0);
+        }
+    }
+}
+
 } // namespace dnnl

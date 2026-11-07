@@ -67,7 +67,7 @@ struct sum_pd_t : public primitive_desc_t {
 
     const memory_desc_t *src_md(
             int index = 0, bool user_input = false) const override {
-        if (index < n_inputs())
+        if (index >= 0 && index < n_inputs())
             return user_input ? desc()->src_mds[index] : &src_mds_[index];
         return &glob_zero_md;
     }
