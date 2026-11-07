@@ -1,0 +1,100 @@
+--reset --dt=f16:f32:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:4:f32+wei:host_scalar:4:bf16 --attr-post-ops=exp 872x1312:1312x148
+--reset --dt=f16:f4_e2m1:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=wei:per_tensor:f8_e4m3:16x1 2x6x1x1x896:1x6x1x896x932
+--reset --dt=f16:s4:f16 --stag=abx --wtag=ba --dtag=abx --attr-scales=wei:per_tensor:f16:64x1 --attr-zero-points=wei:per_oc:s4 --attr-fpmath=strict:true 1x1088:1088x2
+--reset --dt=s8:u8:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:bf16:1x256+wei:per_tensor:f32:64x1 --attr-post-ops=add:u8:common --bia-dt=f32 --bia_mask=4 1x767x256:3x256x1296
+--reset --dt=s8:u8:s32 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x128+wei:per_tensor:f32:64x1 --attr-zero-points=src:host_scalar:4:s8 --attr-post-ops=sub:u8:per_oc 2x4x1x128:1x1x128x863
+--reset --dt=f8_e5m2:f8_e5m2:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:bf16:32x1 --attr-post-ops=sub:f16:common 80x224:224x1692
+--reset --dt=f16:f8_e4m3:f16 --stag=abx --wtag=acb --dtag=abx --attr-scales=src:common:4:f16+wei:per_tensor:f32:256x1 1x1x3328:2x3328x1
+--reset --dt=u8:u8:f16 --stag=abx --dtag=abx --attr-scales=src:common:4:bf16+wei:per_tensor:bf16:32x1 --attr-zero-points=src:common:4:s32+wei:per_oc:u8 --attr-post-ops=elu:-1.0 --bia-dt=f32 --bia_mask=3 604x1888:1888x276
+--reset --dt=u8:u4:bf16 --stag=abx --wtag=abx --dtag=ba --attr-scales=src:per_tensor:bf16:1x64+wei:per_tensor:bf16:64x1 --attr-zero-points=src:host_scalar:4:s32+wei:per_tensor:u4:64x1 1x3200:3200x1884
+--reset --dt=f4_e2m1:f4_e2m1:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:e8m0:32x32 --bia-dt=f32 --bia_mask=3 1x768:768x1920
+--reset --dt=f32:f32:f32 --stag=abx --wtag=abdc --dtag=abx --attr-post-ops=gelu_erf 4x7x42x168:4x7x168x368
+--reset --dt=bf16:f8_e5m2:bf16 --stag=abx --dtag=abx --attr-scales=wei:per_tensor:e8m0:32x1 534x224:224x524
+--reset --dt=s8:u8:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:2:f32+wei:per_oc:bf16 --attr-zero-points=src:host_scalar:2:s8+wei:per_oc:u8 368x984:984x772
+--reset --dt=u8:u8:bf16 --stag=ba --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x32+wei:per_oc:bf16 --attr-zero-points=src:common:2:u8+wei:host_scalar:2:u8 --attr-post-ops=max:s32:common 528x832:832x1
+--reset --dt=s8:s8:s32 --stag=ba --dtag=abx --attr-scales=src:per_tensor:bf16:1x64+wei:per_tensor:f16:64x1 --attr-zero-points=src:common:4:s8 1x2048:2048x1116
+--reset --dt=s8:u8:s8 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x64+wei:per_tensor:bf16:256x1+dst:host_scalar:4:f32 --attr-zero-points=src:per_tensor:s8:1x64+wei:per_tensor:u8:64x1+dst:common:2:s32 --attr-precomputed-reductions=src:per_tensor:s32:1x64 --attr-post-ops=clip_v2:-2.0:4.0 1x1792:1792x1368
+--reset --dt=bf16:f4_e2m1:bf16 --stag=abx --dtag=abx --attr-scales=wei:per_tensor:f8_e4m3:16x1 --attr-post-ops=mul:s32:per_oc 1x76x624:2x624x544
+--reset --dt=s8:u8:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:2:f32+wei:per_tensor:f32:32x1 --attr-zero-points=src:host_scalar:4:s8+wei:host_scalar:2:u8 --attr-post-ops=add:s32:common 452x32:32x372
+--reset --dt=s8:s8:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x64+wei:host_scalar:2:bf16 --attr-post-ops=soft_relu 6x6x1476x1152:6x1x1152x1
+--reset --dt=f32:bf16:f16 --stag=abx --wtag=abx --dtag=abx --attr-post-ops=max:s8:per_oc 900x456:456x260
+--reset --dt=u8:u8:s8 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x128+wei:per_oc:f32+dst:host_scalar:2:f32 --attr-zero-points=src:per_tensor:u8:1x64+wei:per_oc:u8+dst:common:2:s32 --attr-precomputed-reductions=src:per_tensor:s32:1x64 116x2048:2048x1240
+--reset --dt=f32:f32:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:4:f32 --attr-post-ops=hardsigmoid --attr-fpmath=bf16 168x236:236x1680
+--reset --dt=s8:s4:f32 --stag=abx --wtag=acb --dtag=abx --attr-scales=src:per_tensor:f32:1x128+wei:per_tensor:f32:256x1 --attr-zero-points=wei:per_oc:s4 8x24x1536:8x1536x836
+--reset --dt=s8:s8:s32 --stag=abx --wtag=acb --dtag=abx --attr-scales=src:per_tensor:f32:1x32+wei:per_tensor:f16:256x1 --attr-zero-points=src:common:4:s8 3x260x768:1x768x608
+--reset --dt=s8:u8:f16 --stag=abx --dtag=abx --attr-scales=wei:per_tensor:bf16:64x1 --attr-zero-points=wei:per_tensor:u8:64x1 1823x576:576x1
+--reset --dt=f16:f32:f32 --stag=abx --wtag=ba --dtag=abx 1212x1248:1248x264
+--reset --dt=u8:s8:f32 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f16:1x64+wei:per_tensor:f32:256x1 --attr-zero-points=src:per_tensor:u8:1x64+wei:per_oc:s8 --attr-precomputed-reductions=src:per_tensor:s32:1x64 --attr-post-ops=round 508x512:512x1
+--reset --dt=bf16:f8_e4m3:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=wei:per_tensor:f32:32x1 1x256:256x1900
+--reset --dt=f32:f4_e2m1:f32 --stag=abx --dtag=abx --attr-scales=wei:per_tensor:f8_e4m3:16x1 986x1776:1776x2
+--reset --dt=f16:u4:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=wei:per_tensor:f32:32x1 --attr-zero-points=wei:per_tensor:u4:32x1 --attr-post-ops=clip_v2:-0.5:4.0 --attr-fpmath=strict:true 196x1856:1856x964
+--reset --dt=f16:bf16:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:2:bf16+wei:common:4:f32 6x1x256:1x256x191
+--reset --dt=f8_e4m3:f8_e4m3:bf16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:f16:64x1 1x448:448x996
+--reset --dt=f16:f16:f32 --stag=abx --dtag=abx --attr-scales=src:host_scalar:2:f32 --attr-post-ops=sqrt 3x1124x470:1x470x16
+--reset --dt=f4_e2m1:f4_e2m1:bf16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:e8m0:32x1 --attr-post-ops=sqrt 1x256:256x1
+--reset --dt=f32:s8:f32 --stag=abx --dtag=abx --attr-scales=wei:per_oc:f16 --attr-fpmath=strict:true 1x8x188x1204:5x1x1204x1
+--reset --dt=f4_e2m1:f4_e2m1:f8_e4m3 --stag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:f8_e4m3:16x1+dst:mx:e8m0:1x32 --attr-post-ops=mul:f16:common 1857x2208:2208x32
+--reset --dt=s8:s4:f32 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x64+wei:per_tensor:f16:256x1 --attr-zero-points=src:per_tensor:s8:1x32+wei:per_tensor:s4:256x1 --attr-precomputed-reductions=src:per_tensor:s32:1x32 1136x1024:1024x480
+--reset --dt=f4_e2m1:f4_e2m1:f8_e5m2 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f8_e4m3:1x16+wei:per_tensor:f8_e4m3:16x1+dst:mx:e8m0:1x32 1x3552:3552x544
+--reset --dt=f32:f16:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=wei:common:2:f32 --attr-post-ops=gelu_erf 1180x1728:1728x35
+--reset --dt=f4_e2m1:f4_e2m1:f8_e5m2 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:e8m0:32x1+dst:mx:e8m0:1x32 --attr-post-ops=gelu_erf 3x1x3x1x544:1x2x3x544x1632
+--reset --dt=bf16:f32:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:4:f32 --attr-post-ops=add:f16:per_oc 868x32:32x16
+--reset --dt=f32:s4:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:4:f32+wei:per_tensor:f32:256x1 --attr-zero-points=wei:per_tensor:s4:256x1 --attr-post-ops=logistic --attr-fpmath=strict:true 1448x512:512x108
+--reset --dt=u8:u8:s32 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:bf16:1x128+wei:per_oc:f32 --attr-zero-points=src:host_scalar:2:u8+wei:per_oc:u8 --attr-post-ops=min:f16:per_oc 520x512:512x1
+--reset --dt=bf16:f8_e4m3:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:2:f16+wei:per_tensor:f16:128x1 --attr-post-ops=tanh --bia-dt=f32 --bia_mask=1 892x256:256x1712
+--reset --dt=f8_e5m2:f8_e5m2:f16 --stag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:bf16:64x1 --attr-post-ops=mish 4x2x1988x192:1x2x192x1
+--reset --dt=f32:f16:f16 --stag=abx --wtag=abx --dtag=abx --attr-post-ops=min:f16:common 1x642x550:4x550x212
+--reset --dt=u8:s8:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:f32:1x128+wei:host_scalar:4:f32 --attr-zero-points=wei:host_scalar:4:s8 --bia-dt=f32 --bia_mask=1 1884x512:512x484
+--reset --dt=f8_e5m2:f8_e5m2:bf16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:e8m0:32x1 --attr-post-ops=abs 1x832:832x1
+--reset --dt=u8:s8:s8 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f16:1x64+wei:per_tensor:bf16:32x1+dst:host_scalar:2:f32 --attr-zero-points=src:common:2:u8+wei:per_tensor:s8:32x1+dst:common:2:s32 --attr-post-ops=sum:0.5:-3 708x192:192x1
+--reset --dt=s8:u8:f32 --stag=abx --dtag=abx --attr-scales=wei:per_tensor:bf16:128x1 --attr-zero-points=wei:host_scalar:4:u8 --attr-post-ops=max:f16:per_oc --bia-dt=f32 --bia_mask=2 504x2048:2048x1
+--reset --dt=bf16:f4_e2m1:bf16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:host_scalar:4:f32+wei:per_tensor:e8m0:32x1 --attr-post-ops=linear:4.0:4.0 1x128:128x1956
+--reset --dt=u8:u4:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f16:1x256+wei:per_oc:f16 --attr-zero-points=src:per_tensor:u8:1x128+wei:per_oc:u4 --attr-precomputed-reductions=src:per_tensor:s32:1x128 1300x1792:1792x152
+--reset --dt=s8:s4:bf16 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x256+wei:per_tensor:bf16:128x1 --attr-zero-points=src:host_scalar:2:s8+wei:per_oc:s4 --attr-post-ops=add:s8:common 11x1280:1280x72
+--reset --dt=f32:f32:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:2:f32 1x2028:2028x1664
+--reset --dt=u8:s8:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x64+wei:common:4:f32 --attr-zero-points=wei:common:4:s8 --attr-post-ops=relu:-0.5 1x1x1364x1984:5x8x1984x1
+--reset --dt=bf16:f32:f16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:host_scalar:2:f16+wei:common:2:f32 1x3520:3520x1596
+--reset --dt=f4_e2m1:f4_e2m1:f4_e2m1 --stag=ba --dtag=abx --attr-scales=src:per_tensor:f8_e4m3:1x16+wei:per_tensor:bf16:256x1+dst:dynamic_fp:f8_e4m3:1x16 --attr-post-ops=abs --bia-dt=f32 --bia_mask=0 796x1024:1024x16
+--reset --dt=u8:u8:f32 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f16:1x128+wei:per_tensor:f16:256x1 --attr-zero-points=wei:common:4:s32 --attr-post-ops=max:u8:per_oc 2x1312x2560:1x2560x1
+--reset --dt=u8:s8:bf16 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f16:1x128+wei:per_tensor:f16:32x1 --attr-zero-points=src:per_tensor:u8:1x128 --attr-precomputed-reductions=src:per_tensor:s32:1x128 1x3072:3072x568
+--reset --dt=bf16:bf16:f32 --stag=abx --dtag=abx --attr-scales=src:host_scalar:4:f32+wei:host_scalar:2:bf16 --attr-post-ops=gelu_tanh 1692x2848:2848x1
+--reset --dt=s8:s4:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:bf16:1x64+wei:per_oc:f32 --attr-zero-points=src:common:4:s8+wei:per_oc:s4 --attr-post-ops=sqrt --bia-dt=f32 --bia_mask=0 1024x512:512x942
+--reset --dt=s8:s8:bf16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:f32:1x64+wei:per_oc:f32 --attr-zero-points=src:per_tensor:s8:1x64+wei:per_oc:s8 --attr-precomputed-reductions=src:per_tensor:s32:1x64 --bia-dt=bf16 --bia_mask=2 1368x512:512x324
+--reset --dt=f32:u4:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=wei:per_tensor:f32:32x1 --attr-zero-points=wei:per_tensor:u4:32x1 --attr-fpmath=strict:true 1936x384:384x2
+--reset --dt=s8:u8:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:common:4:f32+wei:host_scalar:2:f32 --attr-zero-points=src:host_scalar:2:s8 2000x860:860x56
+--reset --dt=f8_e4m3:f8_e4m3:bf16 --stag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_oc:f16 --attr-post-ops=prelu 1748x864:864x100
+--reset --dt=f4_e2m1:f4_e2m1:f8_e4m3 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:f8_e4m3:16x1+dst:mx:e8m0:1x32 1x2048:2048x1888
+--reset --dt=s8:u4:f32 --stag=abx --dtag=ba --attr-scales=src:per_tensor:f16:1x256+wei:per_oc:f32 --attr-zero-points=src:per_tensor:s8:1x32+wei:per_oc:u4 --attr-precomputed-reductions=src:per_tensor:s32:1x32 --bia-dt=f32 --bia_mask=0 1x3584:3584x866
+--reset --dt=bf16:f4_e2m1:bf16 --stag=abx --wtag=acb --dtag=abx --attr-scales=src:common:2:bf16+wei:per_tensor:f8_e4m3:16x1 --attr-post-ops=square 7x871x1200:1x1200x64
+--reset --dt=s8:u8:f32 --stag=abx --wtag=acb --dtag=abx --attr-scales=src:host_scalar:4:f32+wei:per_oc:f32 --attr-zero-points=src:host_scalar:4:s8+wei:host_scalar:4:u8 8x1062x2080:8x2080x1
+--reset --dt=s8:s4:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=wei:per_tensor:bf16:256x1 --attr-zero-points=wei:per_tensor:s4:256x1 --attr-post-ops=mish 324x512:512x476
+--reset --dt=f32:u4:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:host_scalar:4:f32+wei:per_tensor:f16:32x1 --attr-zero-points=wei:per_tensor:u4:32x1 --attr-post-ops=swish:-1.0 --attr-fpmath=strict:true 412x2880:2880x40
+--reset --dt=f16:f8_e5m2:f16 --stag=abx --wtag=acb --dtag=abx --attr-scales=wei:per_tensor:bf16:128x1 1x340x1536:1x1536x312
+--reset --dt=bf16:s4:bf16 --stag=abx --dtag=abx --attr-scales=wei:per_oc:f32 --attr-zero-points=wei:per_oc:s4 --bia-dt=bf16 --bia_mask=2 --attr-fpmath=strict:true 1x2400:2400x1804
+--reset --dt=f32:f16:f32 --stag=abx --dtag=abx --attr-scales=src:host_scalar:2:f32 7x1799x4064:1x4064x1
+--reset --dt=f32:f16:f32 --stag=abx --dtag=abx --attr-scales=wei:host_scalar:4:bf16 2048x96:96x680
+--reset --dt=bf16:f8_e5m2:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:4:f32+wei:per_tensor:bf16:32x1 5x1464x768:1x768x1
+--reset --dt=f32:u4:f32 --stag=abx --dtag=abx --attr-scales=src:host_scalar:4:bf16+wei:per_tensor:f32:128x1 --attr-zero-points=wei:per_tensor:u4:256x1 --attr-post-ops=min:bf16:per_oc --attr-fpmath=strict:true 750x512:512x824
+--reset --dt=s8:u4:f16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:per_tensor:f32:1x256+wei:per_tensor:bf16:64x1 --attr-zero-points=src:per_tensor:s8:1x256+wei:per_tensor:u4:64x1 --attr-precomputed-reductions=src:per_tensor:s32:1x256 --attr-post-ops=add:s8:common 1x512:512x1216
+--reset --dt=f32:f4_e2m1:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:2:f32+wei:per_tensor:bf16:32x1 1x128:128x2
+--reset --dt=f32:f32:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:2:f32+wei:host_scalar:4:bf16 --attr-post-ops=ge:bf16:common --bia-dt=f32 --bia_mask=3 1980x228:228x1
+--reset --dt=f8_e5m2:f8_e5m2:f4_e2m1 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:e8m0:32x32+dst:dynamic_fp:f8_e4m3:1x16 --attr-post-ops=sum:0.25 --bia-dt=f4_e2m1 --bia_mask=0 1x1536:1536x1472
+--reset --dt=f32:f32:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:2:f32+wei:common:2:bf16 204x620:620x1
+--reset --dt=f32:f4_e2m1:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=wei:per_tensor:f32:128x1 3x6x1x1x384:3x6x6x384x24
+--reset --dt=s8:u8:u8 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x128+wei:per_tensor:bf16:64x1+dst:host_scalar:2:f32 --attr-zero-points=src:per_tensor:s8:1x128+wei:per_oc:u8+dst:host_scalar:4:s32 --attr-precomputed-reductions=src:per_tensor:s32:1x128 --attr-post-ops=hardsigmoid 1040x2560:2560x1
+--reset --dt=f8_e5m2:f8_e5m2:f32 --stag=abdc --wtag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_oc:f16 6x1x1x2272:6x6x2272x1608
+--reset --dt=bf16:u4:bf16 --stag=abx --wtag=ba --dtag=abx --attr-scales=src:host_scalar:2:f16+wei:per_oc:f16 --attr-zero-points=wei:per_oc:u4 --attr-fpmath=strict:true 132x448:448x480
+--reset --dt=u8:u8:s32 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x128+wei:per_tensor:f32:32x1 --attr-zero-points=src:host_scalar:4:s32+wei:host_scalar:4:u8 --attr-post-ops=exp 80x384:384x392
+--reset --dt=bf16:f4_e2m1:bf16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:2:bf16+wei:per_tensor:e8m0:32x1 --attr-post-ops=add:f32:common 152x1632:1632x672
+--reset --dt=f32:f32:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:4:f16+wei:host_scalar:4:f32 --attr-post-ops=sub:s32:common 1x1x1x1824:2x5x1824x1072
+--reset --dt=s8:s8:f32 --stag=abx --dtag=abx --attr-scales=src:per_tensor:f32:1x32+wei:per_oc:f32 --attr-zero-points=wei:host_scalar:4:s8 --attr-post-ops=sqrt 6x1x901x992:1x1x992x1
+--reset --dt=f4_e2m1:f4_e2m1:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:per_tensor:f8_e4m3:1x16+wei:per_tensor:f8_e4m3:16x1 1x541x512:1x512x1352
+--reset --dt=s8:u8:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:4:f32+wei:per_oc:bf16 --attr-zero-points=wei:per_oc:u8 5x1x3808:1x3808x52
+--reset --dt=s8:u8:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:host_scalar:2:bf16+wei:per_tensor:f32:32x1 --attr-zero-points=src:common:2:s8 6x6x1x384:6x1x384x1428
+--reset --dt=s8:s8:f16 --stag=abx --wtag=acb --dtag=abx --attr-scales=src:per_tensor:f32:1x256+wei:per_oc:bf16 --attr-zero-points=wei:per_oc:s8 1x1x256:3x256x347
+--reset --dt=bf16:f32:f16 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:4:f32+wei:common:4:f32 --attr-post-ops=mish --bia-dt=f16 --bia_mask=6 3x1500x2080:1x2080x1
+--reset --dt=f16:f16:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:2:f32 1x2048:2048x1
+--reset --dt=f32:f32:bf16 --stag=ba --wtag=abx --dtag=abx --attr-post-ops=hardswish 568x3040:3040x252
+--reset --dt=f32:f32:f32 --stag=abx --wtag=abx --dtag=abx --attr-scales=src:common:2:f32+wei:host_scalar:2:f16 --attr-post-ops=max:f32:per_oc 196x2028:2028x856
+--reset --dt=f8_e5m2:f8_e5m2:f16 --stag=abx --dtag=abx --attr-scales=src:per_tensor:e8m0:1x32+wei:per_tensor:f32:256x1 2024x256:256x1507
+--reset --dt=f32:u8:f32 --stag=abx --wtag=ba --dtag=abx --attr-scales=wei:per_tensor:f16:128x1 --attr-zero-points=wei:per_oc:u8 --attr-post-ops=round --bia-dt=f32 --bia_mask=0 --attr-fpmath=strict:true 1x2304:2304x1500
