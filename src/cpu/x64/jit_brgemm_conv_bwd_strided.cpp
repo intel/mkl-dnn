@@ -293,7 +293,8 @@ status_t brgemm_convolution_bwd_strided_t<isa>::pd_t::init(
     brgs_sz_ = static_cast<int>(brgs_->refs_size());
 
     auto scratchpad = scratchpad_registry().registrar();
-    brgemm_convolution_bwd_utils::init_scratchpad(scratchpad, jcp_);
+    brgemm_convolution_bwd_utils::init_scratchpad(
+            scratchpad, jcp_, diff_dst_md_, weights_md_);
 
     return status::success;
 }
@@ -330,7 +331,8 @@ status_t brgemm_convolution_bwd_strided_t<isa>::pd_t::add_brg_descriptor(
             = jcp_.req_cal_comp_pad && jcp_.exec_type == exec_trans;
     const auto strides_ptr
             = (jcp_.brg_type == brgemm_strd) ? &brg_strides : nullptr;
-    brg.fp8_with_f16_vnni_block = jcp_.is_fp8 && jcp_.vnni_block == 2;
+    brg.fp8_with_f16_vnni_block
+            = jcp_.is_fp8 && !jcp_.req_precvt_fp8 && jcp_.vnni_block == 2;
     CHECK(brgemm_desc_init(&brg, isa, jcp_.brg_type, jcp_.src_dt, jcp_.wei_dt,
             false, false, brgemm_row_major, alpha, vbeta, jcp_.LDA, jcp_.LDB,
             jcp_.LDC, vM, vN, vK, strides_ptr));
@@ -632,6 +634,20 @@ status_t brgemm_convolution_bwd_strided_t<isa>::init(engine_t *engine) {
     const auto _pd = pd();
     const auto &jcp = _pd->jcp_;
 
+    if (jcp.req_precvt_fp8) {
+        jit_brgemm_conv_fp8_cvt_kernel_t::cfg_t cfg;
+        cfg.isa = isa;
+        cfg.src_dt = _pd->diff_dst_md()->data_type;
+        cfg.dst_dt = f16;
+        CHECK(safe_ptr_assign(
+                fp8_src_cvt_, new jit_brgemm_conv_fp8_cvt_kernel_t(cfg)));
+        CHECK(fp8_src_cvt_->create_kernel());
+        cfg.src_dt = _pd->weights_md()->data_type;
+        CHECK(safe_ptr_assign(
+                fp8_weights_cvt_, new jit_brgemm_conv_fp8_cvt_kernel_t(cfg)));
+        CHECK(fp8_weights_cvt_->create_kernel());
+    }
+
     bia_dsz = jcp.bia_dsz;
     acc_dsz = jcp.acc_dsz;
     src_dsz = jcp.src_dsz;
@@ -790,18 +806,49 @@ status_t brgemm_convolution_bwd_strided_t<isa>::execute(
 
     const auto &scratchpad = ctx.get_scratchpad_grantor();
 
-    brgemm_bwd_exec_ctx_t brgemm_ctx(ctx, _pd);
-
     const memory_desc_wrapper diff_src_d(pd()->diff_src_md(0));
 
-    const char *const __restrict diff_dst = brgemm_ctx.diff_dst;
-    const char *const __restrict wei = brgemm_ctx.weights;
+    const char *const __restrict diff_dst
+            = CTX_IN_MEM(const char *, DNNL_ARG_DIFF_DST);
+    const char *const __restrict wei
+            = CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS);
+    const char *converted_diff_dst = nullptr;
+    const char *converted_weights = nullptr;
+    if (jcp.req_precvt_fp8) {
+        auto *src_f16 = scratchpad.template get<char>(key_brgemm_conv_fp8_src);
+        auto *wei_f16 = scratchpad.template get<char>(key_brgemm_conv_fp8_wei);
+        const auto src_nelems
+                = memory_desc_wrapper(_pd->diff_dst_md()).nelems(true);
+        const auto wei_nelems
+                = memory_desc_wrapper(_pd->weights_md()).nelems(true);
+        parallel(jcp.nthr, [&](int ithr, int nthr) {
+            dim_t start = 0, end = 0;
+            balance211(src_nelems, nthr, ithr, start, end);
+            jit_brgemm_conv_fp8_cvt_kernel_t::ctx_t p;
+            p.src = diff_dst + start;
+            p.dst = src_f16 + start * jcp.src_dsz;
+            p.nelems = end - start;
+            (*fp8_src_cvt_)(&p);
+
+            balance211(wei_nelems, nthr, ithr, start, end);
+            p.src = wei + start;
+            p.dst = wei_f16 + start * jcp.wei_dsz;
+            p.nelems = end - start;
+            (*fp8_weights_cvt_)(&p);
+        });
+        converted_diff_dst = src_f16;
+        converted_weights = wei_f16;
+    }
+
+    brgemm_bwd_exec_ctx_t brgemm_ctx(
+            ctx, _pd, converted_diff_dst, converted_weights);
+
     char *const __restrict diff_src = brgemm_ctx.diff_src;
     const memory_desc_wrapper weights_d(pd()->weights_md(0));
 
     const auto extra_data_offset
             = weights_d.size() - weights_d.additional_buffer_size();
-    auto w = const_cast<char *>(brgemm_ctx.weights);
+    auto w = const_cast<char *>(wei);
     const auto s8s8_comp_offset = jcp.req_cal_comp_pad
             ? jcp.ngroups * jcp.nb_ic * jcp.kd * jcp.kh * jcp.kw * jcp.ic_block
             : jcp.ngroups * jcp.nb_ic * jcp.ic_block;
@@ -966,7 +1013,7 @@ status_t brgemm_convolution_bwd_strided_t<isa>::execute(
                             ker_base(btc);
                         }
                     } else if (jcp.exec_type == exec_trans) {
-                        maybe_trans_inp(ithr, diff_dst, inp_buffer,
+                        maybe_trans_inp(ithr, brgemm_ctx.diff_dst, inp_buffer,
                                 inp_buffer_mask, g, n, occ, idb, ihb, iwb,
                                 last_g, last_n, last_occ, last_idb, last_ihb,
                                 last_iwb);

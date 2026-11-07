@@ -32,6 +32,7 @@
 #include "cpu/x64/jit_brgemm_conv_bwd_copy_kernel.hpp"
 #include "cpu/x64/jit_brgemm_conv_bwd_trans_kernel.hpp"
 #include "cpu/x64/jit_brgemm_conv_comp_pad_kernel.hpp"
+#include "cpu/x64/jit_brgemm_conv_fp8_cvt_kernel.hpp"
 #include "cpu/x64/jit_brgemm_post_ops.hpp"
 
 namespace dnnl {
@@ -117,9 +118,14 @@ protected:
 private:
     //  brgemm convolution execution context
     struct brgemm_bwd_exec_ctx_t {
-        brgemm_bwd_exec_ctx_t(const exec_ctx_t &ctx, const pd_t *pd)
-            : diff_dst(CTX_IN_MEM(const char *, DNNL_ARG_DIFF_DST))
-            , weights(CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS))
+        brgemm_bwd_exec_ctx_t(const exec_ctx_t &ctx, const pd_t *pd,
+                const char *diff_dst_override, const char *weights_override)
+            : diff_dst(diff_dst_override
+                              ? diff_dst_override
+                              : CTX_IN_MEM(const char *, DNNL_ARG_DIFF_DST))
+            , weights(weights_override
+                              ? weights_override
+                              : CTX_IN_MEM(const char *, DNNL_ARG_WEIGHTS))
             , bias(CTX_IN_MEM(const char *, DNNL_ARG_BIAS))
             , diff_src(CTX_OUT_MEM(char *, DNNL_ARG_DIFF_SRC))
             , post_ops_binary_rhs_arg_vec(binary_injector::prepare_binary_args(
@@ -249,6 +255,8 @@ private:
     std::unique_ptr<jit_avx512_core_brgemm_conv_bwd_copy_kernel::
                     jit_avx512_core_brgemm_conv_bwd_copy_kernel_t<Vmm>>
             copy_to_output_buffer_;
+    std::unique_ptr<jit_brgemm_conv_fp8_cvt_kernel_t> fp8_src_cvt_;
+    std::unique_ptr<jit_brgemm_conv_fp8_cvt_kernel_t> fp8_weights_cvt_;
     std::unique_ptr<jit_generator_t> comp_vpad_pbuffer_;
 
     size_t acc_dsz, bia_dsz, src_dsz, wei_dsz, dst_dsz;
