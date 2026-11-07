@@ -1,6 +1,6 @@
 /*******************************************************************************
 * Copyright 2026 Intel Corporation
-* Copyright 2025 FUJITSU LIMITED
+* Copyright 2025-2026 FUJITSU LIMITED
 * Copyright 2025-2026 Arm Ltd. and affiliates
 * Copyright 2026 Ampere Computing LLC
 *
@@ -432,8 +432,9 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
     PReg prd_ld = p1;
     PReg prd_st = p2;
     PReg prd_b = p3;
-    PReg prd_8 = p4;
-    PReg prd_zp_b_tl = p5;
+    PReg prd_mov_d2 = p4;
+    PReg prd_mov_d1 = p5;
+    PReg prd_mov_d3 = P_TMP;
     XReg reg_zp_val_c = x2;
 
     XReg reg_zp_val_a = reg_src_scales;
@@ -453,6 +454,30 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
 
     void operator()(const call_params_t *p) {
         return jit_generator_t::operator()(p);
+    }
+
+    void mmla(ZRegS dst, ZRegB src1, ZRegB src2) {
+        if (brg_.is_s8) {
+            smmla(dst, src1, src2);
+        } else {
+            ummla(dst, src1, src2);
+        }
+    }
+
+    void addv(DReg dst, PReg p, ZRegB src) {
+        if (brg_.is_s8) {
+            saddv(dst, p, src);
+        } else {
+            uaddv(dst, p, src);
+        }
+    }
+
+    void cvtf(ZRegS dst, PReg p, ZRegD src) {
+        if (brg_.is_s8) {
+            scvtf(dst, p, src);
+        } else {
+            ucvtf(dst, p, src);
+        }
     }
 
     ZReg loadb(int ld) { return ZReg(ld + 1); }
@@ -739,6 +764,9 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
     void microkernel(int rdb, int bdb, int ldb, int tail) {
         int a_off = 0, rd, ld, bd;
         mov(reg_tmp, reg_aux_b);
+        int ktail = (tail == 1 && brg_.K % brg_.k_blk > 0) ? brg_.K % brg_.k_blk
+                                                           : brg_.k_blk;
+        if (brg_.is_a_plain) set_preg(P_TMP.b, ktail, X_TMP_0);
         for (rd = 0; rd < rdb; rd++) {
             int ao = 0;
 
@@ -763,7 +791,9 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
                 }
             }
             for (bd = 0; bd < bdb;) {
-                const int a_inc = brg_.m_blk * 2;
+                const bool load_second_row
+                        = !brg_.is_m_tail || (2 * bd + 1) < brg_.m_tail;
+                int a_inc = (brg_.is_a_plain) ? 2 * brg_.K : brg_.m_blk * 2;
                 const int32_t a_off_bytes = a_off + ao;
                 if (simd_bytes(isa) == 16 && bd + 1 < bdb) {
                     // Load two consecutive A blocks (each 16 bytes for SVE128)
@@ -797,7 +827,23 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
                     } else {
                         add_imm(X_DEFAULT_ADDR, reg_aux_a, a_off_bytes,
                                 X_TMP_0);
-                        ld1rqb(z0.b, P_ALL_ONE, ptr(X_DEFAULT_ADDR));
+                        if (brg_.is_a_plain) {
+                            add_imm(reg_tmp_1, reg_aux_a, a_off_bytes + brg_.K,
+                                    X_TMP_0);
+                            if (brg_.is_m_tail) {
+                                if (load_second_row) {
+                                    ld1rqb(z0.b, P_TMP, ptr(X_DEFAULT_ADDR));
+                                    ld1rqb(z31.b, P_TMP, ptr(reg_tmp_1));
+                                    trn1(z0.d, z0.d, z31.d);
+                                } else
+                                    ld1rqb(z0.b, P_TMP, ptr(X_DEFAULT_ADDR));
+                            } else {
+                                ld1rqb(z0.b, P_TMP, ptr(X_DEFAULT_ADDR));
+                                ld1rqb(z31.b, P_TMP, ptr(reg_tmp_1));
+                                trn1(z0.d, z0.d, z31.d);
+                            }
+                        } else
+                            ld1rqb(z0.b, P_ALL_ONE, ptr(X_DEFAULT_ADDR));
                     }
                     ao += a_inc;
 
@@ -812,7 +858,7 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
                     bd += 1;
                 }
             }
-            a_off += brg_.m_blk * brg_.k_blk;
+            a_off += (brg_.is_a_plain) ? brg_.k_blk : brg_.m_blk * brg_.k_blk;
             add_imm(reg_tmp, reg_tmp, brg_.k_blk * brg_.n_blk * brg_.ld_block,
                     X_TMP_0);
         }
@@ -822,27 +868,27 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
         zero_regs();
         mov(reg_aux_a, reg_aux_a1);
         mov(reg_aux_b, reg_b);
+        size_t a_stride
+                = (brg_.is_a_plain) ? brg_.k_blk : brg_.m_blk * brg_.k_blk;
         if (k_full_blks > 0) {
             mov(reg_rd_loop, k_full_blks);
-
             asm_do_while(reg_rd_loop, [&]() {
-                microkernel(brg_.rd_block, bdb, ldb, tail);
-                add_imm(reg_aux_a, reg_aux_a,
-                        brg_.m_blk * brg_.k_blk * brg_.rd_block, X_TMP_0);
+                microkernel(brg_.rd_block, bdb, ldb, 0);
+                add_imm(reg_aux_a, reg_aux_a, a_stride * brg_.rd_block,
+                        X_TMP_0);
                 add_imm(reg_aux_b, reg_aux_b,
                         brg_.k_blk * brg_.n_blk * brg_.ld_block * brg_.rd_block,
                         X_TMP_0);
             });
         }
         if (k_tail_blk > 0) {
-            microkernel(k_tail_blk, bdb, ldb, tail);
-            add_imm(reg_aux_a, reg_aux_a, brg_.m_blk * brg_.k_blk * k_tail_blk,
-                    X_TMP_0);
+            microkernel(k_tail_blk, bdb, ldb, 0);
+            add_imm(reg_aux_a, reg_aux_a, a_stride * k_tail_blk, X_TMP_0);
             add_imm(reg_aux_b, reg_aux_b,
                     brg_.k_blk * brg_.n_blk * brg_.ld_block * k_tail_blk,
                     X_TMP_0);
         }
-        if (k_residual_blk > 0) { microkernel(1, bdb, ldb, tail); }
+        if (k_residual_blk > 0) { microkernel(1, bdb, ldb, 1); }
         store_regs(bdb, ldb, tail);
     }
 
@@ -851,6 +897,9 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
         const ZReg zp_b_sum1 = ZReg(4);
         const ZReg zp_b_sum2 = ZReg(5);
         const ZReg zp_b_sum3 = ZReg(6);
+
+        size_t a_stride
+                = (brg_.is_a_plain) ? brg_.k_blk : brg_.m_blk * brg_.k_blk;
 
         eor(zp_b_sum0.d, zp_b_sum0.d, zp_b_sum0.d);
         eor(zp_b_sum1.d, zp_b_sum1.d, zp_b_sum1.d);
@@ -867,23 +916,34 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
 
             asm_do_while(reg_rd_loop, [&]() {
                 zp_comp(brg_.rd_block, bdb, ldb, is_a, is_b);
-                add_imm(reg_aux_a, reg_aux_a,
-                        brg_.m_blk * brg_.k_blk * brg_.rd_block, X_TMP_0);
+                add_imm(reg_aux_a, reg_aux_a, a_stride * brg_.rd_block,
+                        X_TMP_0);
                 add_imm(reg_aux_b, reg_aux_b,
                         brg_.k_blk * brg_.n_blk * brg_.ld_block * brg_.rd_block,
                         X_TMP_0);
             });
         }
-        if (k_tail_blk > 0) {
-            zp_comp(k_tail_blk, bdb, ldb, is_a, is_b);
-            add_imm(reg_aux_a, reg_aux_a, brg_.m_blk * brg_.k_blk * k_tail_blk,
-                    X_TMP_0);
-            add_imm(reg_aux_b, reg_aux_b,
-                    brg_.k_blk * brg_.n_blk * brg_.ld_block * k_tail_blk,
-                    X_TMP_0);
+        if (!brg_.is_a_plain) {
+            if (k_tail_blk > 0) {
+                zp_comp(k_tail_blk, bdb, ldb, is_a, is_b);
+                add_imm(reg_aux_a, reg_aux_a,
+                        brg_.m_blk * brg_.k_blk * k_tail_blk, X_TMP_0);
+                add_imm(reg_aux_b, reg_aux_b,
+                        brg_.k_blk * brg_.n_blk * brg_.ld_block * k_tail_blk,
+                        X_TMP_0);
+            }
+            if (k_residual_blk > 0) { zp_comp(1, bdb, ldb, is_a, is_b); }
+        } else {
+            if (k_tail_blk > 0) {
+                zp_comp(k_tail_blk, bdb, ldb, is_a, 0);
+                add_imm(reg_aux_b, reg_aux_b,
+                        brg_.k_blk * brg_.n_blk * brg_.ld_block * k_tail_blk,
+                        X_TMP_0);
+            }
+            if (k_residual_blk > 0) { zp_comp(1, bdb, ldb, is_a, 0); }
+            if (k_tail_blk > 0 || k_residual_blk > 0)
+                zp_comp(1, bdb, ldb, 0, is_b);
         }
-        if (k_residual_blk > 0) { zp_comp(1, bdb, ldb, is_a, is_b); }
-
         if (brg_.zp_type_b != jit_int8_broadcast_t::none && is_b == 1) {
             if (simd_bytes(isa) == 16) {
                 uzp1(zp_b_sum0.d, zp_b_sum0.d, zp_b_sum1.d);
@@ -891,8 +951,10 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
                 scvtf(zp_b_sum0.s, P_ALL_ONE, zp_b_sum0.s);
                 scvtf(zp_b_sum2.s, P_ALL_ONE, zp_b_sum2.s);
             } else {
-                uzp1(zp_b_sum0.d, zp_b_sum0.d, zp_b_sum1.d);
-                scvtf(zp_b_sum0.s, P_ALL_ONE, zp_b_sum0.s);
+                if (!brg_.is_a_plain) {
+                    uzp1(zp_b_sum0.d, zp_b_sum0.d, zp_b_sum1.d);
+                    scvtf(zp_b_sum0.s, P_ALL_ONE, zp_b_sum0.s);
+                }
             }
             if (!brg_.is_zp_b_int8) {
                 ldr(W_TMP_0, ptr(reg_zp_val_b));
@@ -968,15 +1030,17 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
         mov(reg_aux_c, reg_aux_c1);
         mov(reg_zp_aux_b, reg_zp_b);
 
+        size_t a_stride = (brg_.is_a_plain)
+                ? brg_.K
+                : div_up(brg_.K, brg_.k_blk) * brg_.k_blk;
+
         asm_do_while(reg_ld_loop, [&]() {
             if (brg_.is_per_m_scales)
                 ldr_imm(reg_aux_src_scales, reg_param, GET_OFF(src_scales));
             ldr(WReg(reg_bd_loop.getIdx()), ptr(reg_na));
             asm_do_while(reg_bd_loop, [&]() {
                 loop_k(bdb, ldb, 0);
-
-                add_imm(reg_aux_a1, reg_aux_a1,
-                        div_up(brg_.K, brg_.k_blk) * brg_.k_blk * brg_.bd_block,
+                add_imm(reg_aux_a1, reg_aux_a1, a_stride * brg_.bd_block,
                         X_TMP_0);
                 add_imm(reg_aux_c, reg_aux_c,
                         brg_.N * brg_.bd_block * brg_.dst_dt_sz, X_TMP_0);
@@ -1007,18 +1071,31 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
     }
 
     void han_blk_zp() {
+
+        if (brg_.is_a_plain) {
+            // these predicates are set to move the rowwise sum stored in a DReg to a specific lane in ZReg
+            set_preg(prd_mov_d3.d, 1, X_TMP_0);
+            set_preg(prd_mov_d2.d, 2, X_TMP_0);
+            set_preg(prd_mov_d1.d, 3, X_TMP_0);
+            rev(prd_mov_d3.d, prd_mov_d3.d); // ZRegD[3]=DReg
+            rev(prd_mov_d2.d, prd_mov_d2.d); // ZRegD[2,3]=DReg
+            rev(prd_mov_d1.d, prd_mov_d1.d); // ZRegD[1,2,3]=DReg
+        }
+
         ldr_imm(reg_tmp, reg_param, GET_OFF(nb));
         ldr_imm(reg_na, reg_param, GET_OFF(na));
         mov(reg_aux_a1, reg_a);
         ldr(WReg(reg_bd_loop.getIdx()), ptr(reg_na));
         ldr(WReg(reg_ld_loop.getIdx()), ptr(reg_tmp));
 
+        size_t a_stride = (brg_.is_a_plain)
+                ? brg_.K
+                : div_up(brg_.K, brg_.k_blk) * brg_.k_blk;
+
         if (brg_.zp_type_b != jit_int8_broadcast_t::none) {
             asm_for(reg_bd_loop, reg_bd_loop, [&]() {
                 loop_k_zp(bdb, ldb, 0, 1);
-
-                add_imm(reg_aux_a1, reg_aux_a1,
-                        div_up(brg_.K, brg_.k_blk) * brg_.k_blk * brg_.bd_block,
+                add_imm(reg_aux_a1, reg_aux_a1, a_stride * brg_.bd_block,
                         X_TMP_0);
                 add_imm(reg_zp_b, reg_zp_b, brg_.m_blk * brg_.acc_dt_sz,
                         X_TMP_0);
@@ -1027,7 +1104,6 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
         if (brg_.zp_type_a != jit_int8_broadcast_t::none) {
             asm_for(reg_ld_loop, reg_ld_loop, [&]() {
                 loop_k_zp(bdb, ldb, 1, 0);
-
                 add_imm(reg_zp_a, reg_zp_a,
                         brg_.n_blk * brg_.ld_block * brg_.acc_dt_sz, X_TMP_0);
                 add_imm(reg_b, reg_b,
@@ -1047,44 +1123,59 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
         int rd, ld;
         if (brg_.zp_type_b != jit_int8_broadcast_t::none && is_b == 1) {
             mov(reg_tmp, reg_aux_a);
-            for (rd = 0; rd < rdb; rd++) {
-                if (simd_bytes(isa) == 16) {
-                    ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp));
-                    if (brg_.is_s8) {
-                        smmla(zp_b_sum0.s, z0.b, z1.b);
-                    } else {
-                        ummla(zp_b_sum0.s, z0.b, z1.b);
-                    }
-                    ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp, 1, MUL_VL));
-                    if (brg_.is_s8) {
-                        smmla(zp_b_sum1.s, z0.b, z1.b);
-                    } else {
-                        ummla(zp_b_sum1.s, z0.b, z1.b);
-                    }
-                    ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp, 2, MUL_VL));
-                    if (brg_.is_s8) {
-                        smmla(zp_b_sum2.s, z0.b, z1.b);
-                    } else {
-                        ummla(zp_b_sum2.s, z0.b, z1.b);
-                    }
-                    ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp, 3, MUL_VL));
-                    if (brg_.is_s8) {
-                        smmla(zp_b_sum3.s, z0.b, z1.b);
-                    } else {
-                        ummla(zp_b_sum3.s, z0.b, z1.b);
-                    }
-                } else {
-                    ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp));
-                    ld1b(z2.b, P_ALL_ONE / T_z, ptr(reg_tmp, 1, MUL_VL));
-                    if (brg_.is_s8) {
-                        smmla(zp_b_sum0.s, z0.b, z1.b);
-                        smmla(zp_b_sum1.s, z0.b, z2.b);
-                    } else {
-                        ummla(zp_b_sum0.s, z0.b, z1.b);
-                        ummla(zp_b_sum1.s, z0.b, z2.b);
-                    }
+
+            if (brg_.is_a_plain) {
+                mov(X_DEFAULT_ADDR, reg_tmp);
+                int ktail = (brg_.rd_block * brg_.k_blk);
+                if (rdb < brg_.rd_block) {
+                    ktail = brg_.K % (brg_.rd_block * brg_.k_blk);
                 }
-                add_imm(reg_tmp, reg_tmp, brg_.k_blk * brg_.m_blk, X_TMP_0);
+                set_preg(prd_st.b, ktail, X_TMP_0);
+
+                int rows = (brg_.is_m_tail) ? brg_.m_tail : brg_.bd_block;
+                for (int a = 0; a < rows; a++) {
+                    ld1b(ZRegB(a + 4), prd_st, ptr(X_DEFAULT_ADDR));
+                    add_imm(X_DEFAULT_ADDR, reg_tmp, (a + 1) * brg_.K, X_TMP_0);
+                }
+                for (int a = rows; a < brg_.m_blk; a++)
+                    mov(ZRegD(a + 4), 0);
+
+                for (int a = 0; a < rows; a++) {
+                    addv(DReg(a + 4), P_ALL_ONE, ZRegB(a + 4));
+                }
+
+                mov(z4.d, prd_mov_d1, DReg(5));
+                mov(z4.d, prd_mov_d2, DReg(6));
+                mov(z4.d, prd_mov_d3, DReg(7));
+                cvtf(z4.s, P_ALL_ONE, z4.d);
+
+                mov(z8.d, prd_mov_d1, DReg(9));
+                mov(z8.d, prd_mov_d2, DReg(10));
+                mov(z8.d, prd_mov_d3, DReg(11));
+                cvtf(z8.s, P_ALL_ONE, z8.d);
+
+                uzp1(z4.s, z4.s, z8.s);
+                fadd(z3.s, z3.s, z4.s);
+            } else {
+
+                for (rd = 0; rd < rdb; rd++) {
+                    if (simd_bytes(isa) == 16) {
+                        ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp));
+                        mmla(zp_b_sum0.s, z0.b, z1.b);
+                        ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp, 1, MUL_VL));
+                        mmla(zp_b_sum1.s, z0.b, z1.b);
+                        ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp, 2, MUL_VL));
+                        mmla(zp_b_sum2.s, z0.b, z1.b);
+                        ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp, 3, MUL_VL));
+                        mmla(zp_b_sum3.s, z0.b, z1.b);
+                    } else {
+                        ld1b(z1.b, P_ALL_ONE / T_z, ptr(reg_tmp));
+                        ld1b(z2.b, P_ALL_ONE / T_z, ptr(reg_tmp, 1, MUL_VL));
+                        mmla(zp_b_sum0.s, z0.b, z1.b);
+                        mmla(zp_b_sum1.s, z0.b, z2.b);
+                    }
+                    add_imm(reg_tmp, reg_tmp, brg_.k_blk * brg_.m_blk, X_TMP_0);
+                }
             }
         }
         if ((brg_.zp_type_a != jit_int8_broadcast_t::none) && is_a == 1) {
@@ -1124,11 +1215,6 @@ struct jit_int8_matmul_kernel_t : public jit_generator_t {
                                : brg_.ld_block;
         bdb = (brg_.is_m_tail) ? div_up(brg_.m_tail, 2) : brg_.bd_block / 2;
         rdb = (brg_.is_k_tail) ? div_up(brg_.k_tail, brg_.k_blk) : 4;
-
-        const int pred_zp_b_tl
-                = (n_cols % sv_len == 0) ? sv_len : n_cols % sv_len;
-        set_preg(prd_8.b, sv_len, X_TMP_0);
-        set_preg(prd_zp_b_tl.b, pred_zp_b_tl, X_TMP_0);
 
         if (brg_.is_n_tail) {
             pred_b = (brg_.n_tail % sv_len == 0) ? sv_len
@@ -1370,161 +1456,373 @@ status_t jit_int8_matmul_t<isa>::pd_t::init(const engine_t *engine) {
         brg_int8_conf.ld_block = 4;
     else
         brg_int8_conf.ld_block = 6;
-    const int micro_n = brg_int8_conf.n_blk * brg_int8_conf.ld_block;
-    const bool tunable_weights_layout = dims == 2
-            && (weights_d.format_any()
-                    || weights_d.matches_tag(format_tag::BA12b8a));
-    const bool no_zero_points = utils::everyone_is(jit_int8_broadcast_t::none,
-            brg_int8_conf.zp_type_a, brg_int8_conf.zp_type_b,
-            brg_int8_conf.zp_type_c);
 
-    // Empirical boundaries from SVE128
-    constexpr int min_tuning_threads = 32;
-    constexpr int high_thread_count = 96;
-    constexpr dim_t min_tuning_k = 128;
-    constexpr dim_t min_float_tuning_channel = 2048;
-    constexpr dim_t min_cache_partition_channel = 1024;
-    constexpr dim_t min_narrow_f32_tuning_channel = 1280;
-    constexpr dim_t f32_long_reduction_model_min_m = 2048;
-    constexpr dim_t f32_wide_n_candidate_min_m = 2048;
-    constexpr dim_t high_thread_wide_n_min_m = 128;
-    constexpr dim_t low_thread_wide_n_min_m = 24;
-    constexpr dim_t small_m_near_square_max = 64;
-    constexpr dim_t near_square_n_slack_divisor = 15;
-    constexpr dim_t medium_m_min = 128;
-    constexpr dim_t large_m_min = 4096;
-    constexpr dim_t long_reduction_k = 8192;
-    constexpr dim_t wide_n_to_k_ratio = 4;
-    constexpr dim_t reduction_k_to_n_ratio = 2;
-    constexpr dim_t large_reduction_k_to_n_ratio = 3;
-    const dim_t m = brg_int8_conf.M;
-    const dim_t n = brg_int8_conf.N;
-    const dim_t k = brg_int8_conf.K;
-    const dim_t padded_k = rnd_up(k, static_cast<dim_t>(brg_int8_conf.k_blk));
-    const double l1_cache_size = platform::get_per_core_cache_size(1);
-    const double l2_cache_size = platform::get_per_core_cache_size(2);
-    const double max_a_tile_bytes
-            = static_cast<double>(
-                      nstl::min(m, static_cast<dim_t>(max_tuned_m_block)))
-            * padded_k;
-    const dim_t wide_n_min_m = num_threads >= high_thread_count
-            ? high_thread_wide_n_min_m
-            : low_thread_wide_n_min_m;
-    const bool wide_n = m >= wide_n_min_m && n >= wide_n_to_k_ratio * k;
-    const bool medium_m_reduction = m >= medium_m_min && m < large_m_min
-            && k >= reduction_k_to_n_ratio * n;
-    const bool large_prefill = m >= large_m_min && k < long_reduction_k
-            && (num_threads < high_thread_count || n <= k
-                    || n >= wide_n_to_k_ratio * k);
-    const dim_t min_channel = nstl::min(k, n);
-    const bool fp32_tune_threshold = min_channel >= min_float_tuning_channel;
-    const bool fp32_tune_shape = fp32_tune_threshold
-            && (wide_n || medium_m_reduction || large_prefill);
-    const bool small_gemv = m == 1 && k < long_reduction_k;
+    auto get_optimal_params_sve256 = [&]() -> void {
+        int M = brg_int8_conf.M, N = brg_int8_conf.N, K = brg_int8_conf.K,
+            B = brg_int8_conf.batch, nthr = num_threads;
 
-    const bool large_m_cache_pressure = m >= large_m_min
-            && k >= large_reduction_k_to_n_ratio * n
-            && max_a_tile_bytes > l2_stream_fraction * l2_cache_size;
+        bool is_thr_div = true;
 
-    bool tune_dst = false;
-    bool use_cache_partition = false;
-    bool use_micro_m_block_limit = false;
-    bool use_long_reduction_model = false;
-    bool allow_wide_n_candidates = false;
-    jit_int8_matmul_tile_hint_t cache_partition_hint;
-    switch (dst_type) {
-        case f32: {
-            const dim_t max_channel = nstl::max(k, n);
-            const bool cache_partition_shape = large_prefill
-                    && min_channel >= min_cache_partition_channel
-                    && min_channel < min_narrow_f32_tuning_channel
-                    && max_channel <= wide_n_to_k_ratio * min_channel
-                    && l1_cache_size > 0. && l2_cache_size > 0.
-                    && static_cast<double>(brg_int8_conf.m_blk) * padded_k
-                            <= cache_partition_a_l1_fraction * l1_cache_size
-                    && static_cast<double>(n) * padded_k
-                            >= cache_partition_min_b_l2_fraction
-                                    * l2_cache_size;
-            if (cache_partition_shape)
-                cache_partition_hint = get_cache_partitioned_tile_hint(
-                        brg_int8_conf, micro_n, l1_cache_size, l2_cache_size);
-            use_cache_partition = cache_partition_hint.n_block_factor > 0
-                    && div_up(m,
-                               static_cast<dim_t>(
-                                       cache_partition_hint.m_block_sz))
-                            >= num_threads;
+        int max_work, min_work;
 
-            const bool tune_narrow_large_prefill = large_prefill
-                    && min_channel >= min_narrow_f32_tuning_channel
-                    && min_channel < min_float_tuning_channel;
-            const bool small_m_near_square = m >= 16
-                    && m <= small_m_near_square_max && n >= k
-                    && n - k <= k / near_square_n_slack_divisor;
-            const bool tune_small_m_near_square
-                    = fp32_tune_threshold && small_m_near_square;
-            const bool tune_cache_pressure
-                    = fp32_tune_threshold && large_m_cache_pressure;
-            const bool k_dominant_long_reduction = k >= long_reduction_k
-                    && k >= large_reduction_k_to_n_ratio * n;
-            // Use the long-reduction search and scoring model from M=2048 onward
-            // when K is at least 8192.
-            use_long_reduction_model = fp32_tune_threshold
-                    && m >= f32_long_reduction_model_min_m
-                    && k_dominant_long_reduction;
-            allow_wide_n_candidates = m >= f32_wide_n_candidate_min_m
-                    && (wide_n || large_prefill);
-            use_micro_m_block_limit
-                    = tune_cache_pressure || use_long_reduction_model;
-            tune_dst = (!large_m_cache_pressure || tune_cache_pressure)
-                    && (fp32_tune_shape || tune_narrow_large_prefill
-                            || tune_small_m_near_square || tune_cache_pressure
-                            || use_long_reduction_model || use_cache_partition);
-            break;
-        }
-        case bf16: tune_dst = !large_m_cache_pressure && fp32_tune_shape; break;
-        case s32: tune_dst = !large_m_cache_pressure; break;
-        default: break;
-    }
-
-    // Tune only outer M/N partitioning; preserve the established micro-N and
-    // packed-weight layout.
-    const bool use_tile_tuner = m > 0 && num_threads >= min_tuning_threads
-            && simd_bytes(isa) == 16 && brg_int8_conf.ld_block == 6
-            && k >= min_tuning_k && tunable_weights_layout && no_zero_points
-            && attr()->post_ops_.len() == 0 && !with_bias() && is_s8
-            && !small_gemv && tune_dst;
-    jit_int8_matmul_tile_hint_t tile_hint;
-    if (use_tile_tuner) {
-        if (use_cache_partition) {
-            tile_hint = cache_partition_hint;
+        if (N <= 8) {
+            brg_int8_conf.ld_block = 2;
+        } else if (K <= 256) {
+            brg_int8_conf.ld_block = 4;
         } else {
-            const int max_search_m_block = use_micro_m_block_limit
-                    ? brg_int8_conf.m_blk
-                    : max_tuned_m_block;
-            tile_hint = get_thread_tile_hint(brg_int8_conf, num_threads,
-                    micro_n, max_search_m_block, allow_wide_n_candidates,
-                    use_long_reduction_model);
+            brg_int8_conf.ld_block = 6;
+        }
+
+        int n_sz = brg_int8_conf.ld_block * brg_int8_conf.n_blk;
+
+        int act_M = div_up(M, brg_int8_conf.m_blk) * brg_int8_conf.m_blk;
+        int act_N = div_up(N, n_sz) * n_sz;
+        int act_K = div_up(K, brg_int8_conf.k_blk) * brg_int8_conf.k_blk;
+
+        int parallelism = 1;
+        size_t L2 = platform::get_per_core_cache_size(2);
+
+        int ktile_sz = act_K;
+
+        auto cache_opt = [&]() {
+            mtile_sz = std::min(thr_M, 32);
+            ntile_sz = std::min(96, thr_N);
+
+            //----------------Cache optimisation--------------------------
+            if (thr_M < 512) {
+                ntile_sz = n_sz;
+            } else {
+                int mem = ktile_sz * ntile_sz;
+                float ava_mem = 0.9 * L2 - (4 * mtile_sz * ntile_sz)
+                        - (mtile_sz * ktile_sz);
+
+                while (mem > ava_mem && ntile_sz > n_sz) {
+                    ntile_sz /= 2;
+                    ntile_sz = (ntile_sz / n_sz) * n_sz;
+                    mem = ktile_sz * ntile_sz;
+                }
+                ntile_sz = std::min(ntile_sz, thr_N);
+            }
+        };
+
+        auto no_thr_div = [&]() {
+            thr_M = act_M;
+            thr_N = act_N;
+
+            if (n_sz == 8 || n_sz == 16 || n_sz == 24) {
+                cache_opt();
+            } else {
+                assert(!"N Block size not supported!");
+            }
+
+            thr_M = mtile_sz;
+            thr_N = ntile_sz;
+            parallelism = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+            while ((thr_N - n_sz) > n_sz && parallelism < nthr) {
+                thr_N -= n_sz;
+                parallelism = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+            }
+            while ((thr_M - brg_int8_conf.m_blk) > brg_int8_conf.m_blk
+                    && parallelism < nthr) {
+                thr_M -= brg_int8_conf.m_blk;
+                parallelism = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+            }
+
+            mtile_sz = thr_M;
+            ntile_sz = thr_N;
+
+            res_thr_M = act_M % thr_M;
+            res_thr_N = act_N % thr_N;
+        };
+
+        auto para = [&](int ns) {
+            int n = nthr;
+            thr_N = div_up(act_N, n);
+
+            int c = 0;
+            while (n > 1 && thr_N < ns) {
+                n = n / 2;
+                thr_N = div_up(act_N, n);
+                c++;
+            }
+            thr_N = std::max(ns, thr_N);
+
+            int mt = std::pow(2, c);
+            thr_M = div_up(act_M, mt);
+
+            int p = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+
+            while (thr_M > 8 && thr_M >= 2 * thr_N && thr_N < act_N) {
+                thr_M /= 2;
+                thr_N *= 2;
+            }
+
+            thr_N = div_up(thr_N, ns) * ns;
+            thr_M = div_up(thr_M, brg_int8_conf.m_blk) * brg_int8_conf.m_blk;
+
+            thr_M = std::min(act_M, thr_M);
+            thr_N = std::min(act_N, thr_N);
+            p = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+
+            while (p > nthr) {
+                while (thr_M < act_M && (thr_M < thr_N || thr_N == act_N)
+                        && p > nthr) {
+                    thr_M += brg_int8_conf.m_blk;
+                    p = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+                }
+                while (thr_N < act_N && (thr_N <= thr_M || thr_M == act_M)
+                        && p > nthr) {
+                    thr_N += ns;
+                    p = div_up(act_M, thr_M) * div_up(act_N, thr_N);
+                }
+            }
+            parallelism = p;
+
+            res_thr_M = act_M % thr_M;
+            res_thr_N = act_N % thr_N;
+
+            min_work = res_thr_M * res_thr_M;
+            max_work = thr_M * thr_N;
+
+            return p;
+        };
+
+        auto ap_hue = [&]() {
+            auto tmp_m = (is_thr_div) ? thr_M : act_M;
+            auto tmp_n = (is_thr_div) ? thr_N : act_N;
+            size_t mem = tmp_m * K + tmp_n * K + tmp_m * tmp_n;
+            if (tmp_n == n_sz || M <= 4 || (M > (0.1 * L2) && N <= 256)
+                    || (mem < (0.1 * L2))) {
+                brg_int8_conf.is_a_plain = true;
+            }
+        };
+
+        auto sel_hue_256 = [&]() {
+            int para_tmp;
+
+            switch (n_sz) {
+                case 8: {
+                    no_thr_div();
+                    break;
+                }
+                case 16: {
+                    int para_16 = para(16);
+                    cache_opt();
+                    para_tmp = (min_work < max_work * 0.6) ? para_16 - 1
+                                                           : para_16;
+                    if (para_tmp < ceil(0.95 * nthr) || ntile_sz == n_sz) {
+                        is_thr_div = false;
+                        no_thr_div();
+                    }
+                    break;
+                }
+                case 24: {
+                    int para_24 = para(24);
+                    cache_opt();
+                    para_tmp = (min_work < max_work * 0.6) ? para_24 - 1
+                                                           : para_24;
+                    if (para_tmp < ceil(0.95 * nthr) || ntile_sz == n_sz) {
+                        is_thr_div = false;
+                        no_thr_div();
+                    }
+                    break;
+                }
+                default: assert(!"N Block size not supported!");
+            };
+        };
+
+        sel_hue_256();
+
+        ap_hue();
+
+        mm_parallel_work = parallelism * B;
+
+        VDEBUGINFO(1, primitive, matmul,
+                "parallelism:%d thr_M:%d thr_N:%d mtile:%d ntile:%d n_sz:%d "
+                "min:%d max:%d a_plain:%d\n",
+                parallelism, thr_M, thr_N, mtile_sz, ntile_sz, n_sz, min_work,
+                max_work, brg_int8_conf.is_a_plain);
+    };
+
+    if (simd_bytes(isa) == 32) get_optimal_params_sve256();
+
+    const int micro_n = brg_int8_conf.n_blk * brg_int8_conf.ld_block;
+
+    if (simd_bytes(isa) == 16) {
+        const bool tunable_weights_layout = dims == 2
+                && (weights_d.format_any()
+                        || weights_d.matches_tag(format_tag::BA12b8a));
+        const bool no_zero_points = utils::everyone_is(
+                jit_int8_broadcast_t::none, brg_int8_conf.zp_type_a,
+                brg_int8_conf.zp_type_b, brg_int8_conf.zp_type_c);
+
+        // Empirical boundaries from SVE128
+        constexpr int min_tuning_threads = 32;
+        constexpr int high_thread_count = 96;
+        constexpr dim_t min_tuning_k = 128;
+        constexpr dim_t min_float_tuning_channel = 2048;
+        constexpr dim_t min_cache_partition_channel = 1024;
+        constexpr dim_t min_narrow_f32_tuning_channel = 1280;
+        constexpr dim_t f32_long_reduction_model_min_m = 2048;
+        constexpr dim_t f32_wide_n_candidate_min_m = 2048;
+        constexpr dim_t high_thread_wide_n_min_m = 128;
+        constexpr dim_t low_thread_wide_n_min_m = 24;
+        constexpr dim_t small_m_near_square_max = 64;
+        constexpr dim_t near_square_n_slack_divisor = 15;
+        constexpr dim_t medium_m_min = 128;
+        constexpr dim_t large_m_min = 4096;
+        constexpr dim_t long_reduction_k = 8192;
+        constexpr dim_t wide_n_to_k_ratio = 4;
+        constexpr dim_t reduction_k_to_n_ratio = 2;
+        constexpr dim_t large_reduction_k_to_n_ratio = 3;
+        const dim_t m = brg_int8_conf.M;
+        const dim_t n = brg_int8_conf.N;
+        const dim_t k = brg_int8_conf.K;
+        const dim_t padded_k
+                = rnd_up(k, static_cast<dim_t>(brg_int8_conf.k_blk));
+        const double l1_cache_size = platform::get_per_core_cache_size(1);
+        const double l2_cache_size = platform::get_per_core_cache_size(2);
+        const double max_a_tile_bytes
+                = static_cast<double>(
+                          nstl::min(m, static_cast<dim_t>(max_tuned_m_block)))
+                * padded_k;
+        const dim_t wide_n_min_m = num_threads >= high_thread_count
+                ? high_thread_wide_n_min_m
+                : low_thread_wide_n_min_m;
+        const bool wide_n = m >= wide_n_min_m && n >= wide_n_to_k_ratio * k;
+        const bool medium_m_reduction = m >= medium_m_min && m < large_m_min
+                && k >= reduction_k_to_n_ratio * n;
+        const bool large_prefill = m >= large_m_min && k < long_reduction_k
+                && (num_threads < high_thread_count || n <= k
+                        || n >= wide_n_to_k_ratio * k);
+        const dim_t min_channel = nstl::min(k, n);
+        const bool fp32_tune_threshold
+                = min_channel >= min_float_tuning_channel;
+        const bool fp32_tune_shape = fp32_tune_threshold
+                && (wide_n || medium_m_reduction || large_prefill);
+        const bool small_gemv = m == 1 && k < long_reduction_k;
+
+        const bool large_m_cache_pressure = m >= large_m_min
+                && k >= large_reduction_k_to_n_ratio * n
+                && max_a_tile_bytes > l2_stream_fraction * l2_cache_size;
+
+        bool tune_dst = false;
+        bool use_cache_partition = false;
+        bool use_micro_m_block_limit = false;
+        bool use_long_reduction_model = false;
+        bool allow_wide_n_candidates = false;
+        jit_int8_matmul_tile_hint_t cache_partition_hint;
+        switch (dst_type) {
+            case f32: {
+                const dim_t max_channel = nstl::max(k, n);
+                const bool cache_partition_shape = large_prefill
+                        && min_channel >= min_cache_partition_channel
+                        && min_channel < min_narrow_f32_tuning_channel
+                        && max_channel <= wide_n_to_k_ratio * min_channel
+                        && l1_cache_size > 0. && l2_cache_size > 0.
+                        && static_cast<double>(brg_int8_conf.m_blk) * padded_k
+                                <= cache_partition_a_l1_fraction * l1_cache_size
+                        && static_cast<double>(n) * padded_k
+                                >= cache_partition_min_b_l2_fraction
+                                        * l2_cache_size;
+                if (cache_partition_shape)
+                    cache_partition_hint
+                            = get_cache_partitioned_tile_hint(brg_int8_conf,
+                                    micro_n, l1_cache_size, l2_cache_size);
+                use_cache_partition = cache_partition_hint.n_block_factor > 0
+                        && div_up(m,
+                                   static_cast<dim_t>(
+                                           cache_partition_hint.m_block_sz))
+                                >= num_threads;
+
+                const bool tune_narrow_large_prefill = large_prefill
+                        && min_channel >= min_narrow_f32_tuning_channel
+                        && min_channel < min_float_tuning_channel;
+                const bool small_m_near_square = m >= 16
+                        && m <= small_m_near_square_max && n >= k
+                        && n - k <= k / near_square_n_slack_divisor;
+                const bool tune_small_m_near_square
+                        = fp32_tune_threshold && small_m_near_square;
+                const bool tune_cache_pressure
+                        = fp32_tune_threshold && large_m_cache_pressure;
+                const bool k_dominant_long_reduction = k >= long_reduction_k
+                        && k >= large_reduction_k_to_n_ratio * n;
+                // Use the long-reduction search and scoring model from M=2048 onward
+                // when K is at least 8192.
+                use_long_reduction_model = fp32_tune_threshold
+                        && m >= f32_long_reduction_model_min_m
+                        && k_dominant_long_reduction;
+                allow_wide_n_candidates = m >= f32_wide_n_candidate_min_m
+                        && (wide_n || large_prefill);
+                use_micro_m_block_limit
+                        = tune_cache_pressure || use_long_reduction_model;
+                tune_dst = (!large_m_cache_pressure || tune_cache_pressure)
+                        && (fp32_tune_shape || tune_narrow_large_prefill
+                                || tune_small_m_near_square
+                                || tune_cache_pressure
+                                || use_long_reduction_model
+                                || use_cache_partition);
+                break;
+            }
+            case bf16:
+                tune_dst = !large_m_cache_pressure && fp32_tune_shape;
+                break;
+            case s32: tune_dst = !large_m_cache_pressure; break;
+            default: break;
+        }
+
+        // Tune only outer M/N partitioning; preserve the established micro-N and
+        // packed-weight layout.
+        const bool use_tile_tuner = m > 0 && num_threads >= min_tuning_threads
+                && simd_bytes(isa) == 16 && brg_int8_conf.ld_block == 6
+                && k >= min_tuning_k && tunable_weights_layout && no_zero_points
+                && attr()->post_ops_.len() == 0 && !with_bias() && is_s8
+                && !small_gemv && tune_dst;
+        jit_int8_matmul_tile_hint_t tile_hint;
+        if (use_tile_tuner) {
+            if (use_cache_partition) {
+                tile_hint = cache_partition_hint;
+            } else {
+                const int max_search_m_block = use_micro_m_block_limit
+                        ? brg_int8_conf.m_blk
+                        : max_tuned_m_block;
+                tile_hint = get_thread_tile_hint(brg_int8_conf, num_threads,
+                        micro_n, max_search_m_block, allow_wide_n_candidates,
+                        use_long_reduction_model);
+            }
+        }
+
+        const auto thread_tiles = get_thread_tiles(brg_int8_conf, num_threads,
+                simd_bytes(isa), micro_n, tile_hint);
+
+        mtile_sz = thread_tiles.m_block_sz;
+        ntile_sz = thread_tiles.n_block_sz;
+
+        int num_a_blocks = div_up(brg_int8_conf.M, mtile_sz);
+        int num_b_blocks = div_up(brg_int8_conf.N, ntile_sz);
+        mm_parallel_work = brg_int8_conf.batch * num_a_blocks * num_b_blocks;
+        if (mm_parallel_work < num_threads && brg_int8_conf.ld_block == 4)
+            ntile_sz = micro_n;
+        num_b_blocks = div_up(brg_int8_conf.N, ntile_sz);
+        mm_parallel_work = brg_int8_conf.batch * num_a_blocks * num_b_blocks;
+
+        thr_M = mtile_sz;
+        thr_N = ntile_sz;
+        int nblk_sz = brg_int8_conf.n_blk * brg_int8_conf.ld_block;
+        int act_M = div_up(brg_int8_conf.M, brg_int8_conf.m_blk)
+                * brg_int8_conf.m_blk;
+        int act_N = div_up(brg_int8_conf.N, nblk_sz) * nblk_sz;
+        res_thr_M = act_M % thr_M;
+        res_thr_N = act_N % thr_N;
+
+        if (use_tile_tuner && tile_hint.n_block_factor > 0) {
+            VDEBUGINFO(1, primitive, matmul,
+                    "jit_int8_matmul autotuner: policy=%s M=%ld N=%ld K=%ld "
+                    "nthr=%d m_block=%d n_block=%d",
+                    use_cache_partition ? "cache_partition" : "scored", (long)m,
+                    (long)n, (long)k, num_threads, mtile_sz, ntile_sz);
         }
     }
-    const auto thread_tiles = get_thread_tiles(
-            brg_int8_conf, num_threads, simd_bytes(isa), micro_n, tile_hint);
-    m_block_sz = thread_tiles.m_block_sz;
-    n_block_sz = thread_tiles.n_block_sz;
-    if (use_tile_tuner && tile_hint.n_block_factor > 0) {
-        VDEBUGINFO(1, primitive, matmul,
-                "jit_int8_matmul autotuner: policy=%s M=%ld N=%ld K=%ld "
-                "nthr=%d m_block=%d n_block=%d",
-                use_cache_partition ? "cache_partition" : "scored", (long)m,
-                (long)n, (long)k, num_threads, m_block_sz, n_block_sz);
-    }
-
-    int num_a_blocks = div_up(brg_int8_conf.M, m_block_sz);
-    int num_b_blocks = div_up(brg_int8_conf.N, n_block_sz);
-    mm_parallel_work = brg_int8_conf.batch * num_a_blocks * num_b_blocks;
-    if (mm_parallel_work < num_threads && brg_int8_conf.ld_block == 4)
-        n_block_sz = micro_n;
-    num_b_blocks = div_up(brg_int8_conf.N, n_block_sz);
-    mm_parallel_work = brg_int8_conf.batch * num_a_blocks * num_b_blocks;
 
     auto b_tag_2d = format_tag::ab;
     auto b_tag_3d = format_tag::abc;
@@ -1677,11 +1975,13 @@ status_t jit_int8_matmul_t<isa>::pd_t::init(const engine_t *engine) {
                         * brg_int8_conf.m_blk * brg_int8_conf.acc_dt_sz
                         * brg_int8_conf.batch,
                 sizeof(char));
-    scratchpad.book(key_brgemm_primitive_buffer_a,
-            brg_int8_conf.batch * div_up(brg_int8_conf.M, brg_int8_conf.m_blk)
-                    * div_up(brg_int8_conf.K, brg_int8_conf.k_blk)
-                    * brg_int8_conf.m_blk * brg_int8_conf.k_blk,
-            sizeof(char));
+    if (!brg_int8_conf.is_a_plain)
+        scratchpad.book(key_brgemm_primitive_buffer_a,
+                brg_int8_conf.batch
+                        * div_up(brg_int8_conf.M, brg_int8_conf.m_blk)
+                        * div_up(brg_int8_conf.K, brg_int8_conf.k_blk)
+                        * brg_int8_conf.m_blk * brg_int8_conf.k_blk,
+                sizeof(char));
     if (brg_int8_conf.b_reo)
         scratchpad.book(key_gemm_blocked_b,
                 brg_int8_conf.batch
@@ -1834,8 +2134,9 @@ status_t jit_int8_matmul_t<isa>::execute(const exec_ctx_t &ctx) const {
 
     int num_threads = dnnl_get_current_num_threads();
 
-    char *src_reorder_buffer
-            = scratchpad.template get<char>(key_brgemm_primitive_buffer_a);
+    char *src_reorder_buffer = (b.is_a_plain)
+            ? (char *)src
+            : scratchpad.template get<char>(key_brgemm_primitive_buffer_a);
     char *wei_reorder_buffer = (b.b_reo)
             ? scratchpad.template get<char>(key_gemm_blocked_b)
             : (char *)wei;
@@ -2179,10 +2480,14 @@ status_t jit_int8_matmul_t<isa>::execute(const exec_ctx_t &ctx) const {
                 int m_ed = end - start + m_st;
                 int mtail
                         = (m_ed == num_a_blocks) ? ((b.m_tail > 0) ? 1 : 0) : 0;
-                int m_blk_adr = (batch
+                int m_blk_adr;
+                if (b.is_a_plain)
+                    m_blk_adr = (batch * (M * K)) + m_st * b.m_blk * K;
+                else
+                    m_blk_adr = (batch
                                         * (num_a_blocks * b.m_blk
                                                 * div_up(K, b.k_blk) * b.k_blk))
-                        + m_st * b.m_blk * div_up(K, b.k_blk) * b.k_blk;
+                            + m_st * b.m_blk * div_up(K, b.k_blk) * b.k_blk;
                 int zp_ptr_b_adr
                         = (batch * (num_a_blocks * b.m_blk)) + m_st * b.m_blk;
 
@@ -2203,7 +2508,11 @@ status_t jit_int8_matmul_t<isa>::execute(const exec_ctx_t &ctx) const {
                                 "created.");
                         return;
                     }
-                    m_blk_adr += n_a * b.m_blk * div_up(K, b.k_blk) * b.k_blk;
+                    if (b.is_a_plain)
+                        m_blk_adr += n_a * b.m_blk * K;
+                    else
+                        m_blk_adr
+                                += n_a * b.m_blk * div_up(K, b.k_blk) * b.k_blk;
                     zp_ptr_b_adr += n_a * b.m_blk;
                     kernel_execute(idx, 1, 0, m_blk_adr, 0, 0, 0, 0, 0,
                             zp_ptr_b_adr, 0, 0);
@@ -2264,154 +2573,324 @@ status_t jit_int8_matmul_t<isa>::execute(const exec_ctx_t &ctx) const {
 
     if (b.b_reo) reorder_b();
 
-    reorder_a();
+    if (!b.is_a_plain) reorder_a();
 
     if (b.zp_type_a != jit_int8_broadcast_t::none
             || b.zp_type_b != jit_int8_broadcast_t::none)
         kernel_execute_zp();
 
-    int m_block1, n_block1, m_block1_rs, n_block1_rs, num_a_blocks_act,
-            num_b_blocks_act, num_a_blocks, num_b_blocks;
-    int m_block_sz = pd()->m_block_sz;
-    int n_block_sz = pd()->n_block_sz;
+    // -------------------------------------------------------------------------
+    // Precompute values invariant across the entire parallel region.
+    // -------------------------------------------------------------------------
 
-    m_block1 = div_up(m_block_sz, b.m_blk);
-    n_block1 = div_up(n_block_sz, (b.n_blk * b.ld_block));
-    m_block1_rs = div_up(M % m_block_sz, b.m_blk);
-    n_block1_rs = div_up(N % n_block_sz, (b.n_blk * b.ld_block));
+    const int mtile_sz = pd()->mtile_sz;
+    const int ntile_sz = pd()->ntile_sz;
+    const int thr_M = pd()->thr_M;
+    const int thr_N = pd()->thr_N;
+    const int n_block_width = b.n_blk * b.ld_block;
+    const int res_thr_M = pd()->res_thr_M;
+    const int res_thr_N = pd()->res_thr_N;
+    const int mtiles_per_thr_M = div_up(thr_M, mtile_sz);
+    const int mtiles_per_res_thr_M = div_up(res_thr_M, mtile_sz);
+    const int ntiles_per_thr_N = div_up(thr_N, ntile_sz);
+    const int ntiles_per_res_thr_N = div_up(res_thr_N, ntile_sz);
+    const int rs_mtile_sz_thr_M = thr_M % mtile_sz;
+    const int rs_mtile_sz_res_thr_M = res_thr_M % mtile_sz;
+    const int rs_mtile_sz_thr_M_mblks = div_up(rs_mtile_sz_thr_M, b.m_blk);
+    const int rs_mtile_sz_res_thr_M_mblks
+            = div_up(rs_mtile_sz_res_thr_M, b.m_blk);
+    const int rs_ntile_sz_thr_N = thr_N % ntile_sz;
+    const int rs_ntile_sz_res_thr_N = res_thr_N % ntile_sz;
+    const int rs_ntile_sz_thr_N_nblks
+            = div_up(rs_ntile_sz_thr_N, n_block_width);
+    const int rs_ntile_sz_res_thr_N_nblks
+            = div_up(rs_ntile_sz_res_thr_N, n_block_width);
 
-    num_a_blocks_act = div_up(M, b.m_blk);
-    num_b_blocks_act = div_up(N, (b.n_blk * b.ld_block));
-    num_a_blocks = div_up(M, m_block_sz);
-    num_b_blocks = div_up(N, n_block_sz);
-    int ktail = (b.k_tail == 0) ? 0 : 1;
-    int parallel_work = pd()->mm_parallel_work;
-    int nt = parallel_work > 1 ? num_threads : 1;
+    const int m_blks_per_tile = div_up(mtile_sz, b.m_blk);
+    const int n_blks_per_tile = div_up(ntile_sz, n_block_width);
+
+    const int thr_M_blks = div_up(M, thr_M);
+    const int thr_N_blks = div_up(N, thr_N);
+
+    const int num_a_blocks_act = div_up(M, b.m_blk);
+    const int num_b_blocks_act = div_up(N, n_block_width);
+    const int ktail = (b.k_tail == 0) ? 0 : 1;
+    const int parallel_work = pd()->mm_parallel_work;
+    const int nt = parallel_work > 1 ? num_threads : 1;
+
+    const int thr_MN_blks = thr_M_blks * thr_N_blks;
+
+    const int packed_k = div_up(K, b.k_blk) * b.k_blk;
+
+    const int a_batch_stride = num_a_blocks_act * b.m_blk * packed_k;
+    const int b_batch_stride = num_b_blocks_act * n_block_width * packed_k;
+
+    const int zp_a_batch_stride = num_b_blocks_act * n_block_width;
+    const int zp_b_batch_stride = num_a_blocks_act * b.m_blk;
+
+    const int mtile_a_stride
+            = b.is_a_plain ? mtile_sz * K : mtile_sz * packed_k;
+    const int ntile_b_stride = ntile_sz * packed_k;
+
+    const dim_t mtile_dst_byte_stride
+            = static_cast<dim_t>(mtile_sz) * N * b.dst_dt_sz;
+
+    // Kernel indices are invariant across all tiles.
+    const int idx_main = pd()->get_idx(0, 0, ktail, 0, b);
+    const int idx_mtail = pd()->get_idx(0, 1, ktail, 0, b);
+    const int idx_ntail = pd()->get_idx(0, 0, ktail, 1, b);
+    const int idx_mn_tail = pd()->get_idx(0, 1, ktail, 1, b);
+
+    if (idx_main < 0 || (b.m_tail && idx_mtail < 0)
+            || (b.n_tail && idx_ntail < 0)
+            || (b.m_tail && b.n_tail && idx_mn_tail < 0)) {
+        assert(!"Requested int8 matmul kernel was not created.");
+    }
+
     parallel(nt, [&](const int ithr, const int nthr) {
-        int start {0}, end {0};
-        balance211(parallel_work, nt, ithr, start, end);
+        int start {0};
+        int end {0};
+
+        balance211(parallel_work, nthr, ithr, start, end);
+
         while (start < end) {
-            int batch = start / (num_a_blocks * num_b_blocks);
-            int batch_start = start % (num_a_blocks * num_b_blocks);
-            int m_block = batch_start % num_a_blocks;
-            int n_block = batch_start / num_a_blocks;
-            int mtail
-                    = (m_block1_rs != 0 && m_block == num_a_blocks - 1) ? 1 : 0;
-            int ntail
-                    = (n_block1_rs != 0 && n_block == num_b_blocks - 1) ? 1 : 0;
-            dim_t dst_byte_offset
-                    = ((batch * M * N) + m_block * b.m_blk * m_block1 * N
-                              + n_block * (b.n_blk * b.ld_block) * n_block1)
-                    * b.dst_dt_sz;
-            int m_blk_adr = (batch
-                                    * (num_a_blocks_act * b.m_blk
-                                            * div_up(K, b.k_blk) * b.k_blk))
-                    + m_block * b.m_blk * m_block1 * div_up(K, b.k_blk)
-                            * b.k_blk;
-            int n_blk_adr = (batch
-                                    * (num_b_blocks_act * (b.n_blk * b.ld_block)
-                                            * div_up(K, b.k_blk) * b.k_blk))
-                    + n_block * (b.n_blk * b.ld_block) * n_block1
-                            * div_up(K, b.k_blk) * b.k_blk;
-            int zp_ptr_a_adr
-                    = (batch * (num_b_blocks_act * (b.n_blk * b.ld_block)))
-                    + n_block * (b.n_blk * b.ld_block) * n_block1;
-            int zp_ptr_b_adr = (batch * (num_a_blocks_act * b.m_blk))
-                    + m_block * b.m_blk * m_block1;
-            int bias_addr = n_block * (b.n_blk * b.ld_block) * n_block1;
-            int zp_b_buf = n_block * (b.n_blk * b.ld_block) * n_block1;
-            int scl_addr = (b.is_oc_scales)
-                    ? (n_block * (b.n_blk * b.ld_block) * n_block1)
-                    : 0;
-            int idx = pd()->get_idx(0, 0, ktail, 0, b);
-            if (idx < 0) {
-                assert(!"Requested int8 matmul kernel was not created.");
-                return;
-            }
-            int n_a = m_block1, n_b = n_block1;
-            n_a = (mtail) ? ((b.m_tail) ? m_block1_rs - 1 : m_block1_rs)
-                          : m_block1;
-            n_b = (ntail) ? ((b.n_tail) ? n_block1_rs - 1 : n_block1_rs)
-                          : n_block1;
+            // -----------------------------------------------------------------
+            // Resolve batch, M block and N block for this work item.
+            // -----------------------------------------------------------------
 
-            if (n_a > 0 && n_b > 0) {
+            const int batch = start / thr_MN_blks;
+            const int batch_start = start - batch * thr_MN_blks;
 
-                kernel_execute(idx, n_a, n_b, m_blk_adr, n_blk_adr,
-                        dst_byte_offset, bias_addr, scl_addr, zp_ptr_a_adr,
-                        zp_ptr_b_adr, zp_b_buf, m_block * m_block_sz);
+            const int thr_N_blk = batch_start / thr_M_blks;
+            const int thr_M_blk = batch_start - thr_N_blk * thr_M_blks;
+
+            const bool last_thr_M_blk = thr_M_blk == thr_M_blks - 1;
+            const bool last_thr_N_blk = thr_N_blk == thr_N_blks - 1;
+
+            const int thr_M_offset = thr_M_blk * thr_M;
+            const int thr_N_offset = thr_N_blk * thr_N;
+
+            int mtiles, ntiles, m_blks_per_last_tile, n_blks_per_last_tile;
+
+            if (last_thr_M_blk && res_thr_M != 0) {
+                mtiles = mtiles_per_res_thr_M;
+                m_blks_per_last_tile = rs_mtile_sz_res_thr_M_mblks;
+            } else {
+                mtiles = mtiles_per_thr_M;
+                m_blks_per_last_tile = rs_mtile_sz_thr_M_mblks;
             }
 
-            if (mtail && b.m_tail > 0 && n_b > 0) {
-                dim_t new_dst_byte_offset
-                        = dst_byte_offset + b.m_blk * n_a * N * b.dst_dt_sz;
-                int new_m_blk_adr = m_blk_adr
-                        + b.m_blk * n_a * div_up(K, b.k_blk) * b.k_blk;
-                int new_zp_ptr_b_adr = zp_ptr_b_adr + b.m_blk * n_a;
-                idx = pd()->get_idx(0, 1, ktail, 0, b);
-                if (idx < 0) {
-                    assert(!"Requested int8 matmul kernel was not created.");
-                    return;
-                }
-                int na = 1;
-                kernel_execute(idx, na, n_b, new_m_blk_adr, n_blk_adr,
-                        new_dst_byte_offset, bias_addr, scl_addr, zp_ptr_a_adr,
-                        new_zp_ptr_b_adr, zp_b_buf,
-                        m_block * m_block_sz + n_a * b.m_blk);
+            if (last_thr_N_blk && res_thr_N != 0) {
+                ntiles = ntiles_per_res_thr_N;
+                n_blks_per_last_tile = rs_ntile_sz_res_thr_N_nblks;
+            } else {
+                ntiles = ntiles_per_thr_N;
+                n_blks_per_last_tile = rs_ntile_sz_thr_N_nblks;
             }
 
-            if (ntail && b.n_tail > 0 && n_a > 0) {
-                dim_t new_dst_byte_offset = dst_byte_offset
-                        + (b.n_blk * b.ld_block) * n_b * b.dst_dt_sz;
-                int new_n_blk_adr = n_blk_adr
-                        + (b.n_blk * b.ld_block) * n_b * div_up(K, b.k_blk)
-                                * b.k_blk;
-                int new_zp_b_buf = zp_b_buf + (b.n_blk * b.ld_block) * n_b;
-                int new_zp_ptr_a_adr
-                        = zp_ptr_a_adr + (b.n_blk * b.ld_block) * n_b;
-                int new_bias_addr = bias_addr + (b.n_blk * b.ld_block) * n_b;
-                int new_scl_addr = scl_addr
-                        + ((b.is_oc_scales) ? ((b.n_blk * b.ld_block) * n_b)
-                                            : 0);
-                idx = pd()->get_idx(0, 0, ktail, 1, b);
-                if (idx < 0) {
-                    assert(!"Requested int8 matmul kernel was not created.");
-                    return;
-                }
-                int nb = 1;
+            // -----------------------------------------------------------------
+            // Base addresses for this batch and thread block.
+            // -----------------------------------------------------------------
 
-                kernel_execute(idx, n_a, nb, m_blk_adr, new_n_blk_adr,
-                        new_dst_byte_offset, new_bias_addr, new_scl_addr,
-                        new_zp_ptr_a_adr, zp_ptr_b_adr, new_zp_b_buf,
-                        m_block * m_block_sz);
-            }
+            const dim_t thread_dst_base = static_cast<dim_t>(batch) * M * N
+                    + static_cast<dim_t>(thr_M_offset) * N + thr_N_offset;
 
-            if (mtail && b.m_tail > 0 && ntail && b.n_tail > 0) {
-                dim_t new_dst_byte_offset = dst_byte_offset
-                        + ((b.n_blk * b.ld_block) * n_b + b.m_blk * n_a * N)
+            const int batch_a_base
+                    = b.is_a_plain ? batch * M * K : batch * a_batch_stride;
+
+            const int thread_a_base = batch_a_base
+                    + (b.is_a_plain ? thr_M_offset * K
+                                    : thr_M_offset * packed_k);
+
+            const int thread_b_base
+                    = batch * b_batch_stride + thr_N_offset * packed_k;
+
+            const int thread_zp_a_base
+                    = batch * zp_a_batch_stride + thr_N_offset;
+
+            const int thread_zp_b_base
+                    = batch * zp_b_batch_stride + thr_M_offset;
+
+            // -----------------------------------------------------------------
+            // N-tile loop.
+            // -----------------------------------------------------------------
+
+            for (int n_tile = 0; n_tile < ntiles; ++n_tile) {
+                const bool last_n_tile = n_tile == ntiles - 1;
+                const int n_tile_offset = n_tile * ntile_sz;
+
+                const bool n_tile_tail
+                        = n_blks_per_last_tile != 0 && last_n_tile;
+
+                const bool ntail = b.n_tail && last_thr_N_blk && last_n_tile;
+
+                // n_b is invariant across the inner M-tile loop.
+                const int n_b = ntail ? (n_tile_tail ? n_blks_per_last_tile - 1
+                                                     : n_blks_per_tile - 1)
+                                      : (n_tile_tail ? n_blks_per_last_tile
+                                                     : n_blks_per_tile);
+
+                const int n_blk_adr = thread_b_base + n_tile * ntile_b_stride;
+
+                const int zp_ptr_a_adr = thread_zp_a_base + n_tile_offset;
+
+                const int bias_addr = thr_N_offset + n_tile_offset;
+
+                const int zp_b_buf = bias_addr;
+
+                const int scl_addr = b.is_oc_scales ? bias_addr : 0;
+
+                // These addresses are incremented for every M tile.
+                dim_t dst_byte_offset
+                        = (thread_dst_base + n_tile_offset) * b.dst_dt_sz;
+
+                int m_blk_adr = thread_a_base;
+                int zp_ptr_b_adr = thread_zp_b_base;
+                int m_row_start = thr_M_offset;
+
+                // -------------------------------------------------------------
+                // M-tile loop.
+                // -------------------------------------------------------------
+
+                for (int m_tile = 0; m_tile < mtiles; ++m_tile) {
+                    const bool last_m_tile = m_tile == mtiles - 1;
+
+                    const bool m_tile_tail
+                            = m_blks_per_last_tile != 0 && last_m_tile;
+
+                    const bool mtail
+                            = b.m_tail && last_thr_M_blk && last_m_tile;
+
+                    const int n_a = mtail
+                            ? (m_tile_tail ? m_blks_per_last_tile - 1
+                                           : m_blks_per_tile - 1)
+                            : (m_tile_tail ? m_blks_per_last_tile
+                                           : m_blks_per_tile);
+
+                    // =========================================================
+                    // Case 1: Main kernel.
+                    // =========================================================
+
+                    if (n_a > 0 && n_b > 0) {
+                        kernel_execute(idx_main, n_a, n_b, m_blk_adr, n_blk_adr,
+                                dst_byte_offset, bias_addr, scl_addr,
+                                zp_ptr_a_adr, zp_ptr_b_adr, zp_b_buf,
+                                m_row_start);
+                    }
+
+                    // =========================================================
+                    // Precompute M-tail values only for the final M-tail tile.
+                    // =========================================================
+
+                    int mtail_m_offset = 0;
+                    dim_t mtail_dst_byte_offset = 0;
+                    int mtail_m_blk_adr = 0;
+                    int mtail_zp_ptr_b_adr = 0;
+                    int mtail_m_row_start = 0;
+
+                    if (mtail) {
+                        mtail_m_offset = b.m_blk * n_a;
+
+                        mtail_dst_byte_offset
+                                = static_cast<dim_t>(mtail_m_offset) * N
                                 * b.dst_dt_sz;
-                int new_m_blk_adr = m_blk_adr
-                        + b.m_blk * n_a * div_up(K, b.k_blk) * b.k_blk;
-                int new_n_blk_adr = n_blk_adr
-                        + (b.n_blk * b.ld_block) * n_b * div_up(K, b.k_blk)
-                                * b.k_blk;
-                int new_zp_b_buf = zp_b_buf + (b.n_blk * b.ld_block) * n_b;
-                int new_zp_ptr_a_adr
-                        = zp_ptr_a_adr + (b.n_blk * b.ld_block) * n_b;
-                int new_zp_ptr_b_adr = zp_ptr_b_adr + b.m_blk * n_a;
-                int new_bias_addr = bias_addr + (b.n_blk * b.ld_block) * n_b;
-                int new_scl_addr = scl_addr
-                        + ((b.is_oc_scales) ? ((b.n_blk * b.ld_block) * n_b)
-                                            : 0);
-                idx = pd()->get_idx(0, 1, ktail, 1, b);
-                if (idx < 0) {
-                    assert(!"Requested int8 matmul kernel was not created.");
-                    return;
+
+                        mtail_m_blk_adr = m_blk_adr
+                                + (b.is_a_plain ? mtail_m_offset * K
+                                                : mtail_m_offset * packed_k);
+
+                        mtail_zp_ptr_b_adr = zp_ptr_b_adr + mtail_m_offset;
+
+                        mtail_m_row_start = m_row_start + mtail_m_offset;
+                    }
+
+                    // =========================================================
+                    // Precompute N-tail values only for the final N-tail tile.
+                    // =========================================================
+
+                    int ntail_n_offset = 0;
+                    dim_t ntail_dst_byte_offset = 0;
+                    int ntail_n_blk_adr = 0;
+                    int ntail_zp_b_buf = 0;
+                    int ntail_zp_ptr_a_adr = 0;
+                    int ntail_bias_addr = 0;
+                    int ntail_scl_addr = 0;
+
+                    if (ntail) {
+                        ntail_n_offset = n_block_width * n_b;
+
+                        ntail_dst_byte_offset
+                                = static_cast<dim_t>(ntail_n_offset)
+                                * b.dst_dt_sz;
+
+                        ntail_n_blk_adr = n_blk_adr + ntail_n_offset * packed_k;
+
+                        ntail_zp_b_buf = zp_b_buf + ntail_n_offset;
+
+                        ntail_zp_ptr_a_adr = zp_ptr_a_adr + ntail_n_offset;
+
+                        ntail_bias_addr = bias_addr + ntail_n_offset;
+
+                        ntail_scl_addr = scl_addr
+                                + (b.is_oc_scales ? ntail_n_offset : 0);
+                    }
+
+                    // =========================================================
+                    // Case 2: M-tail kernel.
+                    // =========================================================
+
+                    if (mtail && n_b > 0) {
+                        constexpr int na = 1;
+
+                        kernel_execute(idx_mtail, na, n_b, mtail_m_blk_adr,
+                                n_blk_adr,
+                                dst_byte_offset + mtail_dst_byte_offset,
+                                bias_addr, scl_addr, zp_ptr_a_adr,
+                                mtail_zp_ptr_b_adr, zp_b_buf,
+                                mtail_m_row_start);
+                    }
+
+                    // =========================================================
+                    // Case 3: N-tail kernel.
+                    // =========================================================
+
+                    if (ntail && n_a > 0) {
+                        constexpr int nb = 1;
+
+                        kernel_execute(idx_ntail, n_a, nb, m_blk_adr,
+                                ntail_n_blk_adr,
+                                dst_byte_offset + ntail_dst_byte_offset,
+                                ntail_bias_addr, ntail_scl_addr,
+                                ntail_zp_ptr_a_adr, zp_ptr_b_adr,
+                                ntail_zp_b_buf, m_row_start);
+                    }
+
+                    // =========================================================
+                    // Case 4: M-tail + N-tail corner kernel.
+                    // =========================================================
+
+                    if (mtail && ntail) {
+                        constexpr int na = 1;
+                        constexpr int nb = 1;
+
+                        kernel_execute(idx_mn_tail, na, nb, mtail_m_blk_adr,
+                                ntail_n_blk_adr,
+                                dst_byte_offset + mtail_dst_byte_offset
+                                        + ntail_dst_byte_offset,
+                                ntail_bias_addr, ntail_scl_addr,
+                                ntail_zp_ptr_a_adr, mtail_zp_ptr_b_adr,
+                                ntail_zp_b_buf, mtail_m_row_start);
+                    }
+
+                    // ---------------------------------------------------------
+                    // Move incrementally to the next M tile.
+                    // ---------------------------------------------------------
+
+                    dst_byte_offset += mtile_dst_byte_stride;
+                    m_blk_adr += mtile_a_stride;
+                    zp_ptr_b_adr += mtile_sz;
+                    m_row_start += mtile_sz;
                 }
-                int nb = 1, na = 1;
-                kernel_execute(idx, na, nb, new_m_blk_adr, new_n_blk_adr,
-                        new_dst_byte_offset, new_bias_addr, new_scl_addr,
-                        new_zp_ptr_a_adr, new_zp_ptr_b_adr, new_zp_b_buf,
-                        m_block * m_block_sz + n_a * b.m_blk);
             }
             start++;
         }

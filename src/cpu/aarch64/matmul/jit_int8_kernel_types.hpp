@@ -1,5 +1,5 @@
 /*******************************************************************************
-* Copyright 2025 FUJITSU LIMITED
+* Copyright 2025-2026 FUJITSU LIMITED
 * Copyright 2025-2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
@@ -96,6 +96,7 @@ struct brg_int8_t {
     jit_int8_broadcast_t zp_type_c = jit_int8_broadcast_t::none;
     bool is_zp_b_int8 = false;
     bool b_reo = true;
+    bool is_a_plain = false;
     data_type_t zp_b_dt;
 };
 
