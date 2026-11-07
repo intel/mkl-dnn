@@ -49,6 +49,7 @@
         --case=complex_fusion/mha/sdpa-vit-training-fwd-no-mask-bf16-f32.json
 
 # bf16 inputs + f32 intermediates + bf16 outputs
+--reset --dt=1:bf16+2:bf16+6:bf16+8:bf16+9:bf16+10:bf16+11:bf16+12:bf16 --case=complex_fusion/mha/JAX-MQA-inf-fp32.json
 --reset --op-kind=1:Multiply,1:Divide --dt=1:bf16+2:bf16+3:bf16+5:bf16+6:bf16+104:bf16 --tensor-property=4:undef,4:host_scalar --case=complex_fusion/mha/sdpa-plain-simplified-f16-f32.json
 --reset --dt=3:bf16+4:bf16+2:bf16+1:bf16+11:bf16+0:bf16+12:bf16+14:bf16+16:bf16 --case=complex_fusion/mha/MHA-bert_large-inf-fp32-bs1.json
 --reset --dt=1:bf16+3:bf16+16:bf16+19:bf16+20:bf16 --case=complex_fusion/mha/GQA-f32-v2.json
@@ -72,6 +73,9 @@
         0:128x12x197x64*453888x37824x192x1+1:128x12x64x197*453888x37824x1x192+2:128x12x197x64*453888x37824x192x1+14:128x12x197x64*453888x37824x192x1,\
         0:128x12x197x64*302592x25216x128x2+1:128x12x64x197*302592x25216x394x2+2:128x12x197x64*302592x25216x128x2+13:128x12x197x1*4728x394x2x1+14:128x12x197x64*302592x25216x128x2
         --case=complex_fusion/mha/sdpa-vit-training-fwd-no-mask-bf16-f32.json
+
+# bf16 graphs
+--reset --dt=bf16 --case=complex_fusion/mha/JAX-MQA-inf-fp32.json
 
 # int8 graphs
 --reset --case=complex_fusion/mha/MHA-GPT-inf-int8-bs1.json

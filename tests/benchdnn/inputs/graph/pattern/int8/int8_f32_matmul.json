@@ -1,0 +1,226 @@
+{
+  "version": "3.15.0",
+  "engine_kind": "cpu",
+  "fpmath_mode": "strict",
+  "fpmath_mode_apply_to_int": "false",
+  "input_ports": [
+    1,
+    4
+  ],
+  "output_ports": [
+    7
+  ],
+  "graph": [
+    {
+      "id": 1,
+      "name": "dqdata_op",
+      "kind": "Dequantize",
+      "attrs": {
+        "axis": {
+          "type": "s64",
+          "value": 0
+        },
+        "scales": {
+          "type": "f32[]",
+          "value": [
+            0.00390625
+          ]
+        },
+        "zps": {
+          "type": "s64[]",
+          "value": [
+            110
+          ]
+        },
+        "qtype": {
+          "type": "string",
+          "value": "per_tensor"
+        }
+      },
+      "inputs": [
+        {
+          "id": 1,
+          "dtype": "u8",
+          "shape": [
+            1,
+            4,
+            16,
+            8
+          ],
+          "stride": [
+            512,
+            128,
+            8,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 2,
+          "dtype": "f32",
+          "shape": [
+            1,
+            4,
+            16,
+            8
+          ],
+          "stride": [
+            512,
+            128,
+            8,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "dqweight_op",
+      "kind": "Dequantize",
+      "attrs": {
+        "axis": {
+          "type": "s64",
+          "value": 1
+        },
+        "scales": {
+          "type": "f32[]",
+          "value": [
+            0.00390625
+          ]
+        },
+        "zps": {
+          "type": "s64[]",
+          "value": [
+            114
+          ]
+        },
+        "qtype": {
+          "type": "string",
+          "value": "per_tensor"
+        }
+      },
+      "inputs": [
+        {
+          "id": 4,
+          "dtype": "u8",
+          "shape": [
+            1,
+            4,
+            8,
+            16
+          ],
+          "stride": [
+            512,
+            128,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 5,
+          "dtype": "f32",
+          "shape": [
+            1,
+            4,
+            8,
+            16
+          ],
+          "stride": [
+            512,
+            128,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "matmul_op",
+      "kind": "MatMul",
+      "attrs": {
+        "accumulation_mode": {
+          "type": "string",
+          "value": "strict"
+        },
+        "transpose_b": {
+          "type": "bool",
+          "value": 0
+        },
+        "transpose_a": {
+          "type": "bool",
+          "value": 0
+        }
+      },
+      "inputs": [
+        {
+          "id": 2,
+          "dtype": "f32",
+          "shape": [
+            1,
+            4,
+            16,
+            8
+          ],
+          "stride": [
+            512,
+            128,
+            8,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        },
+        {
+          "id": 5,
+          "dtype": "f32",
+          "shape": [
+            1,
+            4,
+            8,
+            16
+          ],
+          "stride": [
+            512,
+            128,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ],
+      "outputs": [
+        {
+          "id": 7,
+          "dtype": "f32",
+          "shape": [
+            1,
+            4,
+            16,
+            16
+          ],
+          "stride": [
+            1024,
+            256,
+            16,
+            1
+          ],
+          "layout_type": "strided",
+          "property_type": "undef"
+        }
+      ]
+    }
+  ]
+}

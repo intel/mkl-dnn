@@ -1,3 +1,5 @@
+--reset --batch=op/harness_f32_ci
+
 --reset --op-kind=0:Add,0:Divide,0:Maximum,0:Minimum,0:Multiply,0:Subtract --in-shapes=,1:scalar --case=op/f32/add.json
 --reset --in-shapes=0:1x2048x28x28+1:1x2048x28x28,0:64x128x28x28+1:64x128x28x28,0:64x256x14x14+1:64x256x14x14,0:16x512+1:16x512,0:64x128x28x28+1:64x128x28x28,0:64x128x28x0+1:64x128x28x0,0:64x128x28x28*acdb+1:64x128x28x28*acdb --op-attrs=0:auto_broadcast:none --op-kind=0:Add,0:Divide,0:Maximum,0:Minimum,0:Multiply,0:Subtract --case=op/f32/add.json
 --reset  --in-shapes=0:1x1x1x1+1:64x128x28x28,0:16x13+1:1x13 --op-attrs=0:auto_broadcast:numpy --op-kind=0:Add,0:Divide,0:Maximum,0:Minimum,0:Multiply,0:Subtract --case=op/f32/add.json

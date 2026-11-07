@@ -1,1 +1,10 @@
 --reset --mb=2 --case=pattern/int8/int8_conv_post_ops_fusion.json
+--reset --case=pattern/int8/int8_f32_matmul.json
+--reset --in-shapes=1:1x1x50x50+4:1x1x50x32*4800x4800x96x1 --case=pattern/int8/int8_f32_matmul.json
+--reset --in-shapes=0:1x4x16x8+1:1x4x8x16+2:1 --dt=1:u8 --op-kind=6145:Divide+8193:undef --op-attrs=2065:zps:110+4113:qtype:per_tensor*scales:0.00390625*zps:114 --tensor-property=1:undef --case=pattern/int8/int8_f32_matmul_mul_add_fusion.json
+--reset --in-shapes=0:1x4x16x8+1:1x4x8x16+2:1+3:1x1x1x16 --dt=1:u8 --op-kind=6145:Divide --op-attrs=2065:zps:110+4113:qtype:per_tensor*scales:0.00390625*zps:114 --tensor-property=1:undef --case=pattern/int8/int8_f32_matmul_mul_add_fusion.json
+--reset --in-shapes=0:1x4x16x8+1:1x4x16x8+2:1+3:1x1x1x16 --op-attrs=2065:zps:110+4113:qtype:per_tensor*scales:0.00390625*zps:0*axis:0+8:transpose_b:1 --tensor-property=1:undef --case=pattern/int8/int8_f32_matmul_mul_add_fusion.json
+--reset --in-shapes=0:1x4x16x8+3:1x4x8x16 --dt=0:u8+3:u8,0:u8+3:s8,0:s8+3:u8,0:s8+3:s8 --op-kind=5:undef+6:undef --op-attrs=0:zps:110+2:zps:114*axis:1 --tensor-property=3:undef --case=pattern/int8/int8_bf16_matmul_mul_add_fusion.json
+--reset --in-shapes=0:1x4x16x8+3:1x4x8x16+7:1,0:1x4x16x8*acbd+3:1x4x8x16*adbc+7:1 --dt=0:u8+3:u8,0:u8+3:s8,0:s8+3:u8,0:s8+3:s8 --op-kind=5:Divide+6:undef --op-attrs=0:zps:110+2:zps:114*axis:1 --tensor-property=3:undef --case=pattern/int8/int8_bf16_matmul_mul_add_fusion.json
+--reset --in-shapes=0:8x4x16x8+3:8x4x8x16+7:1+9:8x1x1x16 --dt=0:u8+3:u8,0:u8+3:s8,0:s8+3:u8,0:s8+3:s8 --op-kind=5:Divide --op-attrs=0:zps:110+2:zps:114*axis:1 --tensor-property=3:undef --case=pattern/int8/int8_bf16_matmul_mul_add_fusion.json
+--reset --in-shapes=0:2x2x4x4+1:2x2x4x4+2:2x2x4x4 --dt=0:s8+1:s8+2:s8+8368:s8 --op-attrs=3:axis:1+2065:scales:0.03937008+4113:scales:0.03937008+6161:scales:0.03937008+8208:scales:0.03937008 --case=pattern/int8/int8_concat_fusion_3.json

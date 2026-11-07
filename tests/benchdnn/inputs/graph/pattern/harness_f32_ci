@@ -1,1 +1,2 @@
 --reset --in-shapes=0:2x64x112x112+1:32x64x2x2 --case=pattern/f32/conv_post_ops_fusion.json
+--reset --case=pattern/f32/matmul_div_select.json

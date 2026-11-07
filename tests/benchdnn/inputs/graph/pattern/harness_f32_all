@@ -1,3 +1,5 @@
+--reset --batch=pattern/harness_f32_ci
+
 --reset --case=pattern/f32/binary_post_ops_fusion.json
 --reset --case=pattern/f32/bn_bwd_relu_bwd_fusion.json
 --reset --case=pattern/f32/bn_relu_fusion.json

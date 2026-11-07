@@ -719,7 +719,8 @@ bool deserialized_graph_t::detect_sdpa_fwd_impl() const {
             = {"Divide", "Multiply", "Add", "Subtract", "Select", "GenIndex",
                     "GreaterEqual", "StaticReshape", "StaticTranspose"};
     static const std::unordered_set<std::string> mm2_pre_op_kind
-            = {"Dequantize", "TypeCast", "Quantize", "Dropout"};
+            = {"Dequantize", "TypeCast", "Quantize", "Dropout", "StaticReshape",
+                    "StaticTranspose"};
     const auto is_root_op = [&](const deserialized_op_t &op) {
         return std::none_of(op.in_lts_.begin(), op.in_lts_.end(),
                 [&](const deserialized_lt_t &lt) {

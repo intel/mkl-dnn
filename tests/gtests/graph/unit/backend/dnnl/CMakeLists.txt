@@ -44,10 +44,8 @@ FILE(GLOB DNNL_OP_EXECUTION_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_scratchpad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_subgraph_pass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_op_executable.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_select.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_batch_norm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_binary_op.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/test_bmm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_compiled_partition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_concat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_convolution.cpp

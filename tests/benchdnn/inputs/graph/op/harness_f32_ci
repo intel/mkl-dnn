@@ -49,3 +49,9 @@
 --reset --case=op/f32/static_transpose.json
 --reset --case=op/f32/genindex.json
 --reset --case=op/f32/greaterequal.json
+--reset --in-shapes=0:1x2+1:1x2 --op-attrs=0:axis:0,0:axis:1 --case=op/f32/concat.json
+--reset --in-shapes=0:1x2x2+1:1x2x2 --op-attrs=0:axis:0,0:axis:1,0:axis:2 --case=op/f32/concat.json
+--reset --in-shapes=0:1x2x2x2+1:1x2x2x2 --op-attrs=0:axis:0,0:axis:1,0:axis:2,0:axis:3,0:axis:-1 --case=op/f32/concat.json
+--reset --in-shapes=0:1x2x2x2+1:1x2x2x2*acdb --op-attrs=0:axis:0 --case=op/f32/concat.json
+--reset --in-shapes=0:2x3x4+1:2x0x4+2:2x3x4 --op-attrs=0:axis:1 --case=op/f32/concat_2.json
+--reset --case=op/f32/concat_64.json
