@@ -436,7 +436,10 @@ struct dnnl_post_ops {
                 case primitive_kind::binary:
                     ret = binary.alg == rhs.binary.alg
                             && binary.user_src1_desc
-                                    == rhs.binary.user_src1_desc;
+                                    == rhs.binary.user_src1_desc
+                            && IMPLICATION(is_binary_with_ternary_op(),
+                                    binary.user_src2_desc
+                                            == rhs.binary.user_src2_desc);
                     break;
                 case primitive_kind::prelu:
                     ret = prelu.mask == rhs.prelu.mask;

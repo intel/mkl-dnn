@@ -196,6 +196,8 @@ void serialize(serialization_stream_t &sstream, const post_ops_t &post_ops) {
             case primitive_kind::binary:
                 sstream.append(entry.binary.alg);
                 serialize(sstream, entry.binary.user_src1_desc);
+                if (entry.is_binary_with_ternary_op())
+                    serialize(sstream, entry.binary.user_src2_desc);
                 break;
             case primitive_kind::prelu: sstream.append(entry.prelu.mask); break;
             default: assert(!"unknown post_op");

@@ -263,6 +263,9 @@ status_t post_ops_t::validate_binary(alg_kind_t alg,
                 IMPLICATION(user_src2_desc->format_kind == format_kind::any,
                         types::data_type_bits(user_src2_desc->data_type) >= 8),
                 VERBOSE_UNSUPPORTED_DT);
+        // The conditional input is s8 only, as for the binary primitive.
+        VCHECK_ATTR(user_src2_desc->data_type == data_type::s8,
+                VERBOSE_INVALID_DATATYPE, "bin_po src2");
         for (int d = 0; d < user_src2_desc->ndims; ++d) {
             VCHECK_ATTR(!is_runtime_value(user_src2_desc->dims[d]),
                     VERBOSE_RUNTIMEDIM_UNSUPPORTED);
