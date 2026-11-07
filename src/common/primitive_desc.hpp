@@ -489,7 +489,10 @@ struct primitive_desc_t {
         // up from the cache and lead to the errornous deserialization process
         // of further nested primitives which may not hit the primitive cache.
         const bool force_create_from_blob = static_cast<bool>(cache_blob);
-        if (get_verbose(verbose_t::debuginfo) >= 1) {
+        // Only top-level primitive create profile is printed. Nested primitive
+        // create profile is printed under debuginfo.
+        if (get_verbose(verbose_t::create_profile)
+                && get_verbose(verbose_t::debuginfo) >= 1) {
             double start_ms = get_msec();
             CHECK(create_primitive(
                     primitive, engine, cache_blob, force_create_from_blob));
