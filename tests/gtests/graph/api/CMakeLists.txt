@@ -70,6 +70,7 @@ FILE(GLOB API_TEST_ENGINE_DEPENDENT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/test_c_api_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_cpp_api_compile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/test_cpp_api_partition.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_cpp_api_concurrent_execution.cpp
 )
 
 foreach(TEST_FILE ${API_TEST_ENGINE_INDEPENDENT_SOURCES})
