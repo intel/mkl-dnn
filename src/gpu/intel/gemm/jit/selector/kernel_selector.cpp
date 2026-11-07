@@ -17,8 +17,11 @@
 #include "gemmstone/kernel_selector.hpp"
 #include "gemmstone/kernel_evaluator.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -168,6 +171,20 @@ struct EntryData {
 const std::vector<const kcatalog::Entry *> getEntries(const kcatalog::Catalog &catalog, int npatterns, const MatchParams *patterns, const EvaluateParams &eparams, EvaluateAuxOutput &aux,  SelectionObserver * observer)
 {
     // TODO: omit evaluation if only one match, if aux output not needed.
+    static const bool dbg = []{
+        const char *s = std::getenv("OV_GEMM_DEBUG");
+        return s && s[0] == '1';
+    }();
+    if (dbg) {
+        std::fprintf(stderr,
+                "GEMMSEL prec=%s/%s/%s lay=%s/%s/%c m=%d n=%d k=%d batch=%d align=%d/%d/%d npat=%d\n",
+                patterns[0].selector.precisions[0], patterns[0].selector.precisions[1],
+                patterns[0].selector.precisions[2], patterns[0].selector.layouts[0],
+                patterns[0].selector.layouts[1], patterns[0].selector.layouts[2][0],
+                (int)patterns[0].sizes.m, (int)patterns[0].sizes.n, (int)patterns[0].sizes.k,
+                (int)patterns[0].sizes.batch, patterns[0].alignment[0], patterns[0].alignment[1],
+                patterns[0].alignment[2], npatterns);
+    }
     std::vector<EntryData> keys;
     for (int ipattern = 0; ipattern < npatterns; ipattern++) {
         for (auto it = match(catalog, patterns[ipattern]); it; it++) {
@@ -209,6 +226,28 @@ const std::vector<const kcatalog::Entry *> getEntries(const kcatalog::Catalog &c
                       return (lhs.entry < rhs.entry);
     };
     std::sort(keys.begin(), keys.end(), less);
+
+    // Experimental control: OV_GEMM_SKIP=n rotates the always-accept (score=-inf) block so
+    // each spliced variant can be measured in isolation; OV_GEMM_SKIP=99 drops it entirely
+    // to measure the pure catalog ranking. Other selection sites are unaffected either way.
+    static const int rotate_by = []{
+        const char *s = std::getenv("OV_GEMM_SKIP");
+        return s ? std::atoi(s) : 0;
+    }();
+    if (rotate_by == 99) {
+        keys.erase(std::remove_if(keys.begin(), keys.end(),
+                        [](const EntryData &k) { return k.score < -1e29; }),
+                keys.end());
+    } else if (rotate_by >= 100) {
+        int skip = rotate_by - 100;
+        if (keys.size() > 1)
+            std::rotate(keys.begin(), keys.begin() + (skip % int(keys.size())), keys.end());
+    } else if (rotate_by > 0) {
+        int nacc = 0;
+        while (nacc < (int)keys.size() && keys[nacc].score < -1e29) nacc++;
+        if (nacc > 1)
+            std::rotate(keys.begin(), keys.begin() + (rotate_by % nacc), keys.begin() + nacc);
+    }
 
     // Unpack into vector of entries (dropping score)
     std::vector<const kcatalog::Entry *> entries;

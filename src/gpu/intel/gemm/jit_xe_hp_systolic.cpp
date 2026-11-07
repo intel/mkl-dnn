@@ -16,6 +16,8 @@
 
 #include "gpu/intel/gemm/jit_xe_hp_systolic.hpp"
 
+#include <cstdlib>
+
 #include "common/c_types_map.hpp"
 #include "common/type_helpers.hpp"
 #include "common/verbose_msg.hpp"
@@ -42,6 +44,15 @@ status_t xe_hp_systolic_t::pd_t::init(const impl::engine_t *engine) {
 
     assert(engine->kind() == engine_kind::gpu);
     const auto *intel_engine = utils::downcast<const intel::engine_t *>(engine);
+
+    // veesion: this implementation sits AHEAD of gemmstone (gen_t) in the gemm impl list, so
+    // wherever it accepts a shape the cost model never gets to compare. gemmstone measured
+    // faster on every int8 GEMM shape this ViT runs, so skip unless explicitly re-enabled.
+    static const bool disabled = []() {
+        const char *e = std::getenv("OV_SYSTOLIC");
+        return !(e != nullptr && e[0] == '1');
+    }();
+    VDISPATCH_GEMM(!disabled, VERBOSE_UNSUPPORTED_FEATURE, "OV_SYSTOLIC");
 
     VDISPATCH_GEMM(intel_engine->mayiuse_ngen_kernels(),
             VERBOSE_UNSUPPORTED_DEVICE_FEATURE, "ngen kernels");
