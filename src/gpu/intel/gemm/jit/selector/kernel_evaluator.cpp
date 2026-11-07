@@ -357,46 +357,27 @@ double evaluateECore(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, 
 #undef PARAM
 }
 
+static int kParallelK0(const kcatalog::Entry &e, const DerivedEvaluateParams &dp)
+{
+    int padWGs = e.driverInfo.kPadding() ? 1 : 0;
+    int wgCountK = std::max(1, int(dp.hwThreadCapacity / dp.threadCount) - padWGs);
+
+    if (dp.deterministic || dp.noCAtomics) wgCountK = 1;    /* k-parallelization is not deterministic */
+
+    auto k0 = int(alignUp(divUp(dp.sizes.k, wgCountK * e.driverInfo.wg[LoopK]), e.driverInfo.unroll[LoopK]));
+    return std::max(k0, 1);
+}
+
 double evaluateE(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, EvaluateAuxOutput &aux)
 {
     if (e.driverInfo.kParallel()) {
-        // Consider choosing k0 to get as close as possible to 1 or 2 full waves.
-        int padWGs = e.driverInfo.kPadding() ? 1 : 0;
-        int wgCountK1 = std::max(1, int(dp.hwThreadCapacity / dp.threadCount) - padWGs);
-        int wgCountK2 = std::max(1, int(2 * dp.hwThreadCapacity / dp.threadCount) - padWGs);
-
-        if (dp.deterministic || dp.noCAtomics) wgCountK1 = wgCountK2 = 1;    /* k-parallelization is not deterministic */
-
-        auto k0_1 = int(alignUp(divUp(dp.sizes.k, wgCountK1 * e.driverInfo.wg[LoopK]), e.driverInfo.unroll[LoopK]));
-        auto k0_2 = int(alignUp(divUp(dp.sizes.k, wgCountK2 * e.driverInfo.wg[LoopK]), e.driverInfo.unroll[LoopK]));
-
-        k0_1 = std::max(k0_1, 1);
-        k0_2 = std::max(k0_2, 1);
-
-        wgCountK1 = std::max(1, int(divUp(dp.sizes.k, k0_1 * e.driverInfo.wg[LoopK])));
-        wgCountK2 = std::max(1, int(divUp(dp.sizes.k, k0_2 * e.driverInfo.wg[LoopK])));
+        aux.k0 = kParallelK0(e, dp);
 
         auto dp1 = dp;
-        dp1.wgCountK = wgCountK1;
-        dp1.threadCount *= wgCountK1;
-        aux.k0 = k0_1;
+        dp1.wgCountK = std::max(1, int(divUp(dp.sizes.k, aux.k0 * e.driverInfo.wg[LoopK])));
+        dp1.threadCount *= dp1.wgCountK;
 
         double score = evaluateECore(e, dp1, aux);
-
-        if (k0_2 != k0_1) {
-            auto dp2 = dp;
-            dp2.wgCountK = wgCountK2;
-            dp2.threadCount *= wgCountK2;
-
-            EvaluateAuxOutput aux2;
-            aux2.k0 = k0_2;
-
-            double score2 = evaluateECore(e, dp2, aux2);
-            if (score2 < score) {
-                score = score2;
-                aux = aux2;
-            }
-        }
 
         // Add cost of initial beta scaling if not 1.
         if (!e.driverInfo.fusedBeta() && dp.beta != 1.) {
@@ -586,6 +567,20 @@ double evaluate(const kcatalog::Entry &e, const DerivedEvaluateParams &dp, Evalu
     aux.disableAtomics = dp.noCAtomics;
 
     return score;
+}
+
+EvaluateAuxOutput evaluateFixed(const kcatalog::Entry &e, const DerivedEvaluateParams &dp)
+{
+    EvaluateAuxOutput aux;
+    auto &di = e.driverInfo;
+
+    aux.kParallel = di.kParallel();
+    aux.kParallelVariable = di.kParallelVariable();
+    if (aux.kParallel)
+        aux.k0 = kParallelK0(e, dp);
+
+    evaluateECore(e, dp, aux);
+    return aux;
 }
 
 void modifyStrategy(GEMMStrategy &strategy, const EvaluateAuxOutput &aux)

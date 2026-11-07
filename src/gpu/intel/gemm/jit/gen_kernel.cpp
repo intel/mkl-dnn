@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <functional>
 #include <stdexcept>
 
 #include "gpu/intel/gemm/jit/gen_kernel.hpp"
@@ -57,14 +58,71 @@ std::string ms_hint(double score, int eu_count, int freq_mhz) {
     return b;
 }
 
-SelectionObserver make_entry_observer(int eu_count, int freq_mhz) {
-    return [eu_count, freq_mhz](const kcatalog::Entry *entry, double score,
-                   EvaluateAuxOutput) {
+SelectionObserver make_entry_observer(int eu_count, int freq_mhz,
+        std::function<std::string(const kcatalog::Entry *)> resolve = nullptr) {
+    return [eu_count, freq_mhz, resolve](const kcatalog::Entry *entry,
+                   double score, EvaluateAuxOutput) {
+        auto row = [&]() {
+            if (!resolve) return entry->str();
+            auto r = resolve(entry);
+            return r.empty() ? std::string("(unresolved)") : r;
+        };
         gpu_debug() << "[" << lpad(entry - catalog().entries, 4)
                     << "] consider score:" << score
-                    << ms_hint(score, eu_count, freq_mhz) << " "
-                    << entry->str();
+                    << ms_hint(score, eu_count, freq_mhz) << " " << row();
     };
+}
+
+// kr k-thread count (1: no kr).
+struct decisions_t {
+    bool kv = false, kb = false;
+    int wgK = 1;
+    bool operator==(const decisions_t &o) const {
+        return kv == o.kv && kb == o.kb && wgK == o.wgK;
+    }
+    bool operator!=(const decisions_t &o) const { return !(*this == o); }
+    std::string str() const {
+        std::string s = std::string(kv ? " kv" : "") + (kb ? " kb" : "")
+                + (wgK > 1 ? " kr x" + std::to_string(wgK) : "");
+        return s.empty() ? "none" : s.substr(1);
+    }
+};
+
+decisions_t decisions_of(const GEMMStrategy &s) {
+    decisions_t d;
+    d.kv = s.kParallelVariable;
+    d.kb = s.kParallel;
+    d.wgK = s.kParallelLocal ? s.wg[LoopK] : 1;
+    return d;
+}
+
+decisions_t selector_decisions(
+        const GEMMStrategy &row, const EvaluateAuxOutput &aux) {
+    auto d = decisions_of(row);
+    d.kv = aux.kParallelVariable;
+    d.kb = aux.kParallel;
+    bool by_rule = row.fixedWGK() || row.shrinkWGK || aux.kParallelVariable
+            || (aux.kParallel && row.kParallel);
+    if (!by_rule && aux.wgK < d.wgK) d.wgK = std::max(aux.wgK, 1);
+    return d;
+}
+
+void set_decisions(GEMMStrategy &s, const decisions_t &d) {
+    auto had = decisions_of(s);
+    if (d.kb != had.kb || d.kv != had.kv) {
+        EvaluateAuxOutput aux;
+        aux.kParallel = d.kb;
+        aux.kParallelVariable = d.kv;
+        modifyStrategy(s, aux);
+    }
+    if (d.wgK != had.wgK) s.setKParallelLocal(d.wgK);
+}
+
+decisions_t kept(
+        const GEMMStrategy &st, dim_t k, const EvaluateAuxOutput &aux) {
+    auto d = decisions_of(st);
+    if (d.kb && k <= aux.k0 * aux.wgK) d.kb = false;
+    return d;
 }
 
 std::string kernel_str(const GEMMProblem &problem, int unroll_m, int unroll_n,
@@ -74,6 +132,7 @@ std::string kernel_str(const GEMMProblem &problem, int unroll_m, int unroll_n,
     return problem.toString() + ' ' + std::to_string(unroll_m) + ' '
             + std::to_string(unroll_n) + ' ' + astr + strategy;
 }
+
 } // anonymous namespace
 
 bool enable_generator_dsl() {
@@ -200,7 +259,27 @@ void gen_desc_t::prepare(
     adjustStrategy(hw_, problem, st, tags);
 }
 
-status_t gen_desc_t::finalize(const char *tags) {
+GEMMStrategy gen_desc_t::resolve_launch(const GEMMStrategy &s,
+        const kcatalog::Entry &base, const char *tags,
+        const EvaluateParams &eval_params) {
+    GEMMStrategy st = s;
+    GEMMProblem problem = problem_;
+    prepare(st, problem, tags);
+    st.preflight(hw_, problem);
+
+    if (k_chunk_beta_ && k_ > st.blocking[LoopK] && !problem_.beta1())
+        problem_.beta = Scalar();
+
+    // The launch depends on the strategy, not on the entry.
+    kcatalog::Entry e = base;
+    e.driverInfo = driver_info_of(st);
+    e.selector.layouts[2] = isColMajor(problem_.C.layout) ? "N" : "T";
+    aux_params_ = evaluateFixed(e, getDerivedParams(e, eval_params));
+    return st;
+}
+
+status_t gen_desc_t::finalize(
+        const char *tags, const EvaluateParams &eval_params) {
     reject_reason_.clear();
     auto reject = [&](const std::string &why) {
         reject_reason_ = why;
@@ -208,6 +287,13 @@ status_t gen_desc_t::finalize(const char *tags) {
     };
     problem_.CO.setAlignment(problem_.Tco.paddedSize());
 
+    kcatalog::Entry bare = {};
+    bare.selector.hw = catalog_hw_;
+    bare.selector.kernelType = bare.selector.precisions[0]
+            = bare.selector.precisions[1] = bare.selector.precisions[2]
+            = bare.selector.layouts[0] = bare.selector.layouts[1]
+            = bare.selector.layouts[2] = "";
+    const auto *base = entry_ ? entry_ : &bare;
     std::string str = kernel_override_;
     try {
         if (str.empty()) {
@@ -238,50 +324,36 @@ status_t gen_desc_t::finalize(const char *tags) {
                         entry_->restrictions.alignment[2]));
             }
 
-            str = kernel_str(problem_, entry_->driverInfo.unroll[LoopM],
-                    entry_->driverInfo.unroll[LoopN], entry_->strategy);
+            auto um = entry_->driverInfo.unroll[LoopM];
+            auto un = entry_->driverInfo.unroll[LoopN];
+            GEMMStrategy row(hw_, stepping_);
+            row.unroll[LoopM] = um;
+            row.unroll[LoopN] = un;
+            parseStrategy(entry_->strategy, problem_, row);
+            EvaluateAuxOutput sel;
+            evaluate(*entry_, eval_params, sel);
+            auto st = row;
+            set_decisions(st, selector_decisions(row, sel));
+            // Decisions only shrink, so one correction is stable.
+            set_decisions(st,
+                    kept(resolve_launch(st, *entry_, tags, eval_params), k_,
+                            aux_params_));
+            str = kernel_str(problem_, um, un,
+                    rewriteKParallel(entry_->strategy, row, st));
         } else {
             entry_ = nullptr;
         }
+        resolved_str_ = str;
         apply_strategy(str);
-        if (!entry_) {
-            // Later k-chunks accumulate (catalog parity).
-            auto block_k = strategy_.blocking[LoopK];
-            if (block_k <= 0) block_k = strategy_.defaultBlockK(hw_, problem_);
-            if (k_ > block_k && !problem_.beta1()) problem_.beta = Scalar();
-
-            if (strategy_.kParallel)
-                throw std::runtime_error("unknown k0 for global k-parallel");
-            aux_params_ = EvaluateAuxOutput();
-            aux_params_.kParallelVariable = strategy_.kParallelVariable;
-            if (strategy_.kParallelLocal) {
-                if (strategy_.wg[LoopK] < 1 || strategy_.unroll[LoopK] < 1)
-                    throw std::runtime_error(
-                            "invalid k-parallel-local geometry");
-                aux_params_.k0
-                        = utils::rnd_up(utils::div_up(k_, strategy_.wg[LoopK]),
-                                strategy_.unroll[LoopK]);
-                aux_params_.wgK = std::max(1,
-                        std::min(strategy_.wg[LoopK],
-                                int(utils::div_up(k_, aux_params_.k0))));
-            }
-        }
+        resolve_launch(strategy_, *base, tags, eval_params);
     } catch (const std::exception &e) { return reject(e.what()); }
-    modifyStrategy(strategy_, aux_params_);
+    auto want = decisions_of(strategy_);
     if (l1_flush_wa_)
         strategy_.C.cachingW = makeL1Uncacheable(strategy_.C.cachingW);
     strategy_.panelCheck
             |= (isPacked(problem_.A.layout) || isPacked(problem_.B.layout));
 
     if (enable_generator_dsl()) { fixup_dsl_strategy(strategy_); }
-
-    // Align k slice size and quantization group size
-    if (strategy_.kParallelLocal) {
-        if (problem_.quantized2DA())
-            aux_params_.k0 = utils::rnd_up(aux_params_.k0, problem_.aqGroupK);
-        if (problem_.quantized2DB())
-            aux_params_.k0 = utils::rnd_up(aux_params_.k0, problem_.bqGroupK);
-    }
 
     if (hw_ == ngen::HW::Xe2 || hw_ == ngen::HW::Xe3) {
         // Use XeHPC register banking on Xe2/Xe3, in order
@@ -310,16 +382,6 @@ status_t gen_desc_t::finalize(const char *tags) {
         strategy_.namedBarriers[1] = 0;
     }
 
-    // Disable global k parallelization if it wouldn't be used.
-    if (strategy_.kParallel && k_ >= 0) {
-        auto k_min = aux_params_.k0 * aux_params_.wgK;
-        if (k_ <= k_min) {
-            strategy_.kParallel = false;
-            strategy_.C.atomic = false;
-            strategy_.CO.atomic = false;
-        }
-    }
-
     // Always use variable beta for global k-parallel kernels.
     if (strategy_.kParallel && !strategy_.fuseBeta) problem_.beta = Scalar();
 
@@ -339,7 +401,7 @@ status_t gen_desc_t::finalize(const char *tags) {
             dim_t n_tiles = dim_t(utils::div_up(n_, wg_tile_n));
             dim_t thread_per_tg = strategy_.wg[LoopM] * strategy_.wg[LoopN];
             if (!strategy_.kParallelVariable)
-                thread_per_tg *= std::max(strategy_.wg[LoopK], 1);
+                thread_per_tg *= std::max(aux_params_.wgK, 1);
             dim_t thread_gpu = eu_count_
                     * compute::device_info_t::threads_per_eu(
                             product_, strategy_.GRFs);
@@ -385,13 +447,11 @@ status_t gen_desc_t::finalize(const char *tags) {
     } catch (const std::exception &e) { return reject(e.what()); } catch (...) {
         return reject("preflight failed");
     }
-
-    // Override: fixed beta would be reapplied on later k-chunks.
-    if (!entry_ && k_ > strategy_.blocking[LoopK] && problem_.beta.fixed()
-            && !problem_.beta1())
-        return reject("fixed beta over k-chunks");
-    if ((strategy_.kParallel || strategy_.kParallelVariable)
-            && !strategy_.C.atomic)
+    auto have = kept(strategy_, k_, aux_params_);
+    if (have != want)
+        return reject("decisions changed: " + want.str() + " -> " + have.str()
+                + "," + resolved_str_);
+    if ((have.kb || have.kv) && !strategy_.C.atomic)
         return reject("k-parallel without C atomics");
 
     // Check for legal 2D quantization group size.
@@ -433,11 +493,6 @@ status_t gen_desc_t::finalize(const char *tags) {
                 = utils::rnd_up(problem_.bqGroupN, strategy_.unroll[LoopN]);
     }
 
-    strategy_.kInterleaveChunk
-            = std::min(strategy_.kInterleaveChunk, (int)aux_params_.k0);
-    if (strategy_.kInterleave) aux_params_.wgK = strategy_.wg[LoopK];
-    if (aux_params_.wgK > strategy_.wg[LoopK])
-        aux_params_.wgK = strategy_.wg[LoopK];
     driver_info_ = driver_info_of(strategy_);
 
     return status::success;
@@ -490,6 +545,7 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     /* Reuse PVC strategies for legacy mode on Xe3p */
     if (hw_ == ngen::HW::Xe3p && !efficient_64b_)
         base.selector.hw = kcatalog::HWTagXeHPC;
+    catalog_hw_ = base.selector.hw;
 
     // By default gemmstone assumes that the accumulation type must be at least
     // as wide as the output type. For oneDNN this restriction is not needed.
@@ -643,9 +699,18 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
     eval_params_.deterministic = (mode & mode_deterministic);
     eval_params_.Tc_ext = problem.Tc_ext;
 
+    auto resolve = [this, &problem](const kcatalog::Entry *entry) {
+        gen_nocopy_desc_t d = *this;
+        d.set_kernel_override("");
+        d.set_entry(entry);
+        d.set_problem(problem);
+        return d.finalize() == status::success ? d.resolved_str_
+                                               : std::string();
+    };
     SelectionObserver observer = make_entry_observer(
-            dev_info.eu_count(), dev_info.max_clock_mhz());
+            dev_info.eu_count(), dev_info.max_clock_mhz(), resolve);
     tags_ = match_params[0].tags;
+    k_chunk_beta_ = true;
     Ts_ = problem.Ts;
     beta_ = problem.beta;
     return select(catalog(), static_cast<int>(match_params.size()),
@@ -654,6 +719,16 @@ gen_nocopy_desc_t::select_kernel(const compute::device_info_t &dev_info,
 
 status_t gen_nocopy_desc_t::finalize() {
     // Update A/B/C types from entry.
+    if (entry_) update_types();
+    problem_.Ts = Ts_;
+
+    if (problem_.Ts == Type::invalid) problem_.Ts = problem_.Tc;
+
+    problem_.beta = beta_;
+    return gen_desc_t::finalize(tags_.c_str(), eval_params_);
+}
+
+void gen_nocopy_desc_t::update_types() {
     Type Ta_new, Ta_ext_new, Tb_new, Tb_ext_new, Tc_new;
     parsePrecisions(entry_->selector.precisions[0], Ta_ext_new, Ta_new);
     parsePrecisions(entry_->selector.precisions[1], Tb_ext_new, Tb_new);
@@ -682,18 +757,6 @@ status_t gen_nocopy_desc_t::finalize() {
     };
     use_tf32(problem_.Ta_ext, Ta_ext_new);
     use_tf32(problem_.Tb_ext, Tb_ext_new);
-    problem_.Ts = Ts_;
-
-    if (problem_.Ts == Type::invalid) problem_.Ts = problem_.Tc;
-
-    auto block_k = entry_->driverInfo.blocking[LoopK];
-    problem_.beta = beta_;
-    // An override applies its own k blocking.
-    if (kernel_override_.empty() && block_k > 0 && k_ > block_k
-            && eval_params_.beta != 1.0f)
-        problem_.beta = Scalar();
-    evaluate(*entry_, eval_params_, aux_params_);
-    return gen_desc_t::finalize(tags_.c_str());
 }
 
 status_t gen_xe_systolic_kernel_desc_t::select_kernel(
@@ -828,7 +891,7 @@ status_t gen_xe_systolic_kernel_desc_t::select_kernel(
 
     if (entries.size() < 1) return status::unimplemented;
     entry_ = entries[0];
-    return finalize(match_params.tags);
+    return finalize(match_params.tags, eval_params);
 }
 
 void gen_xe_systolic_kernel_desc_t::choose_unrolls(compute::gpu_arch_t arch,

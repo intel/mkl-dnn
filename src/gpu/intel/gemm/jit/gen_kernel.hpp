@@ -70,6 +70,7 @@ struct gen_desc_t {
     const gemmstone::GEMMProblem *problem() const { return &problem_; }
     const gemmstone::GEMMStrategy *strategy() const { return &strategy_; }
     std::string str() const;
+    const std::string &resolved_str() const { return resolved_str_; }
 
     const gemmstone::CommonDriverInfo *driver_info() const {
         return &driver_info_;
@@ -107,6 +108,7 @@ struct gen_desc_t {
     void set_kernel_override(const std::string &kernel) {
         kernel_override_ = kernel;
     }
+    bool has_override() const { return !kernel_override_.empty(); }
     // Why the override does not run.
     const std::string &reject_reason() const { return reject_reason_; }
 
@@ -123,9 +125,13 @@ protected:
     gemmstone::CommonDriverInfo driver_info_;
 
     bool efficient_64b_ = false;
+    char catalog_hw_ = 0;
 
     std::string kernel_override_;
+    std::string resolved_str_;
     std::string reject_reason_;
+    // Variable beta when k spans several k-blocks (nocopy only).
+    bool k_chunk_beta_ = false;
 
     /* optional information to fine-tune kernel */
     int m_ = -1, n_ = -1, k_ = -1;
@@ -133,9 +139,14 @@ protected:
     bool disable_systolic_ = false;
     bool relaxed_acc_ = false;
 
-    status_t finalize(const char *tags);
+    status_t finalize(
+            const char *tags, const gemmstone::EvaluateParams &eval_params);
     // Throws.
     void apply_strategy(std::string str);
+    // Returns the preflighted strategy; throws.
+    gemmstone::GEMMStrategy resolve_launch(const gemmstone::GEMMStrategy &s,
+            const gemmstone::kcatalog::Entry &base, const char *tags,
+            const gemmstone::EvaluateParams &eval_params);
     void prepare(gemmstone::GEMMStrategy &st, gemmstone::GEMMProblem &problem,
             const char *tags) const;
     gemmstone::CommonDriverInfo driver_info_of(
@@ -167,6 +178,8 @@ struct gen_nocopy_desc_t : public gen_desc_t {
     status_t finalize();
 
 private:
+    void update_types();
+
     std::string tags_;
     gemmstone::EvaluateParams eval_params_;
     gemmstone::Type Ts_;
