@@ -2,7 +2,7 @@
 
 ## Usage
 ```
-    [--perf-template={def [default], csv, CUSTOM_TEMPLATE}]
+    [--perf-template={def [default], csv, CUSTOM_TEMPLATE, csv:CUSTOM_TEMPLATE}]
 ```
 
 where:
@@ -13,6 +13,40 @@ where:
  - `CUSTOM_TEMPLATE` -- user-defined template. Should consist of special options
                       supported by specific driver. Refer to the list of
                       options supported below.
+ - `csv:CUSTOM_TEMPLATE` -- user-defined CSV template, for example
+                           `csv:%name%,%prb%,%-time%,%0time%`.
+
+## Reading the default header
+
+For primitive drivers, the default report has the following header:
+
+```text
+perf,engine,impl,name,prb,Gops,max_ctime,min_time,min_Gflops,avg_time,avg_Gflops
+```
+
+| Column | Template entry | Meaning and units |
+| :-- | :-- | :-- |
+| `perf` | Literal `perf` | Performance record marker. |
+| `engine` | `%engine%` | Execution engine, such as `cpu` or `gpu`. |
+| `impl` | `%impl%` | Implementation selected for this problem. |
+| `name` | `%name%` | Optional problem name from the input descriptor. |
+| `prb` | `%prb%` | Reproducer containing global settings, driver settings, and the problem descriptor. |
+| `Gops` | `%Gops%` | Estimated operation count for one execution, divided by 10^9. |
+| `max_ctime` | `%+ctime%` | Sum of maximum primitive-descriptor creation time and maximum primitive creation time, in milliseconds. See Create Time Notes below. |
+| `min_time` | `%-time%` | Minimum execution time, in milliseconds. |
+| `min_Gflops` | `%-Gflops%` | Throughput corresponding to minimum execution time: `Gops / (min_time / 1000)`. |
+| `avg_time` | `%0time%` | Average execution time, in milliseconds. |
+| `avg_Gflops` | `%0Gflops%` | Throughput corresponding to average execution time: `Gops / (avg_time / 1000)`. |
+
+For example, `Gops=0.008` and `min_time=0.02` give `min_Gflops=400`.
+The `Gflops` label is also used for operation rates of integer problems.
+
+`Template entries:` shows the template used to generate the report, followed
+by the column header. In the header, `%` characters are removed, and the time
+modifiers `-`, `0`, and `+` become `min_`, `avg_`, and `max_`.
+For example, `%0Gbw%` produces `avg_Gbw` (GB/s). Unmodified `%time%` defaults
+to minimum time; unmodified creation-time options default to maximum time.
+The expanded `csv` template includes driver-specific fields.
 
 
 **benchdnn** supports both out-of-the-box and custom performance reports.
@@ -127,7 +161,7 @@ dumping results with a standard performance template:
 ```
 Template entries: perf,%engine%,%impl%,%name%,%prb%,%Gops%,%+ctime%,%-time%,%-Gflops%,%0time%,%0Gflops%
 perf,engine,impl,name,prb,Gops,max_ctime,min_time,min_Gflops,avg_time,avg_Gflops
-perf,cpu,brg_matmul:avx512_core,"resnet:ip1",--mode=P --max-ms-per-prb=6000 --ip ic2048oc1000n"resnet:ip1",0.008192,0.935547,0.0234375,349.525,0.0269902,303.518
+perf,cpu,brg_matmul:avx512_core,"""resnet:ip1""","--mode=P --max-ms-per-prb=6000 --ip ic2048oc1000n""resnet:ip1""",0.008192,0.935547,0.0234375,349.525,0.0269902,303.518
 ...
 ```
 
@@ -140,7 +174,7 @@ CSV-style:
 ```
 Template entries: perf,%engine%,%impl%,%name%,%dir%,%sdt%,%bia_dt%,%stag%,%wtag%,%dtag%,%attr%,%desc%,%Gops%,%+ctime%,%-time%,%-Gflops%,%0time%,%0Gflops%
 perf,engine,impl,name,dir,sdt,bia_dt,stag,wtag,dtag,attr,desc,Gops,max_ctime,min_time,min_Gflops,avg_time,avg_Gflops
-perf,cpu,brg_matmul:avx512_core,"resnet:ip1",FWD_B,f32:f32:f32,f32,any,any,any,,ic2048oc1000n"resnet:ip1",0.008192,0.9375,0.0234375,349.525,0.027302,300.051
+perf,cpu,brg_matmul:avx512_core,"""resnet:ip1""",FWD_B,f32:f32:f32,f32,any,any,any,,"ic2048oc1000n""resnet:ip1""",0.008192,0.9375,0.0234375,349.525,0.027302,300.051
 ...
 ```
 

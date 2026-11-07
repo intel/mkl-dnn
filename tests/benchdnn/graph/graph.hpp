@@ -58,9 +58,11 @@ struct settings_t : public base_settings_t {
     std::vector<std::map<size_t, std::string>> tensor_property_vec {
             {{SIZE_MAX, "default"}}};
 
-    const char *perf_template_csv = "perf,%engine%,%desc%,%-time%,%0time%";
+    // The leading \1 (byte 0x01) marks built-in templates for CSV escaping.
+    // base_perf_report_t consumes this marker before printing the template.
+    const char *perf_template_csv = "\1perf,%engine%,%desc%,%-time%,%0time%";
     static constexpr const char *perf_template_def
-            = "perf,%engine%,%prb%,%-time%,%0time%";
+            = "\1perf,%engine%,%prb%,%-time%,%0time%";
 
     void reset() { *this = settings_t(perf_template); }
 };

@@ -35,7 +35,12 @@
 #include "tests/thread_context.hpp"
 
 struct base_perf_report_t {
-    base_perf_report_t(const char *perf_template) : pt_(perf_template) {}
+    base_perf_report_t(const char *perf_template)
+        : pt_(perf_template)
+        , csv_(*perf_template == '\1' || !strncmp(perf_template, "csv:", 4)) {
+        // Consume the internal built-in marker or the custom CSV prefix.
+        if (csv_) pt_ += *perf_template == '\1' ? 1 : 4;
+    }
     virtual ~base_perf_report_t() = default;
 
     void report(res_t *res, const char *prb_str) const;
@@ -74,6 +79,9 @@ struct base_perf_report_t {
 
 private:
     const char *pt_;
+    const bool csv_;
+
+    std::string format(res_t *res, const char *prb_str) const;
 
     void handle_option(std::ostream &s, const char *&option, res_t *res,
             const char *prb_str) const;

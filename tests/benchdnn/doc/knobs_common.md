@@ -290,4 +290,5 @@ default.
 ### --perf-template
 `--perf-template=STR` specifies the format of a performance report. `STR`
 values can be `def` (the default), `csv` or a custom set of supported flags.
+Prefix a comma-delimited custom template with `csv:` to use CSV output.
 Refer to [performance report](knobs_perf_report.md) for details.

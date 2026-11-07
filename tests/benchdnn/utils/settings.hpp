@@ -109,9 +109,11 @@ struct base_settings_t {
     // Non-parsed members
     settings_attributes_t attributes;
 
+    // The leading \1 (byte 0x01) marks built-in templates for CSV escaping.
+    // base_perf_report_t consumes this marker before printing the template.
     const char *perf_template_csv_base(const std::string &driver_args) const {
         static const std::string csv_pre
-                = std::string("perf,%engine%,%impl%,%name%,");
+                = std::string("\1perf,%engine%,%impl%,%name%,");
         static const std::string csv_post = std::string(
                 ",%attr%,%desc%,%Gops%,%+ctime%,%-time%,%-Gflops%,%0time%,%"
                 "0Gflops%");
@@ -120,7 +122,7 @@ struct base_settings_t {
     }
 
     static constexpr const char *perf_template_def
-            = "perf,%engine%,%impl%,%name%,%prb%,%Gops%,%+ctime%,%-time%,%-"
+            = "\1perf,%engine%,%impl%,%name%,%prb%,%Gops%,%+ctime%,%-time%,%-"
               "Gflops%,%0time%,%0Gflops%";
     const char *perf_template = perf_template_def;
 

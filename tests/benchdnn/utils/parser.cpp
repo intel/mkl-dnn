@@ -1392,11 +1392,13 @@ bool parse_perf_template(const char *&pt, const char *pt_def,
     static const std::string help
             = "TEMPLATE    (Default: `def`)\n    Specifies performance output "
               "template for perf mode. `TEMPLATE` values can be `def`, `csv` "
-              "or customized set.\n    More details at "
+              "or customized set. Prefix a custom template with `csv:` for "
+              "CSV output.\n    More details at "
             + doc_url + "knobs_perf_report.md\n";
     const auto str2pt = [&pt_def, &pt_csv](const char *str_) {
         const std::string csv_pattern = "csv";
         const std::string def_pattern = "def";
+        if (!strncmp(str_, "csv:", 4)) return str_;
         if (utils::option_matched(csv_pattern, str_))
             return pt_csv;
         else if (utils::option_matched(def_pattern, str_))

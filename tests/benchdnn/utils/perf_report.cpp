@@ -22,6 +22,23 @@
 
 #include "utils/perf_report.hpp"
 
+namespace {
+
+void write_csv_field(std::ostream &s, const std::string &value) {
+    if (value.find_first_of(",\"\r\n") == std::string::npos) {
+        s << value;
+        return;
+    }
+    s << '"';
+    for (char c : value) {
+        if (c == '"') s << '"';
+        s << c;
+    }
+    s << '"';
+}
+
+} // namespace
+
 void base_perf_report_t::report(res_t *res, const char *prb_str) const {
     // Report performance hints before any perf data is emitted.
     report_perf_hints();
@@ -34,20 +51,33 @@ void base_perf_report_t::report(res_t *res, const char *prb_str) const {
     dump_global_params(global_params_ss);
     const std::string full_prb_str = global_params_ss.str() + prb_str;
 
-    stringstream_t ss;
+    const std::string str = format(res, full_prb_str.c_str());
+    BENCHDNN_PRINT(0, "%s\n", str.c_str());
+}
+
+std::string base_perf_report_t::format(res_t *res, const char *prb_str) const {
+    stringstream_t ss, field;
+    std::ostream &out = csv_ ? field : ss;
 
     const char *pt = pt_;
     char c;
     while ((c = *pt++) != '\0') {
-        if (c != '%') {
-            ss << c;
+        if (csv_ && c == ',') {
+            write_csv_field(ss, field.str());
+            ss << ',';
+            field.str("");
+            field.clear();
             continue;
         }
-        handle_option(ss, pt, res, full_prb_str.c_str());
+        if (c != '%') {
+            out << c;
+            continue;
+        }
+        handle_option(out, pt, res, prb_str);
     }
 
-    std::string str = ss.str();
-    BENCHDNN_PRINT(0, "%s\n", str.c_str());
+    if (csv_) write_csv_field(ss, field.str());
+    return ss.str();
 }
 
 void base_perf_report_t::dump_engine(std::ostream &s) const {
@@ -180,11 +210,19 @@ void base_perf_report_t::dump_perf_header() const {
     // dataframe (i.e. no symbols other than _ and not starting with a number)
     const char *pt = pt_;
     char c;
-    stringstream_t ss;
+    stringstream_t ss, field;
+    std::ostream &out = csv_ ? field : ss;
     while ((c = *pt++) != '\0') {
+        if (csv_ && c == ',') {
+            write_csv_field(ss, field.str());
+            ss << ',';
+            field.str("");
+            field.clear();
+            continue;
+        }
         // Print anything that isn't %
         if (c != '%') {
-            ss << c;
+            out << c;
             continue;
         }
         // Replace -/0/+ modifiers immediately after % with min/avg/max in header
@@ -192,15 +230,16 @@ void base_perf_report_t::dump_perf_header() const {
         if (c_next != '\0'
                 && (c_next == '-' || c_next == '0' || c_next == '+')) {
             switch (c_next) {
-                case '-': ss << "min_"; break;
-                case '0': ss << "avg_"; break;
-                case '+': ss << "max_"; break;
+                case '-': out << "min_"; break;
+                case '0': out << "avg_"; break;
+                case '+': out << "max_"; break;
                 default: break;
             }
             pt++;
         }
     }
 
+    if (csv_) write_csv_field(ss, field.str());
     BENCHDNN_PRINT(0, "%s\n", ss.str().c_str());
     header_printed = true;
 }
