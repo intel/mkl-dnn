@@ -47,7 +47,15 @@
 #define USE_MKL_IGEMM 0
 
 #if defined(USE_ACCELERATE)
-#include "Accelerate.h"
+// Include only the CBLAS part of vecLib: the umbrella Accelerate.h (as well as
+// vecLib.h) pulls in arm_neon.h, which declares a global bfloat16_t that
+// conflicts with dnnl::impl::bfloat16_t. Define ACCELERATE_NEW_LAPACK to use
+// the new CBLAS interface (requires macOS 13.3+).
+#if defined(ACCELERATE_NEW_LAPACK)
+#include <vecLib/cblas_new.h>
+#else
+#include <vecLib/cblas.h>
+#endif
 #else
 
 #if defined(USE_CBLAS)
