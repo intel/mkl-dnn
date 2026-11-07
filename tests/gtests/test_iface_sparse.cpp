@@ -103,6 +103,15 @@ TEST(iface_sparse_test_t, TestSparseMDQueries) {
     const memory::dims dims = {64, 128};
     const memory::data_type data_type = dt::f32;
 
+    // The C API is used for the out-of-range checks below because the C++
+    // wrapper maps any error to `undef`, which is indistinguishable from an
+    // out-of-bounds read that happens to return zero.
+    auto query_dt = [](const memory::desc &md, int index) {
+        dnnl_data_type_t qdt;
+        return dnnl_memory_desc_query_v2(
+                md.get(), dnnl_query_data_type, index, &qdt);
+    };
+
     memory::desc md;
 
     // CSR.
@@ -117,6 +126,11 @@ TEST(iface_sparse_test_t, TestSparseMDQueries) {
     ASSERT_EQ(md.get_sparse_encoding(), memory::sparse_encoding::csr);
     ASSERT_EQ(md.get_data_type(1), indices_dt);
     ASSERT_EQ(md.get_data_type(2), pointers_dt);
+    // Indices past the metadata types are rejected instead of reading out of
+    // bounds.
+    ASSERT_EQ(query_dt(md, 3), dnnl_invalid_arguments);
+    ASSERT_EQ(query_dt(md, 1 << 20), dnnl_invalid_arguments);
+    ASSERT_EQ(query_dt(md, -1), dnnl_invalid_arguments);
 
     // COO.
     ASSERT_NO_THROW(md = memory::desc::coo(dims, data_type, nnz, indices_dt));
@@ -129,6 +143,7 @@ TEST(iface_sparse_test_t, TestSparseMDQueries) {
     ASSERT_EQ(md.get_sparse_encoding(), memory::sparse_encoding::coo);
     ASSERT_EQ(md.get_data_type(1), indices_dt);
     ASSERT_EQ(md.get_data_type(2), indices_dt);
+    ASSERT_EQ(query_dt(md, -1), dnnl_invalid_arguments);
 
     // Packed.
     ASSERT_NO_THROW(md = memory::desc::packed(dims, data_type, nnz));
@@ -139,6 +154,11 @@ TEST(iface_sparse_test_t, TestSparseMDQueries) {
 
     ASSERT_EQ(md.get_nnz(), nnz);
     ASSERT_EQ(md.get_sparse_encoding(), memory::sparse_encoding::packed);
+    ASSERT_EQ(query_dt(md, 3), dnnl_invalid_arguments);
+    ASSERT_EQ(query_dt(md, 1 << 20), dnnl_invalid_arguments);
+    ASSERT_EQ(query_dt(md, -1), dnnl_invalid_arguments);
+    ASSERT_EQ(query_dt(md, std::numeric_limits<int>::min()),
+            dnnl_invalid_arguments);
 }
 
 TEST(iface_sparse_test_t, TestSparseMDSize) {
