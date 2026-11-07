@@ -84,6 +84,36 @@ int get_n_block_from_tag(format_tag_t matrix_b_tag) {
     }
 }
 
+int get_vnni_granularity_from_tag(format_tag_t matrix_b_tag) {
+    switch (matrix_b_tag) {
+        case aCB16b64c4b:
+        case aCB16b48c4b:
+        case aCB16b32c4b:
+        case aCB16b16c4b:
+        case BA16a64b4a:
+        case BA16a48b4a:
+        case BA16a32b4a:
+        case BA16a16b4a: return 4;
+        case aCB16b64c2b:
+        case aCB16b48c2b:
+        case aCB16b32c2b:
+        case aCB16b16c2b:
+        case BA16a64b2a:
+        case BA16a48b2a:
+        case BA16a32b2a:
+        case BA16a16b2a: return 2;
+        case aCB16b64c:
+        case aCB16b48c:
+        case aCB16b32c:
+        case aCB16b16c:
+        case BA16a64b:
+        case BA16a48b:
+        case BA16a32b:
+        case BA16a16b: return 1;
+        default: return 0;
+    }
+}
+
 int get_wei_k_blk(data_type_t wei_dt) {
     // Fixed outer block size.
     const int k_outer_block = 16;
@@ -649,7 +679,8 @@ status_t brgemm_matmul_conf_utils_t::set_or_check_B_tag(memory_desc_t &B_md,
                     ? get_default_n_block(format_tag::undef)
                     : static_cast<int>(bgmmc.N_blk);
             bgmmc.wei_tag = blocked_B_layouts_allowed && !bgmmc.is_runtime_N
-                            && !bgmmc.is_int4_weights
+                            && IMPLICATION(bgmmc.is_int4_weights,
+                                    is_int4_blocked_B_supported())
                     ? this->pick_blocked_B_layout(default_n_block)
                     : plain_tensor_layout_tag;
 
@@ -661,7 +692,8 @@ status_t brgemm_matmul_conf_utils_t::set_or_check_B_tag(memory_desc_t &B_md,
 
             // Plain copy-B kernel does not support odd sizes for subbyte types.
             // Using transposed version for these cases.
-            if (bgmmc.is_int4_weights && bgmmc.N % 2 != 0) {
+            if (bgmmc.is_int4_weights && bgmmc.N % 2 != 0
+                    && bgmmc.wei_tag == plain_tensor_layout_tag) {
                 bgmmc.wei_tag = transposed_tensor_layout_tag;
             }
         }
@@ -687,7 +719,8 @@ status_t brgemm_matmul_conf_utils_t::set_or_check_B_tag(memory_desc_t &B_md,
                     blocked_32n_B_layout_tag, blocked_16n_B_layout_tag);
         } else {
             bgmmc.wei_tag = blocked_B_layouts_allowed && !bgmmc.is_runtime_N
-                            && !bgmmc.is_int4_weights
+                            && IMPLICATION(bgmmc.is_int4_weights,
+                                    is_int4_blocked_B_supported())
                     ? memory_desc_matches_one_of_tag(B_md,
                               plain_tensor_layout_tag,
                               transposed_tensor_layout_tag,
@@ -707,7 +740,8 @@ status_t brgemm_matmul_conf_utils_t::set_or_check_B_tag(memory_desc_t &B_md,
 
             // Plain copy-B kernel does not support odd sizes for subbyte types.
             // Using transposed version for these cases.
-            if (bgmmc.is_int4_weights && bgmmc.N % 2 != 0) {
+            if (bgmmc.is_int4_weights && bgmmc.N % 2 != 0
+                    && bgmmc.wei_tag == plain_tensor_layout_tag) {
                 bgmmc.wei_tag = transposed_tensor_layout_tag;
             }
 
@@ -843,11 +877,12 @@ status_t brgemm_matmul_conf_utils_t::set_B_flags(memory_desc_t &B_md) const {
     // Set bits for all dimensions except k dimension
     const int compensation_mask
             = ((1 << bgmmc.ndims) - 1 - (1 << (bgmmc.ndims - 2)));
-    if (bgmmc.s8s8_compensation_required && bgmmc.blocked_B) {
+    if (bgmmc.s8s8_compensation_required && bgmmc.wei_md_has_compensation()) {
         want_B_md.extra.flags |= memory_extra_flags::compensation_conv_s8s8;
         want_B_md.extra.compensation_mask = compensation_mask;
     }
-    if (bgmmc.src_zp_type != brgemm_broadcast_t::none && bgmmc.blocked_B) {
+    if (bgmmc.src_zp_type != brgemm_broadcast_t::none
+            && bgmmc.wei_md_has_compensation()) {
         want_B_md.extra.flags
                 |= memory_extra_flags::compensation_conv_asymmetric_src;
         want_B_md.extra.asymm_compensation_mask = compensation_mask;
@@ -866,8 +901,14 @@ format_tag_t brgemm_matmul_conf_utils_t::pick_blocked_B_layout(
 
     if (bgmmc.ndims > 3) return format_tag::undef;
 
+    // Int4 weights of bf16 weights decompression share the int8 VNNI-blocked
+    // layouts with the int8 grouped quantization path.
+    const bool is_bf16_with_int4_wei = is_bf16_with_int_wei()
+            && one_of(bgmmc.orig_wei_dt, data_type::s4, data_type::u4);
+
     if (is_int8() || (is_f8() && bgmmc.isa != avx10_2) || is_bf16_fp8()
-            || is_f16_fp8() || with_int8_grouped_quantization()) {
+            || is_f16_fp8() || with_int8_grouped_quantization()
+            || is_bf16_with_int4_wei) {
         switch (n_blk) {
             case 64: return bgmmc.ndims == 3 ? aCB16b64c4b : BA16a64b4a;
             case 48: return bgmmc.ndims == 3 ? aCB16b48c4b : BA16a48b4a;
@@ -1567,10 +1608,49 @@ dim_t compute_k_group(const brgemm_matmul_conf_t &bgmmc) {
     return k_group;
 }
 
+// Int4 weights can use the VNNI-blocked B layouts on AVX-512 in the paths whose
+// copy-B kernels read int4 VNNI row groups:
+//   - int8 grouped quantization: the nibbles are expanded in place, and the
+//     per-(M, N) compensation reads the blocked weights as well;
+//   - bf16 weights decompression: each row group is split into the bf16 VNNI
+//     row pairs of buffer B.
+// The weights are addressed in whole VNNI row groups, so every per-K group,
+// including the ones applied in buffer B, has to start at one.
+bool brgemm_matmul_conf_utils_t::is_int4_blocked_B_supported() const {
+    if (!bgmmc.is_int4_weights) return false;
+    if (!bgmmc.with_int8_grouped_quantization && !is_bf16_with_int_wei())
+        return false;
+    if (!is_superset(bgmmc.isa, avx512_core) || bgmmc.is_runtime_K)
+        return false;
+
+    const dim_t vnni_granularity = int4_blocked_B_vnni_granularity();
+    auto is_group_ok = [&](bool is_per_k, dim_t k_group) {
+        return !is_per_k || k_group >= bgmmc.K
+                || k_group % vnni_granularity == 0;
+    };
+    return is_group_ok(bgmmc.is_wei_scale_per_k, bgmmc.wei_scales_k_gsize)
+            && is_group_ok(bgmmc.is_wei_zp_per_k, bgmmc.wei_zp_k_gsize)
+            && is_group_ok(bgmmc.is_src_scale_per_k, bgmmc.src_scales_k_gsize)
+            && is_group_ok(bgmmc.is_src_zp_per_k, bgmmc.src_zp_k_gsize);
+}
+
 // Reset the blocking state so a (re-)run of a blocking search starts from a
 // well-defined configuration.
-void reset_blocking_state(brgemm_matmul_conf_t &bgmmc) {
+void reset_blocking_state(brgemm_matmul_conf_t &bgmmc,
+        const brgemm_matmul_conf_utils_t &bm_conf_utils) {
     bgmmc.N_blk = bgmmc.wei_n_blk;
+    // Blocked int4 weights are always copied into buffer B, and brgemm
+    // kernels with tile accumulators address several blocks of the weights
+    // layout per call (LDB2). Start from the N block of plain int4 weights
+    // rather than from the layout block there. Runtime M is excluded as its
+    // tail kernel uses a non-AMX ISA.
+    if (bgmmc.blocked_B && bgmmc.is_int4_weights && bgmmc.is_amx
+            && !bgmmc.is_runtime_M) {
+        const dim_t default_n_blk
+                = bm_conf_utils.get_default_n_block(format_tag::undef);
+        bgmmc.N_blk = nstl::max<dim_t>(
+                bgmmc.wei_n_blk, rnd_dn(default_n_blk, bgmmc.wei_n_blk));
+    }
     if (!bgmmc.is_runtime_N) bgmmc.N_blk = nstl::min(bgmmc.N_blk, bgmmc.N);
 
     bgmmc.M_chunk_size = bgmmc.N_chunk_size = bgmmc.K_chunk_size = 1;
@@ -1688,7 +1768,7 @@ bool prefer_single_thread_avx2_f32(const brgemm_matmul_conf_t &bgmmc,
 status_t compute_amx_blocking_candidate(brgemm_matmul_conf_t &bgmmc,
         const brgemm_matmul_conf_utils_t &bm_conf_utils, bool prefer_copy_a,
         dim_t k_group, dim_t actual_ldd, bool &per_k_requires_buffer_c) {
-    reset_blocking_state(bgmmc);
+    reset_blocking_state(bgmmc, bm_conf_utils);
 
     if (matmul_amx_blocking_params_macro_t::is_supported(
                 bgmmc, bm_conf_utils)) {
@@ -1844,7 +1924,7 @@ status_t compute_blocking_heuristic(brgemm_matmul_conf_t &bgmmc,
                 bgmmc, bm_conf_utils, attr, prefer_copy_a, k_group, actual_ldd);
 
     bgmmc.is_c_buf_dst_dt = false;
-    reset_blocking_state(bgmmc);
+    reset_blocking_state(bgmmc, bm_conf_utils);
 
     const bool is_avx512 = is_superset(bm_conf_utils.get_isa(), avx512_core);
     VCONDCHECK_BG(is_avx512 || is_superset(bm_conf_utils.get_isa(), avx2),
@@ -2414,12 +2494,12 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
         bgmmc.tr_b_dt_sz = types::data_type_size(f32);
     }
 
-    // int4 weights decompression only supports plain and transpose layouts
-    // TODO: enable int4 reorder and extend support to blocked weights
-    // layout when needed
+    // int4 weights decompression supports plain, transposed and, when
+    // `is_int4_blocked_B_supported()`, the int8 VNNI-blocked layouts.
     if (bgmmc.with_wei_decompression && bgmmc.is_int4_weights)
         VCONDCHECK_BG(bm_conf_utils.check_is_plain(bgmmc.wei_tag)
-                        || bm_conf_utils.check_is_transposed(bgmmc.wei_tag),
+                        || bm_conf_utils.check_is_transposed(bgmmc.wei_tag)
+                        || bgmmc.blocked_B,
                 VERBOSE_UNSUPPORTED_TAG);
 
     const bool transposed_A = bm_conf_utils.check_is_transposed(bgmmc.src_tag);
@@ -2630,6 +2710,16 @@ status_t init_brgemm_matmul_conf(cpu_isa_t isa, brgemm_matmul_conf_t &bgmmc,
                           && bgmmc.N_blk != bgmmc.N),
             "The first coordinate of every N_blk that is larger than LDB "
             "needs to be divisible by LDB");
+
+    // Blocked int4 weights are addressed in whole VNNI row groups, so every
+    // brgemm K block has to start at one (see is_int4_blocked_B_supported()).
+    if (bgmmc.blocked_B && bgmmc.is_int4_weights) {
+        const dim_t vnni_granularity
+                = brgemm_matmul_conf_utils_t::int4_blocked_B_vnni_granularity();
+        VCONDCHECK_BG(
+                bgmmc.K_blk >= bgmmc.K || bgmmc.K_blk % vnni_granularity == 0,
+                VERBOSE_BLOCKING_FAIL, "K_blk is not aligned to blocked B");
+    }
 
     if (bgmmc.is_gemv && bgmmc.gemv_swap_a_b) {
         bgmmc.LDC = bgmmc.LDD = 1;

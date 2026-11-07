@@ -56,6 +56,10 @@ struct per_mn_comp_kernel_t {
         dim_t M_blk = 0;
         dim_t N_blk = 0;
 
+        // Blocked weights only: `wei_batch_ptr` points at (K-block start,
+        // n_base), which is column `wei_n_blk_off` of its weights N block.
+        dim_t wei_n_blk_off = 0;
+
         // Length of the K-block
         dim_t k_len = 0;
 

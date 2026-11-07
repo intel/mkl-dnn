@@ -10,3 +10,6 @@
 # When a generator support must be expanded, leave a TODO note.
 
 --batch=harness_matmul_decompression_u3
+
+# int8 dynamic quantization with VNNI-blocked int4 weights
+--batch=harness_matmul_blocked_int4
