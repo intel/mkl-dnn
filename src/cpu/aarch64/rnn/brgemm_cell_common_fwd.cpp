@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -66,13 +67,10 @@ brgemm_dst_layer_iter_t<src_t, weights_t, scratch_t,
     , B_layer_k_tail_offset_(rnn_.KB1_blocks * rnn_.k1_block * rnn_.n_block)
     , B_iter_k_tail_offset_(rnn_.KB2_blocks * rnn_.k2_block * rnn_.n_block)
     , n_gates_(rnn.unfused_post_gemm ? 1 : rnn.n_gates)
-    , brgemm_kernel_iter_main_(need_gemm_layer_
-                      ? rnn_brgemm_.kernel_iter_b1_[iter_desc_idx_].get()
-                      : rnn_brgemm_.kernel_iter_b0_[iter_desc_idx_].get())
-    , brgemm_kernel_iter_n_tail_(need_gemm_layer_
-                      ? rnn_brgemm_.kernel_iter_N_tail_b1_[iter_desc_idx_].get()
-                      : rnn_brgemm_.kernel_iter_N_tail_b0_[iter_desc_idx_]
-                                .get())
+    , brgemm_kernel_iter_main_(
+              rnn_brgemm_.kernel_iter_b1_[iter_desc_idx_].get())
+    , brgemm_kernel_iter_n_tail_(
+              rnn_brgemm_.kernel_iter_N_tail_b1_[iter_desc_idx_].get())
     , brgemm_kernel_iter_k_tail_(
               rnn_brgemm_.kernel_iter_K2_tail_b1_[iter_desc_idx_].get())
     , brgemm_kernel_iter_nk_tail_(

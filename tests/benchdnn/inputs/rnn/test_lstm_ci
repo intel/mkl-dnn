@@ -44,3 +44,9 @@
 
 --direction=right2left,concat,sum
 --batch=shapes_small
+
+--reset
+--alg=VANILLA_LSTM
+--cfg=f32
+--prop=FWD_I
+l1t3mb1sic5slc1dhc5dic5n"brgemm_lstm_merged_layer_accumulation"

@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2018 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -316,6 +317,12 @@ ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::pd_t::init_brgemm(
             = this->desc()->weights_iter_desc.data_type;
     const data_type_t weights_layer_dt
             = this->desc()->weights_layer_desc.data_type;
+
+#if DNNL_AARCH64
+    // no asimd support for now
+    VDISPATCH_RNN(mayiuse(sve), VERBOSE_UNSUPPORTED_ISA);
+#endif
+
 #if DNNL_X64
     bool is_f32 = everyone_is(
             data_type::f32, src_layer_dt, weights_iter_dt, weights_layer_dt);
@@ -411,10 +418,6 @@ ref_rnn_common_t<aprop, src_type, weights_type, acc_type>::pd_t::init_brgemm(
                                        && rnn_.is_lstm_projection),
                           this->desc()->prop_kind == forward_inference)),
             "bad algorithm for lstm projection for forward inference");
-
-#if DNNL_AARCH64
-    VDISPATCH_RNN(mayiuse(asimd), VERBOSE_ISA_DT_MISMATCH);
-#endif
 
     if (rnn_.is_bf16_conf()) {
         const bool isa_dt_not_ok = (

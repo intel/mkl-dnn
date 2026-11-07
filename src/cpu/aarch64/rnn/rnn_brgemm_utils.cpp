@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2021 Intel Corporation
 * Copyright 2026 FUJITSU LIMITED
+* Copyright 2026 Arm Ltd. and affiliates
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -73,7 +74,6 @@ aarch64::cpu_isa_t brgemm_calc_isa(
     if (mayiuse(sve_512)) return sve_512;
     if (mayiuse(sve_256)) return sve_256;
     if (mayiuse(sve_128)) return sve_128;
-    if (mayiuse(asimd)) return asimd;
     return isa_undef;
 }
 
@@ -278,6 +278,9 @@ status_t rnn_brgemm_t<prop_kind::forward>::configure_brgemm(
         dim_t src_layer_type_size, dim_t scratch_type_size) {
 
     using namespace cpu::rnn_utils;
+
+    // no asimd support for now
+    if (!mayiuse(sve)) return status::unimplemented;
 
     // no int8 brgemm RNN support for now
     if (rnn.is_int8_conf() || rnn.is_cell_dt_int8())
@@ -702,6 +705,9 @@ status_t rnn_brgemm_t<prop_kind::backward>::configure_brgemm(
         dim_t src_layer_type_size, dim_t scratch_type_size) {
 
     using namespace cpu::rnn_utils;
+
+    // no asimd support for now
+    if (!mayiuse(sve)) return status::unimplemented;
 
     if (rnn.is_cell_dt_xf16()) return status::unimplemented;
 
