@@ -71,7 +71,7 @@ struct ur_w_blks_params_t {
     std::vector<single_ur_w_blk_params_t> blks_params;
     int num_pre_blks; // num of blocks with l_overflow>0
     int num_post_blks; // num of blocks with r_overflow>0 or that need to be
-            // processed carefully
+    // processed carefully
 };
 
 template <cpu_isa_t isa>
@@ -280,9 +280,6 @@ struct jit_sve_512_core_x8s8s32x_deconvolution_fwd_t : public primitive_t {
         status_t init(const engine_t *engine) {
             using namespace data_type;
             using skip_mask_t = primitive_attr_t::skip_mask_t;
-            VDISPATCH_DECONVOLUTION(
-                    DNNL_CPU_THREADING_RUNTIME != DNNL_RUNTIME_THREADPOOL,
-                    VERBOSE_UNSUPPORTED_THREADPOOL_RUNTIME);
 
             const bool ok = mayiuse(sve_512) && is_fwd()
                     && (desc()->alg_kind & alg_kind::deconvolution_direct)

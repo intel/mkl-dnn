@@ -44,9 +44,6 @@ struct jit_sve_512_x8s8s32x_convolution_fwd_t : public primitive_t {
 
         status_t init(const engine_t *engine) {
             using smask_t = primitive_attr_t::skip_mask_t;
-            VDISPATCH_CONV(
-                    DNNL_CPU_THREADING_RUNTIME != DNNL_RUNTIME_THREADPOOL,
-                    VERBOSE_UNSUPPORTED_THREADPOOL_RUNTIME);
 
             bool ok = true && is_fwd()
                     && set_default_alg_kind(alg_kind::convolution_direct)

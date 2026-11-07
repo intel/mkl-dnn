@@ -16,6 +16,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include "common/compiler_workarounds.hpp"
 #include "common/dnnl_thread.hpp"
 #include "common/memory_desc_wrapper.hpp"
 #include "cpu/cpu_primitive.hpp"
@@ -1399,7 +1400,8 @@ status_t jit_sve_512_core_x8s8s32x_deconvolution_fwd_t::execute_forward_1d(
     const int nb_groups = jcp.nb_ch;
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
     const size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<int8_t *>(weights);
     int32_t *compensation = (!jcp.signed_input)
@@ -1410,7 +1412,7 @@ status_t jit_sve_512_core_x8s8s32x_deconvolution_fwd_t::execute_forward_1d(
                       jcp.ngroups, jcp.oc)
             : nullptr;
 
-    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         int start {0}, end {0};
         int work_amount = jcp.mb * nb_groups * oc_chunks;
         balance211(work_amount, nthr, ithr, start, end);
@@ -1500,7 +1502,8 @@ status_t jit_sve_512_core_x8s8s32x_deconvolution_fwd_t::execute_forward_2d(
     size_t wht_kh_stride = wht_blk_off(weights_d, 0, 0, 0, 1);
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
     const size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<int8_t *>(weights);
     int32_t *compensation = (!jcp.signed_input)
@@ -1511,7 +1514,7 @@ status_t jit_sve_512_core_x8s8s32x_deconvolution_fwd_t::execute_forward_2d(
                       jcp.ngroups, jcp.oc)
             : nullptr;
 
-    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         int start {0}, end {0};
         int work_amount = jcp.mb * nb_groups * oc_chunks * jcp.oh;
         balance211(work_amount, nthr, ithr, start, end);
@@ -1664,7 +1667,8 @@ status_t jit_sve_512_core_x8s8s32x_deconvolution_fwd_t::execute_forward_3d(
     size_t wht_kh_stride = wht_blk_off(weights_d, 0, 0, 0, 0, 1);
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<int8_t *>(weights);
     int32_t *compensation = (!jcp.signed_input)
@@ -1675,7 +1679,7 @@ status_t jit_sve_512_core_x8s8s32x_deconvolution_fwd_t::execute_forward_3d(
                       jcp.ngroups, jcp.oc)
             : nullptr;
 
-    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         int start {0}, end {0};
         int work_amount = jcp.mb * nb_groups * oc_chunks * jcp.od * jcp.oh;
         balance211(work_amount, nthr, ithr, start, end);

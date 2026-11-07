@@ -16,6 +16,7 @@
 *******************************************************************************/
 
 #include "common/c_types_map.hpp"
+#include "common/compiler_workarounds.hpp"
 #include "common/dnnl_thread.hpp"
 #include "common/type_helpers.hpp"
 #include "common/utils.hpp"
@@ -62,7 +63,8 @@ jit_sve_512_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward_1d(
     assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<wei_data_t *>(weights);
@@ -75,7 +77,7 @@ jit_sve_512_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward_1d(
     int group_block = jcp.ch_block;
     int work_amount = jcp.mb * nb_groups * oc_chunks * jcp.nb_ow;
 
-    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         int start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
@@ -176,7 +178,8 @@ jit_sve_512_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward_2d(
     assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<wei_data_t *>(weights);
@@ -188,7 +191,7 @@ jit_sve_512_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward_2d(
     int nb_groups = jcp.nb_ch;
     int work_amount = jcp.mb * nb_groups * oc_chunks * jcp.oh * jcp.nb_ow;
 
-    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         int start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
@@ -322,7 +325,8 @@ status_t jit_sve_512_x8s8s32x_convolution_fwd_t<src_type,
     assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<wei_data_t *>(weights);
@@ -333,7 +337,7 @@ status_t jit_sve_512_x8s8s32x_convolution_fwd_t<src_type,
     int group_block = jcp.ch_block;
 
     parallel_nd(jcp.mb, jcp.oh, jcp.nb_ow, nb_groups,
-            [&](int n, int oh_s, int owb, int gg) {
+            [= COMPAT_THIS_CAPTURE](int n, int oh_s, int owb, int gg) {
         auto p = jit_conv_args_t();
 
         size_t src_h_stride = src_d.blk_off(0, 0, 1);
@@ -406,7 +410,8 @@ jit_sve_512_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward_3d(
     assert(jcp.nb_ch % jcp.nb_ch_blocking == 0);
 
     // TODO: add support for scaling based on latest programming model.
-    DEFINE_ARG_SCALES_BUFFER(oscales, DNNL_ARG_WEIGHTS);
+    alignas(64) static const float oscales[16] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f,
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
 
     size_t offset = weights_d.size() - weights_d.additional_buffer_size();
     auto w = const_cast<wei_data_t *>(weights);
@@ -418,7 +423,7 @@ jit_sve_512_x8s8s32x_convolution_fwd_t<src_type, dst_type>::execute_forward_3d(
     int work_amount
             = jcp.mb * nb_groups * oc_chunks * jcp.od * jcp.oh * jcp.nb_ow;
 
-    parallel(jcp.nthr, [&](const int ithr, const int nthr) {
+    parallel(jcp.nthr, [= COMPAT_THIS_CAPTURE](const int ithr, const int nthr) {
         int start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 

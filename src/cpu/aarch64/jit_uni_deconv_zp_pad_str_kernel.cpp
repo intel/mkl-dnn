@@ -305,7 +305,7 @@ void compute_deconv_zp_pad_str_comp_ker(const jit_conv_conf_t &jcp,
             ? jcp.nthr
             : 1;
 
-    parallel(nthrs, [&](const int ithr, const int nthr) {
+    parallel(nthrs, [=](const int ithr, const int nthr) {
         int start {0}, end {0};
         balance211(work_amount, nthr, ithr, start, end);
 
