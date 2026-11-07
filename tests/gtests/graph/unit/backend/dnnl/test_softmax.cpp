@@ -427,6 +427,44 @@ TEST(test_softmax_compile, SoftmaxAdd) {
     }
 }
 
+TEST(test_softmax_compile, SoftmaxStatsInvalidAxis) {
+    graph::engine_t *eng = get_engine();
+
+    for (int64_t axis : {-3, 2, 1000}) {
+        graph::op_t softmax_op(graph::op_kind::SoftMax);
+        softmax_op.set_attr<int64_t>(graph::op_attr::axis, axis);
+
+        graph::logical_tensor_t src
+                = utils::logical_tensor_init(0, {2, 3}, graph::data_type::f32);
+        graph::logical_tensor_t dst = utils::logical_tensor_init(
+                1, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t stats = utils::logical_tensor_init(
+                2, graph::data_type::f32, graph::layout_type::strided);
+
+        softmax_op.add_input(src);
+        softmax_op.add_output(dst);
+        softmax_op.add_output(stats);
+
+        graph::graph_t g(eng->kind());
+        g.add_op(&softmax_op);
+        g.finalize();
+
+        graph::pass::pass_base_ptr apass = get_pass("softmax_pass");
+        apass->run(g);
+        ASSERT_EQ(g.get_num_partitions(), 1U);
+        auto part = g.get_partitions()[0];
+        graph::partition_t p;
+        p.init(part);
+
+        std::vector<const graph::logical_tensor_t *> inputs {&src};
+        std::vector<const graph::logical_tensor_t *> outputs {&dst, &stats};
+
+        graph::compiled_partition_t cp(p);
+        ASSERT_EQ(p.compile(&cp, inputs, outputs, eng),
+                graph::status::invalid_shape);
+    }
+}
+
 TEST(test_softmax_compile, SoftmaxGetInplacePair) {
     graph::engine_t *eng = get_engine();
 

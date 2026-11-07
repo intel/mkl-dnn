@@ -1089,6 +1089,10 @@ status_t infer_softmax_output_shape(op_t *n,
     auto out1 = logical_tensor_wrapper_t(outputs[1]);
     dims out1_dims = in0.vdims();
     int64_t axis = n->get_attr<int64_t>(op_attr::axis);
+    VCHECK_INVALID_SHAPE((axis >= -in0.ndims() && axis < in0.ndims()),
+            "%s, axis should be in range [-%d, %d), given axis: %" PRId64 " ",
+            op_t::kind2str(n->get_kind()).c_str(), in0.ndims(), in0.ndims(),
+            axis);
     if (axis < 0) { axis += in0.ndims(); }
     out1_dims[axis] = 1;
 
@@ -1203,6 +1207,14 @@ status_t infer_norm_output_shape(op_t *n,
     const dim_t begin_norm_axis = n->has_attr(op_attr::begin_norm_axis)
             ? n->get_attr<dim_t>(op_attr::begin_norm_axis)
             : -1;
+    // The backend pattern only checks this against the rank known at add_op,
+    // which can differ from the rank given at compile.
+    VCHECK_INVALID_SHAPE(
+            (begin_norm_axis >= -in0.ndims() && begin_norm_axis < in0.ndims()),
+            "%s, begin_norm_axis should be in range [-%d, %d), given: %" PRId64
+            " ",
+            op_t::kind2str(n->get_kind()).c_str(), in0.ndims(), in0.ndims(),
+            begin_norm_axis);
 
     auto out1 = logical_tensor_wrapper_t(outputs[1]);
     auto out2 = logical_tensor_wrapper_t(outputs[2]);
@@ -2471,6 +2483,10 @@ status_t infer_dnnl_softmax_output_shape(op_t *n,
     auto out1 = logical_tensor_wrapper_t(outputs[2]);
     dims out1_dims = in0.vdims();
     int64_t axis = n->get_attr<int64_t>(op_attr::axis);
+    VCHECK_INVALID_SHAPE((axis >= -in0.ndims() && axis < in0.ndims()),
+            "%s, axis should be in range [-%d, %d), given axis: %" PRId64 " ",
+            op_t::kind2str(n->get_kind()).c_str(), in0.ndims(), in0.ndims(),
+            axis);
     if (axis < 0) { axis += in0.ndims(); }
     out1_dims[axis] = 1;
 

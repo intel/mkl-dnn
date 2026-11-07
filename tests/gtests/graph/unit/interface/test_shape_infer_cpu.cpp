@@ -92,6 +92,109 @@ TEST(test_interface_shape_infer, StaticReshapeValid) {
     ASSERT_EQ(graph::logical_tensor_wrapper_t(dst).vdims(), (dims {6}));
 }
 
+TEST(test_interface_shape_infer, SoftMaxStatsAxisOutOfRange) {
+    graph::op_t softmax_op {0, graph::op_kind::SoftMax, std::string("softmax")};
+
+    for (int64_t axis : {-3, 2, 1000}) {
+        softmax_op.set_attr<int64_t>(graph::op_attr::axis, axis);
+
+        graph::logical_tensor_t src
+                = utils::logical_tensor_init(0, {2, 3}, graph::data_type::f32);
+        graph::logical_tensor_t dst = utils::logical_tensor_init(
+                1, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t scratchpad = utils::logical_tensor_init(
+                2, graph::data_type::u8, graph::layout_type::strided);
+        graph::logical_tensor_t stats = utils::logical_tensor_init(
+                3, graph::data_type::f32, graph::layout_type::strided);
+
+        std::vector<graph::logical_tensor_t *> inputs {&src};
+        std::vector<graph::logical_tensor_t *> outputs {&dst, &stats};
+        std::vector<graph::logical_tensor_t *> dnnl_outputs {
+                &dst, &scratchpad, &stats};
+        ASSERT_EQ(
+                graph::infer_softmax_output_shape(&softmax_op, inputs, outputs),
+                graph::status::invalid_shape);
+        ASSERT_EQ(graph::infer_dnnl_softmax_output_shape(
+                          &softmax_op, inputs, dnnl_outputs),
+                graph::status::invalid_shape);
+    }
+}
+
+TEST(test_interface_shape_infer, SoftMaxStatsAxisValid) {
+    graph::op_t softmax_op {0, graph::op_kind::SoftMax, std::string("softmax")};
+
+    for (int64_t axis : {-2, -1, 0, 1}) {
+        softmax_op.set_attr<int64_t>(graph::op_attr::axis, axis);
+
+        graph::logical_tensor_t src
+                = utils::logical_tensor_init(0, {2, 3}, graph::data_type::f32);
+        graph::logical_tensor_t dst = utils::logical_tensor_init(
+                1, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t stats = utils::logical_tensor_init(
+                2, graph::data_type::f32, graph::layout_type::strided);
+
+        std::vector<graph::logical_tensor_t *> inputs {&src};
+        std::vector<graph::logical_tensor_t *> outputs {&dst, &stats};
+        ASSERT_EQ(
+                graph::infer_softmax_output_shape(&softmax_op, inputs, outputs),
+                graph::status::success);
+
+        const dims expected
+                = (axis == 0 || axis == -2) ? dims {1, 3} : dims {2, 1};
+        ASSERT_EQ(graph::logical_tensor_wrapper_t(stats).vdims(), expected);
+    }
+}
+
+TEST(test_interface_shape_infer, LayerNormBeginNormAxisOutOfRange) {
+    graph::op_t ln_op {0, graph::op_kind::LayerNorm, std::string("ln")};
+
+    const std::vector<std::pair<dims, int64_t>> cases {
+            {{2, 3}, -3}, {{2, 3}, 2}, {{2, 3}, 1000}, {{}, -1}};
+    for (const auto &c : cases) {
+        ln_op.set_attr<int64_t>(graph::op_attr::begin_norm_axis, c.second);
+
+        graph::logical_tensor_t src
+                = utils::logical_tensor_init(0, c.first, graph::data_type::f32);
+        graph::logical_tensor_t dst = utils::logical_tensor_init(
+                1, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t mean = utils::logical_tensor_init(
+                2, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t var = utils::logical_tensor_init(
+                3, graph::data_type::f32, graph::layout_type::strided);
+
+        std::vector<graph::logical_tensor_t *> inputs {&src};
+        std::vector<graph::logical_tensor_t *> outputs {&dst, &mean, &var};
+        ASSERT_EQ(graph::infer_norm_output_shape(&ln_op, inputs, outputs),
+                graph::status::invalid_shape);
+    }
+}
+
+TEST(test_interface_shape_infer, LayerNormBeginNormAxisValid) {
+    graph::op_t ln_op {0, graph::op_kind::LayerNorm, std::string("ln")};
+
+    const std::vector<std::pair<int64_t, dims>> cases {
+            {-3, {}}, {-2, {2}}, {-1, {2, 3}}, {0, {}}, {1, {2}}, {2, {2, 3}}};
+    for (const auto &c : cases) {
+        ln_op.set_attr<int64_t>(graph::op_attr::begin_norm_axis, c.first);
+
+        graph::logical_tensor_t src = utils::logical_tensor_init(
+                0, {2, 3, 4}, graph::data_type::f32);
+        graph::logical_tensor_t dst = utils::logical_tensor_init(
+                1, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t mean = utils::logical_tensor_init(
+                2, graph::data_type::f32, graph::layout_type::strided);
+        graph::logical_tensor_t var = utils::logical_tensor_init(
+                3, graph::data_type::f32, graph::layout_type::strided);
+
+        std::vector<graph::logical_tensor_t *> inputs {&src};
+        std::vector<graph::logical_tensor_t *> outputs {&dst, &mean, &var};
+        ASSERT_EQ(graph::infer_norm_output_shape(&ln_op, inputs, outputs),
+                graph::status::success);
+        ASSERT_EQ(graph::logical_tensor_wrapper_t(mean).vdims(), c.second);
+        ASSERT_EQ(graph::logical_tensor_wrapper_t(var).vdims(), c.second);
+    }
+}
+
 TEST(test_interface_shape_infer, InvalidShapeForMatmul) {
     graph::op_t matmul {0, graph::op_kind::MatMul, std::string("matmul")};
     graph::logical_tensor_t src0
