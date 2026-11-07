@@ -1039,12 +1039,12 @@ void jit_uni_i8i8_pooling_fwd_ker_t<isa>::compute_avg_step(
                             reg_dst_f32.getIdx(), rhs_arg_params);
                 }
 
-                uni_vcvtps2dq(reg_dst_s32, reg_dst_f32);
+                saturate_cvt_f32(
+                        reg_dst_f32, vreg_zeros, vreg_ubound, jpp.dst_dt);
 
-                if (jpp.with_postops)
-                    if (jpp.dst_dt == u8) {
-                        uni_vpmaxsd(reg_dst_s32, reg_dst_s32, vreg_zeros);
-                    }
+                if (jpp.with_postops && jpp.dst_dt == u8)
+                    uni_vpmaxsd(reg_dst_s32, reg_dst_s32, vreg_zeros);
+
                 store_dst(jj, ll, c_tail);
             }
         }
@@ -1320,7 +1320,7 @@ void jit_uni_i8i8_pooling_fwd_ker_t<isa>::generate() {
 
     init_saturate_f32(vreg_zeros, vreg_ubound, reg_tmp, f32, jpp.dst_dt);
 
-    if (jpp.src_dt != u8) uni_vpxor(vreg_zeros, vreg_zeros, vreg_zeros);
+    uni_vpxor(vreg_zeros, vreg_zeros, vreg_zeros);
 
     init_mask();
 

@@ -21,3 +21,8 @@
 --dt=f32,bf16,f16,s32,s8,u8
 --attr-post-ops=add:f32:per_oc,linear:0.5:-1
 --batch=shapes_basic
+
+## Saturation
+--dt=s8,u8,s32
+--attr-post-ops=linear:1e9:0
+--batch=shapes_basic
